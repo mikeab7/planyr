@@ -7925,8 +7925,1586 @@ ${extraNote}` : list;
     MasterView: [() => MasterView]
   });
 
+  // src/workspaces/scheduler/page/layout.js
+  var ROW_H = 24;
+  var setRowH = (v) => {
+    ROW_H = v;
+  };
+  var PPD = 22;
+  var TL_H = 30;
+  var BUF = 6;
+  var WIN_CHUNK = 8;
+  var WIN_OVER = 12;
+  var rowWindowTop = (st) => Math.floor(Math.max(0, st) / ROW_H / WIN_CHUNK) * WIN_CHUNK;
+  var rowWindow = (winTop, viewH, total) => ({
+    startIdx: Math.max(0, winTop - WIN_OVER),
+    endIdx: Math.min(total, winTop + WIN_CHUNK + Math.ceil(viewH / ROW_H) + 1 + WIN_OVER)
+  });
+  var GRID_SCROLL_MEMO = /* @__PURE__ */ new Map();
+  var GANTT_SCROLL_MEMO = /* @__PURE__ */ new Map();
+  var escapeHtml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  var fmtBarDate = (s, withYear) => {
+    if (!s) return "";
+    const d = /* @__PURE__ */ new Date(s + "T12:00:00");
+    return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()}` + (withYear === false ? "" : `/${String(d.getFullYear()).slice(2)}`);
+  };
+  var barLabelText = (t, field, withYear) => {
+    if (!field || field === "none") return "";
+    if (field === "start") return fmtBarDate(t.start, withYear);
+    if (field === "end") return fmtBarDate(t.end, withYear);
+    if (field === "owner") return ownerDisplayParts(ownerListOf(t)).label;
+    if (field === "pct") return `${t.percentComplete || 0}%`;
+    return "";
+  };
+  exposeToHarness({
+    ROW_H: [() => ROW_H, (v) => {
+      ROW_H = v;
+    }],
+    setRowH: [() => setRowH],
+    PPD: [() => PPD],
+    TL_H: [() => TL_H],
+    BUF: [() => BUF],
+    WIN_CHUNK: [() => WIN_CHUNK],
+    WIN_OVER: [() => WIN_OVER],
+    rowWindowTop: [() => rowWindowTop],
+    rowWindow: [() => rowWindow],
+    GRID_SCROLL_MEMO: [() => GRID_SCROLL_MEMO],
+    GANTT_SCROLL_MEMO: [() => GANTT_SCROLL_MEMO],
+    escapeHtml: [() => escapeHtml],
+    fmtBarDate: [() => fmtBarDate],
+    barLabelText: [() => barLabelText]
+  });
+
+  // src/workspaces/scheduler/page/gantt/GanttView.jsx
+  var { useState: useState3, useEffect: useEffect2, useRef: useRef3, useMemo: useMemo2 } = React;
+  var GANTT_INK = "#1a1a1a";
+  var resolveLabelAlign = (proj) => {
+    const a = proj && proj.labelAlign;
+    return a === "left" || a === "center" || a === "right" ? a : "right";
+  };
+  var writeLabelAlign = (setData, pid, align) => setData((d) => d.projects && d.projects[pid] ? { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], labelAlign: align } } } : d);
+  var ganttNameWeight = (depth, kind, bold) => {
+    const d = Math.min(depth || 0, 3);
+    let w;
+    if (kind === "summary") w = [800, 700, 600, 600][d];
+    else if (kind === "milestone") w = 600;
+    else w = 500;
+    return bold ? Math.max(w, 700) : w;
+  };
+  var estLabelWidth = (s, fs) => Math.max(1, String(s == null ? "" : s).length) * fs * 0.6 + 4;
+  var placeGanttLabel = ({
+    align,
+    bx,
+    bw,
+    rowTop,
+    barTopY,
+    labelW,
+    chartL,
+    chartR,
+    capHalf = 6,
+    rowH = null
+  }) => {
+    const barStart = bx, barEnd = bx + bw;
+    const confineY = (r) => {
+      if (rowH == null) return r;
+      const y = Math.max(rowTop + capHalf, Math.min(rowTop + rowH - capHalf, r.y));
+      return y === r.y ? r : { ...r, y };
+    };
+    const aboveY = Math.max(
+      rowTop + capHalf,
+      Math.min(rowTop + capHalf + 1, (barTopY != null ? barTopY : rowTop) - 1 - capHalf)
+    );
+    const clampX = (x, anchor) => {
+      let x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+      const x1 = x0 + labelW;
+      if (x1 > chartR) x -= x1 - chartR;
+      x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+      if (x0 < chartL) x += chartL - x0;
+      return x;
+    };
+    const above = (x, anchor) => confineY({ x: clampX(x, anchor), y: aboveY, anchor, mode: "above" });
+    return align === "left" ? above(barStart, "start") : align === "right" ? above(barEnd, "end") : above(barStart + bw / 2, "middle");
+  };
+  var GANTT_CAPTION_LH = 1.2;
+  var ganttCaptionNeed = (fs) => fs * GANTT_CAPTION_LH;
+  var ganttCaptionHalf = (fs) => fs * GANTT_CAPTION_LH / 2;
+  var fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, (headroom + 1e-6) / GANTT_CAPTION_LH));
+  var GANTT_PROFILES = {
+    screen: {
+      names: [10, 9.25, 8.5, 8],
+      span: [6, 5, 4, 4],
+      leg: [0.16, 0.12, 0.09, 0.07],
+      minSpan: 2,
+      minLeg: 2,
+      leafFrac: 0.25,
+      mileHalf: 3 * Math.SQRT2,
+      mileMin: 2.5,
+      leafBase: 1,
+      summaryBase: 2,
+      mileBase: 1
+    },
+    print: {
+      names: [9, 8.5, 8, 7.5],
+      span: [4, 3.5, 3, 3],
+      leg: [0.14, 0.1, 0.08, 0.06],
+      minSpan: 2,
+      minLeg: 1.5,
+      leafFrac: 0.3,
+      mileHalf: 4,
+      mileMin: 2.5,
+      leafBase: 2,
+      summaryBase: 2,
+      mileBase: 2
+    }
+  };
+  var ganttNameSize = (P, level) => P.names[Math.min(Math.max(level || 0, 0), 3)];
+  var ganttLeafGeom = (P, rowH) => {
+    const bot = rowH - P.leafBase;
+    const h = Math.max(3, Math.min(P.leafFrac * rowH, bot - ganttCaptionNeed(P.names[0])));
+    return { top: bot - h, bot, h };
+  };
+  var ganttSummaryGeom = (P, rowH, level) => {
+    const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.summaryBase;
+    const nom0 = P.span[0] + P.leg[0] * rowH;
+    const s = Math.min(1, Math.max(0, bot - ganttCaptionNeed(P.names[0])) / nom0);
+    const nomLeg = P.leg[d] * rowH;
+    let span = Math.max(Math.min(P.minSpan, P.span[d]), P.span[d] * s), leg = Math.max(Math.min(P.minLeg, nomLeg), nomLeg * s);
+    const room = Math.max(0, bot - ganttCaptionNeed(P.names[d]));
+    if (span + leg > room) {
+      const k = room / (span + leg);
+      span *= k;
+      leg *= k;
+    }
+    const top = bot - leg - span;
+    return { span, leg, top, bot, mid: top + span / 2 };
+  };
+  var ganttMilestoneGeom = (P, rowH, level) => {
+    const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.mileBase;
+    const half = Math.max(P.mileMin, Math.min(P.mileHalf, rowH * 0.25, (bot - ganttCaptionNeed(P.names[d])) / 2));
+    const cy = bot - half;
+    return { half, cy, top: cy - half, bot };
+  };
+  var ARROW_REACH = 7;
+  var depAnchors = ({ type, src, tgt, fanIndex = 0, fanCount = 1, tgtLabelRightX = null }) => {
+    const down = tgt.rowTop >= src.rowTop;
+    const srcConnX = type === "SS" || type === "SF" ? src.startX : src.endX;
+    const tgtConnX = type === "FF" || type === "SF" ? tgt.endX : tgt.startX;
+    const y1 = down ? src.botY : src.topY;
+    const y2 = down ? tgt.topY : tgt.botY;
+    const srcCenterX = (src.startX + src.endX) / 2;
+    const halfW = Math.abs(srcCenterX - srcConnX);
+    const toCenter = Math.sign(srcCenterX - srcConnX) || -1;
+    const arc = halfW > 0.5 ? halfW : fanCount > 1 ? 4 : 0;
+    const spread = Math.min(arc, 7 * Math.max(0, fanCount - 1));
+    const step = fanCount > 1 ? spread / (fanCount - 1) : 0;
+    const x1 = srcConnX + toCenter * step * fanIndex;
+    let x2 = tgtConnX;
+    if (tgtLabelRightX != null && x2 - ARROW_REACH < tgtLabelRightX + 2)
+      x2 = Math.min(tgt.endX, tgtLabelRightX + ARROW_REACH + 2);
+    return { x1, y1, x2, y2, down };
+  };
+  function GanttView({ tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings, rowZoom = 1 }) {
+    const [winTop, setWinTop] = useState3(0);
+    const localRef = useRef3(null);
+    const ref = scrollRef || localRef;
+    const ppd = pxPerDay || 22;
+    const vh = (ref.current ? ref.current.clientHeight : window.innerHeight) - 80;
+    const taskById = useMemo2(() => {
+      const m = {};
+      (proj?.tasks || tasks).forEach((t) => m[t.id] = t);
+      return m;
+    }, [proj?.tasks, tasks]);
+    const childParentIds = useMemo2(() => {
+      const allTasks = proj?.tasks || tasks;
+      return new Set(allTasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
+    }, [proj?.tasks, tasks]);
+    const _progressMap = useMemo2(() => {
+      const allTasks = proj?.tasks || tasks;
+      if (!allTasks.length) return {};
+      const getDesc = (id) => {
+        const kids = allTasks.filter((t) => t.parentId === id);
+        return [...kids, ...kids.flatMap((k) => getDesc(k.id))];
+      };
+      const map = {};
+      childParentIds.forEach((pid) => {
+        const desc = getDesc(pid);
+        if (!desc.length) return;
+        map[pid] = Math.round(desc.filter((t) => t.health === "green").length / desc.length * 100);
+      });
+      return map;
+    }, [proj?.tasks, tasks, childParentIds]);
+    const { minD, totD } = useMemo2(() => {
+      const windowStart = addD(NOW, -365 * 5);
+      const windowEnd = addD(NOW, 365 * 15);
+      if (!tasks.length) return { minD: windowStart, totD: dif(windowStart, windowEnd) };
+      const starts = tasks.map((t) => t.start).filter(Boolean).slice().sort();
+      const ends = tasks.map((t) => t.end).filter(Boolean).slice().sort();
+      if (!starts.length || !ends.length) return { minD: windowStart, totD: dif(windowStart, windowEnd) };
+      let mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
+      let mx = ends[ends.length - 1] > windowEnd ? addD(ends[ends.length - 1], 60) : windowEnd;
+      const hardBack = addD(NOW, -365 * 30), hardFwd = addD(NOW, 365 * 50);
+      if (mn < hardBack) mn = hardBack;
+      if (mx > hardFwd) mx = hardFwd;
+      return { minD: mn, totD: dif(mn, mx) };
+    }, [tasks]);
+    const totalW = totD * ppd;
+    const xOf = (d) => Math.max(0, Math.min(totalW, dif(minD, d) * ppd));
+    const todayX = xOf(NOW);
+    const months = useMemo2(() => {
+      const out = [];
+      const endD = addD(minD, totD);
+      let cur = new Date(pd(minD).getFullYear(), pd(minD).getMonth(), 1);
+      while (fd(cur) <= endD) {
+        const x0 = dif(minD, fd(cur)) * ppd;
+        const nxt = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+        out.push({ label: cur.toLocaleString("default", { month: "short" }), x0, w: dif(minD, fd(nxt)) * ppd - x0 });
+        cur = nxt;
+      }
+      return out;
+    }, [minD, totD, ppd]);
+    const years = useMemo2(() => {
+      const out = [];
+      const endD = addD(minD, totD);
+      let cur = new Date(pd(minD).getFullYear(), 0, 1);
+      while (fd(cur) <= endD) {
+        const nxt = new Date(cur.getFullYear() + 1, 0, 1);
+        const x0 = dif(minD, fd(cur)) * ppd;
+        const x1 = dif(minD, fd(nxt)) * ppd;
+        out.push({ label: String(cur.getFullYear()), x0, w: x1 - x0 });
+        cur = nxt;
+      }
+      return out;
+    }, [minD, totD, ppd]);
+    const glyphEdges = (t, idx) => {
+      const rowTop = idx * ROW_H;
+      const sX = xOf(t.start), eX = xOf(t.end);
+      if (childParentIds.has(t.id)) {
+        const g2 = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, t.level);
+        return { startX: sX, endX: eX, topY: rowTop + g2.top, botY: rowTop + g2.bot, rowTop };
+      }
+      if (t.duration === 0) {
+        const g2 = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, t.level);
+        return { startX: sX, endX: sX, topY: rowTop + g2.top, botY: rowTop + g2.bot, rowTop };
+      }
+      const lg = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H);
+      return { startX: sX, endX: sX + Math.max(9, eX - sX), topY: rowTop + lg.top, botY: rowTop + lg.bot, rowTop };
+    };
+    const startDateLabelRightX = (t) => {
+      const bl = settings?.barLabels;
+      if (!bl || !bl.left) return null;
+      if (childParentIds.has(t.id)) return null;
+      if (!barLabelText(t, bl.left, bl.year)) return null;
+      return xOf(t.start) - (t.duration === 0 ? 8 : 4);
+    };
+    const depLines = useMemo2(() => {
+      const idxOf = new Map(tasks.map((t, i) => [t.id, i]));
+      const raw = [];
+      tasks.forEach((task) => normPreds(task.predecessors).forEach((p) => {
+        const pred = idxOf.has(p.id) ? tasks[idxOf.get(p.id)] : null;
+        if (!pred) return;
+        if (!pred.start || !pred.end || !task.start || !task.end || isNaN(pd(pred.start)) || isNaN(pd(pred.end)) || isNaN(pd(task.start)) || isNaN(pd(task.end))) return;
+        raw.push({ pred, task, type: (p.type || "FS").toUpperCase() });
+      }));
+      const bySrc = /* @__PURE__ */ new Map();
+      raw.forEach((l) => {
+        const a = bySrc.get(l.pred.id) || [];
+        a.push(l);
+        bySrc.set(l.pred.id, a);
+      });
+      bySrc.forEach((a) => a.sort((x, y) => idxOf.get(x.task.id) - idxOf.get(y.task.id) || (x.type < y.type ? -1 : x.type > y.type ? 1 : 0)));
+      return raw.map((l) => {
+        const group = bySrc.get(l.pred.id);
+        const src = glyphEdges(l.pred, idxOf.get(l.pred.id));
+        const tgt = glyphEdges(l.task, idxOf.get(l.task.id));
+        const a = depAnchors({
+          type: l.type,
+          src,
+          tgt,
+          fanIndex: group.indexOf(l),
+          fanCount: group.length,
+          tgtLabelRightX: l.type === "SS" || l.type === "FS" ? startDateLabelRightX(l.task) : null
+        });
+        return {
+          key: `${l.pred.id}-${l.task.id}-${l.type}`,
+          x1: a.x1,
+          y1: a.y1,
+          x2: a.x2,
+          y2: a.y2,
+          down: a.down,
+          type: l.type,
+          srcIdx: idxOf.get(l.pred.id),
+          tgtIdx: idxOf.get(l.task.id)
+        };
+      });
+    }, [tasks, minD, ppd, childParentIds, settings, ROW_H]);
+    const labelAlign = resolveLabelAlign(proj);
+    const chartL = 0, chartR = Math.max(totalW, 400);
+    const NAME_SIZE = (lvl) => ganttNameSize(GANTT_PROFILES.screen, lvl);
+    const GanttName = ({ task, kind, place, fs }) => {
+      const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
+      return /* @__PURE__ */ React.createElement("span", { "data-gantt-name": task.id, "data-gantt-mode": place.mode, style: {
+        position: "absolute",
+        left: place.x,
+        top: place.y,
+        transform: `translate(${ax}, -50%)`,
+        fontSize: fs,
+        lineHeight: 1.2,
+        fontWeight: ganttNameWeight(task.level, kind, task.bold || task.cellFmt?.name?.bold),
+        fontStyle: task.italic || task.cellFmt?.name?.italic ? "italic" : "normal",
+        textDecoration: task.underline || task.cellFmt?.name?.underline ? "underline" : "none",
+        color: GANTT_INK,
+        fontFamily: "'Inter',system-ui,sans-serif",
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+        zIndex: 7
+      } }, task.name);
+    };
+    const ganttMemoKey = proj?.id ?? null;
+    React.useLayoutEffect(() => {
+      const el = ref.current;
+      if (!el || ganttMemoKey == null) return;
+      const saved = GANTT_SCROLL_MEMO.get(ganttMemoKey);
+      if (saved != null) {
+        el.scrollTop = saved;
+        setWinTop(rowWindowTop(el.scrollTop));
+      }
+    }, [ganttMemoKey]);
+    const handleScroll = (e) => {
+      if (ganttMemoKey != null) GANTT_SCROLL_MEMO.set(ganttMemoKey, e.currentTarget.scrollTop);
+      setWinTop(rowWindowTop(e.currentTarget.scrollTop));
+      if (onScroll) onScroll(e);
+    };
+    const { startIdx, endIdx } = rowWindow(winTop, ref.current ? ref.current.clientHeight : window.innerHeight, tasks.length);
+    const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
+    const _zoom = (dir) => {
+      if (onZoomChange) onZoomChange(dir > 0 ? Math.min(80, Math.ceil(ppd * 1.35)) : Math.max(1, Math.floor(ppd / 1.35)));
+    };
+    useEffect2(() => {
+      const el = ref.current;
+      if (!el) return;
+      const w = el.clientWidth || 800;
+      el.scrollLeft = Math.max(0, todayX - w * 0.35);
+    }, []);
+    const prevPpdRef = useRef3(ppd);
+    useEffect2(() => {
+      const el = ref.current;
+      if (!el || prevPpdRef.current === ppd) return;
+      const oldPpd = prevPpdRef.current;
+      const centerDayOffset = (el.scrollLeft + el.clientWidth / 2) / oldPpd;
+      el.scrollLeft = Math.max(0, centerDayOffset * ppd - el.clientWidth / 2);
+      prevPpdRef.current = ppd;
+    }, [ppd]);
+    const isPanning = useRef3(false);
+    const panPin = useRef3(null);
+    const panOrigin = useRef3({ x: 0, y: 0, sl: 0, st: 0 });
+    const overscrollY = useRef3(0);
+    const animFrame = useRef3(null);
+    const springBack = () => {
+      const el = ref.current;
+      if (!el) return;
+      const cur = overscrollY.current;
+      if (cur <= 0.5) {
+        overscrollY.current = 0;
+        el.style.transform = "";
+        return;
+      }
+      const next = cur * 0.74;
+      overscrollY.current = next;
+      el.style.transform = `translateY(${next}px)`;
+      animFrame.current = requestAnimationFrame(springBack);
+    };
+    const onPanDown = (e) => {
+      if (e.button !== 0) return;
+      const el = ref.current;
+      if (!el) return;
+      if (animFrame.current) cancelAnimationFrame(animFrame.current);
+      isPanning.current = true;
+      panOrigin.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+      if (panPin.current) panPin.current();
+      panPin.current = window.pinSchedCursor("grabbing", { onExit: () => {
+        isPanning.current = false;
+        panPin.current = null;
+      } });
+      e.preventDefault();
+    };
+    const onPanMove = (e) => {
+      if (!isPanning.current) return;
+      const el = ref.current;
+      if (!el) return;
+      const rawSL = panOrigin.current.sl - (e.clientX - panOrigin.current.x);
+      const rawST = panOrigin.current.st - (e.clientY - panOrigin.current.y);
+      el.scrollLeft = Math.max(0, rawSL);
+      if (rawST < 0) {
+        el.scrollTop = 0;
+        const pull = -rawST * 0.32;
+        overscrollY.current = pull;
+        el.style.transform = `translateY(${pull}px)`;
+      } else {
+        el.scrollTop = rawST;
+        overscrollY.current = 0;
+        el.style.transform = "";
+      }
+    };
+    const onPanUp = () => {
+      isPanning.current = false;
+      if (panPin.current) {
+        panPin.current();
+        panPin.current = null;
+      }
+      const el = ref.current;
+      if (!el) return;
+      if (overscrollY.current > 0) springBack();
+    };
+    return /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref,
+        "data-gantt-scroll": "1",
+        style: { flex: 1, overflow: "auto", background: "var(--bg)", cursor: "grab", zoom: rowZoom, paddingBottom: `calc(var(--fab-dock, 0px) / ${rowZoom})` },
+        onMouseEnter,
+        onScroll: handleScroll,
+        onMouseDown: onPanDown,
+        onMouseMove: onPanMove,
+        onMouseUp: onPanUp,
+        onMouseLeave: onPanUp
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { position: "sticky", top: 0, zIndex: 10, height: TL_H, background: "var(--surf)", borderBottom: "2px solid var(--amber)", width: Math.max(totalW, 400) } }, years.map((y) => /* @__PURE__ */ React.createElement("div", { key: y.label, style: { position: "absolute", left: y.x0, width: y.w, height: 13, top: 0, borderRight: "1px solid var(--bd2)", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", padding: "0 6px", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--txt)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".04em", whiteSpace: "nowrap" } }, y.label))), months.map((m) => /* @__PURE__ */ React.createElement("div", { key: m.label + m.x0, style: { position: "absolute", left: m.x0, width: m.w, height: TL_H - 13, top: 13, borderRight: "1px solid var(--bd)", display: "flex", alignItems: "center", padding: "0 4px", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", textTransform: "uppercase", letterSpacing: ".04em", whiteSpace: "nowrap" } }, m.label)))),
+      /* @__PURE__ */ React.createElement(
+        "div",
+        { style: {
+          position: "relative",
+          height: (tasks.length + emptyPad) * ROW_H,
+          width: Math.max(totalW, 400),
+          background: "var(--bg)"
+        } },
+        Array.from({ length: emptyPad }, (_, i) => /* @__PURE__ */ React.createElement("div", { key: `ph${i}`, style: {
+          position: "absolute",
+          top: (tasks.length + i) * ROW_H,
+          left: 0,
+          right: 0,
+          height: ROW_H,
+          borderBottom: "1px solid rgba(0,0,0,0.07)",
+          pointerEvents: "none"
+        } })),
+        /* month lines removed per user preference */
+        false,
+        years.map((y) => /* @__PURE__ */ React.createElement("div", { key: "yl" + y.x0, style: { position: "absolute", left: y.x0, top: 0, bottom: 0, width: 1, background: "rgba(0,0,0,0.07)", zIndex: 2 } })),
+        /* @__PURE__ */ React.createElement("div", { style: {
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 2,
+          background: "#ef4444",
+          opacity: 0.9,
+          zIndex: 4,
+          pointerEvents: "none",
+          transform: `translateX(${todayX}px)`,
+          willChange: "transform"
+        } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: -1, background: "#ef4444", borderRadius: "0 2px 2px 0", padding: "1px 4px", whiteSpace: "nowrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, color: "#fff", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", fontWeight: 700 } }, "TODAY"))),
+        /* @__PURE__ */ React.createElement("svg", { style: { position: "absolute", top: 0, left: 0, width: totalW, height: tasks.length * ROW_H, pointerEvents: "none", zIndex: 3, overflow: "visible" } }, depLines.filter((l) => l.srcIdx >= startIdx && l.srcIdx < endIdx && l.tgtIdx >= startIdx && l.tgtIdx < endIdx).map((l) => {
+          const color = l.type === "SS" ? "#7c3aed" : l.type === "FF" ? "#0891b2" : l.type === "SF" ? "#be185d" : "#0969da";
+          const dx = l.x2 - l.x1, dy = l.y2 - l.y1;
+          const vh2 = Math.max(6, Math.min(28, Math.abs(dy) * 0.5));
+          const vSign = l.down ? 1 : -1;
+          const c1x = l.x1 + dx * 0.25, c1y = l.y1 + vSign * vh2;
+          const c2x = l.x2 - dx * 0.25, c2y = l.y2 - vSign * vh2;
+          const ex = l.x2 - c2x, ey = l.y2 - c2y, el = Math.hypot(ex, ey) || 1, ux = ex / el, uy = ey / el;
+          const a1x = l.x2 - ux * 6 - uy * 3, a1y = l.y2 - uy * 6 + ux * 3, a2x = l.x2 - ux * 6 + uy * 3, a2y = l.y2 - uy * 6 - ux * 3;
+          return /* @__PURE__ */ React.createElement("g", { key: l.key }, /* @__PURE__ */ React.createElement(
+            "path",
+            {
+              d: `M${l.x1},${l.y1} C${c1x},${c1y} ${c2x},${c2y} ${l.x2},${l.y2}`,
+              stroke: color,
+              strokeWidth: "1.2",
+              fill: "none",
+              strokeDasharray: "4 3",
+              opacity: ".55"
+            }
+          ), /* @__PURE__ */ React.createElement("path", { d: `M${l.x2},${l.y2} L${a1x},${a1y} L${a2x},${a2y}Z`, fill: color, opacity: ".55" }));
+        })),
+        tasks.slice(startIdx, endIdx).map((task, i) => {
+          const ri = startIdx + i;
+          const isBlankDates = !task.start || !task.end;
+          const bx = isBlankDates ? 0 : xOf(task.start);
+          const bw = isBlankDates ? 0 : Math.max(6, xOf(task.end) - bx);
+          const isSummary = childParentIds.has(task.id);
+          const isMilestone = task.duration === 0;
+          const _isCollapsed = isSummary && !task.isExpanded;
+          const isExpandedParent = isSummary && task.isExpanded;
+          const displayHealth2 = isSummary ? rolledHealthMap?.[task.id] || task.health : computeDisplayHealth(task, settings, taskById);
+          const _h = HEALTH[displayHealth2] || HEALTH["gray"];
+          const rowBg = task.rowColor || (isExpandedParent ? ri % 2 ? "#f8fafc" : "var(--bg)" : displayHealth2 === "red" ? "#ffdfdf" : displayHealth2 === "yellow" ? "#fff7b9" : displayHealth2 === "green" ? "#d6fae2" : displayHealth2 === "paused" ? "#f3f4f6" : ri % 2 ? "#f8fafc" : "var(--bg)");
+          const isGanttSel = selectedId === task.id;
+          const LEAF_H = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).h;
+          if (isBlankDates) {
+            return /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                key: task.id,
+                "data-gantt-row": task.id,
+                onClick: () => setSelectedId?.(task.id),
+                style: {
+                  position: "absolute",
+                  top: ri * ROW_H,
+                  left: 0,
+                  right: 0,
+                  height: ROW_H,
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid rgba(0,0,0,0.1)",
+                  borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent",
+                  background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg
+                }
+              },
+              /* @__PURE__ */ React.createElement("span", { style: {
+                position: "sticky",
+                left: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                height: 14,
+                padding: "0 6px",
+                fontSize: 8,
+                fontWeight: 600,
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+                color: "#6b7280",
+                background: "var(--bg)",
+                border: "1px dashed #cbd5e1",
+                borderRadius: 7,
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+                fontFamily: "'Inter',system-ui,sans-serif"
+              } }, "Unscheduled")
+            );
+          }
+          return /* @__PURE__ */ React.createElement("div", { key: task.id, "data-gantt-row": task.id, onClick: () => setSelectedId?.(task.id), style: { position: "absolute", top: ri * ROW_H, left: 0, right: 0, height: ROW_H, borderBottom: "1px solid rgba(0,0,0,0.1)", borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent", background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg } }, isMilestone && !isSummary ? /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
+            const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level);
+            const fs = fitCaptionFs(NAME_SIZE(task.level), mg.top);
+            const place = placeGanttLabel({
+              kind: "milestone",
+              align: labelAlign,
+              bx,
+              bw: 0,
+              rowTop: 0,
+              barTopY: mg.top,
+              labelW: estLabelWidth(task.name, fs),
+              chartL,
+              chartR,
+              capHalf: ganttCaptionHalf(fs),
+              rowH: ROW_H
+            });
+            return /* @__PURE__ */ React.createElement(GanttName, { task, kind: "milestone", place, fs });
+          })(), (() => {
+            const hue = "#94a3b8";
+            const done = displayHealth2 === "green" || isCompleteTask(task);
+            const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level), side = mg.half * Math.SQRT2;
+            return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { position: "absolute", left: bx - side / 2, top: mg.cy - side / 2, width: side, height: side, transform: "rotate(45deg)", background: done ? hue : "#fff", border: "1.25px solid #475569", boxSizing: "border-box", zIndex: 5 } });
+          })(), (() => {
+            const bl = settings?.barLabels;
+            if (!bl) return null;
+            const L = barLabelText(task, bl.left, bl.year), R = barLabelText(task, bl.right, bl.year);
+            const mlTop = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level).cy - 4.8;
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, L && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx - 8, transform: "translateX(-100%)", top: mlTop, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, L), R && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx + 8, top: mlTop, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, R));
+          })()) : isSummary ? (() => {
+            const d = Math.min(task.level || 0, 3);
+            const col = ["#2B3340", "#46506A", "#6E7790", "#8A93A8"][d];
+            const sg = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, task.level);
+            const SPAN = sg.span, LEG = sg.leg, spanTop = sg.top;
+            const legW = 1.5;
+            const fs = fitCaptionFs(NAME_SIZE(task.level), spanTop);
+            const place = placeGanttLabel({
+              kind: "summary",
+              align: labelAlign,
+              bx,
+              bw,
+              rowTop: 0,
+              barTopY: spanTop,
+              labelW: estLabelWidth(task.name, fs),
+              chartL,
+              chartR,
+              capHalf: ganttCaptionHalf(fs),
+              rowH: ROW_H
+            });
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(GanttName, { task, kind: "summary", place, fs }), /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, "data-gantt-kind": "summary", style: { position: "absolute", left: bx, width: bw, top: spanTop, height: SPAN + LEG, zIndex: 5, pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, top: 0, height: SPAN, background: col, borderRadius: 1 } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, top: 0, width: legW, height: SPAN + LEG, background: col } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", right: 0, top: 0, width: legW, height: SPAN + LEG, background: col } })));
+          })() : /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
+            const barTopY = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
+            const fs = fitCaptionFs(NAME_SIZE(task.level), barTopY);
+            const place = placeGanttLabel({
+              kind: "leaf",
+              align: labelAlign,
+              bx,
+              bw,
+              rowTop: 0,
+              barTopY,
+              labelW: estLabelWidth(task.name, fs),
+              chartL,
+              chartR,
+              capHalf: ganttCaptionHalf(fs),
+              rowH: ROW_H
+            });
+            return /* @__PURE__ */ React.createElement(GanttName, { task, kind: "leaf", place, fs });
+          })(), (() => {
+            const bl = settings?.barLabels;
+            if (!bl) return null;
+            const L = barLabelText(task, bl.left, bl.year), R = barLabelText(task, bl.right, bl.year);
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, L && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx - 4, transform: "translateX(-100%)", top: ROW_H - 11.5, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, L), R && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx + bw + 4, top: ROW_H - 11.5, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, R));
+          })(), (() => {
+            const hue = "#94a3b8";
+            const EDGE = "#475569";
+            const pct = displayHealth2 === "green" ? 100 : leafPercent(task);
+            const top = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
+            const barW = Math.max(bw, 9);
+            const base = { position: "absolute", left: bx, top, height: LEAF_H, width: barW, zIndex: 5, borderRadius: LEAF_H / 2, boxSizing: "border-box" };
+            if (pct >= 100)
+              return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: hue, border: `1px solid ${EDGE}` } });
+            if (pct <= 0)
+              return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: "var(--bg)", border: `1.5px solid ${EDGE}` } });
+            return (
+              // In progress → partial fill
+              /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: "var(--bg)", border: `1px solid ${EDGE}`, overflow: "hidden", display: "flex", alignItems: "stretch" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${pct}%`, background: hue, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, background: hue, opacity: 0.22 } }))
+            );
+          })()));
+        })
+      )
+    ));
+  }
+  exposeToHarness({
+    GANTT_INK: [() => GANTT_INK],
+    resolveLabelAlign: [() => resolveLabelAlign],
+    writeLabelAlign: [() => writeLabelAlign],
+    ganttNameWeight: [() => ganttNameWeight],
+    estLabelWidth: [() => estLabelWidth],
+    placeGanttLabel: [() => placeGanttLabel],
+    GANTT_CAPTION_LH: [() => GANTT_CAPTION_LH],
+    ganttCaptionNeed: [() => ganttCaptionNeed],
+    ganttCaptionHalf: [() => ganttCaptionHalf],
+    fitCaptionFs: [() => fitCaptionFs],
+    GANTT_PROFILES: [() => GANTT_PROFILES],
+    ganttNameSize: [() => ganttNameSize],
+    ganttLeafGeom: [() => ganttLeafGeom],
+    ganttSummaryGeom: [() => ganttSummaryGeom],
+    ganttMilestoneGeom: [() => ganttMilestoneGeom],
+    ARROW_REACH: [() => ARROW_REACH],
+    depAnchors: [() => depAnchors],
+    GanttView: [() => GanttView]
+  });
+
+  // src/workspaces/scheduler/page/gantt/pdfExport.jsx
+  var PAGE_SIZES = {
+    letter: { label: "Letter (8.5 × 11 in)", w: 8.5, h: 11, css: "letter", short: "Letter" },
+    legal: { label: "Legal (8.5 × 14 in)", w: 8.5, h: 14, css: "legal", short: "Legal" },
+    tabloid: { label: "Tabloid (11 × 17 in)", w: 11, h: 17, css: "11in 17in", short: "11×17" },
+    a4: { label: "A4 (8.27 × 11.69 in)", w: 8.27, h: 11.69, css: "A4", short: "A4" }
+  };
+  function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
+    const noLabels = !!opts.noLabels;
+    const ROW_H2 = 18, LABEL_W = noLabels ? 0 : orientation === "landscape" ? 200 : 155;
+    const ganttW = svgWidth - LABEL_W;
+    const PP = GANTT_PROFILES.print;
+    const leafBand = (yTop) => {
+      const g2 = ganttLeafGeom(PP, ROW_H2), top = yTop + g2.top;
+      return { top, bot: top + g2.h, mid: top + g2.h / 2, h: g2.h };
+    };
+    const mileBand = (yTop, depth) => {
+      const g2 = ganttMilestoneGeom(PP, ROW_H2, depth);
+      return { top: yTop + g2.top, bot: yTop + g2.bot, mid: yTop + g2.cy, half: g2.half };
+    };
+    const summaryBand = (yTop, depth) => {
+      const g2 = ganttSummaryGeom(PP, ROW_H2, depth);
+      return { top: yTop + g2.top, bot: yTop + g2.bot, mid: yTop + g2.mid, SPAN: g2.span, LEG: g2.leg };
+    };
+    const pd2 = (s) => /* @__PURE__ */ new Date(s + "T12:00:00"), fd2 = (d) => d.toISOString().slice(0, 10);
+    const allTasks = projects.flatMap((p) => p.tasks);
+    if (!allTasks.length) return "";
+    const dates = allTasks.flatMap((t) => [t.start, t.end]).filter((d) => d && !isNaN(pd2(d))).sort();
+    if (!dates.length) return "";
+    const minD = dates[0], maxD = dates[dates.length - 1];
+    const DAY = 864e5;
+    const addDays = (s, n) => fd2(new Date(pd2(s).getTime() + Math.round(n) * DAY));
+    const getDepth = (tasks, id) => {
+      let dep = 0, t = tasks.find((x) => x.id === id);
+      while (t && t.parentId !== null) {
+        dep++;
+        t = tasks.find((x) => x.id === t.parentId);
+      }
+      return Math.min(dep, 3);
+    };
+    let winStart, winEnd, totalDays, ppd;
+    {
+      const td0 = Math.max(1, Math.ceil((pd2(maxD) - pd2(minD)) / DAY) + 2), ppd0 = ganttW / td0;
+      const xo0 = (d) => LABEL_W + Math.round((pd2(d) - pd2(minD)) / DAY * ppd0);
+      let leadPx = 0, trailPx = 0;
+      try {
+        allTasks.forEach((t) => {
+          if (!t || !t.start || !t.end || isNaN(pd2(t.start)) || isNaN(pd2(t.end))) return;
+          const proj = projects.find((p) => p.tasks.some((x) => x.id === t.id));
+          const depth = proj ? getDepth(proj.tasks, t.id) : 0;
+          const isMile = t.duration === 0, isParent = proj ? proj.tasks.some((x) => x.parentId === t.id) : false;
+          if (opts.barNames === false) return;
+          const bx = xo0(t.start), bw = Math.max(3, Math.round((pd2(t.end) - pd2(t.start)) / DAY * ppd0));
+          const kind = isMile ? "milestone" : isParent ? "summary" : "leaf";
+          const align = opts.labelAlign || resolveLabelAlign(proj);
+          const fs = ganttNameSize(GANTT_PROFILES.print, depth);
+          const nm = t.name == null ? "" : String(t.name), lw = estLabelWidth(nm, fs);
+          const place = placeGanttLabel({
+            kind,
+            align,
+            bx,
+            bw: isMile ? 0 : bw,
+            rowTop: 0,
+            barTopY: 0,
+            labelW: lw,
+            chartL: -1e9,
+            chartR: 1e9,
+            capHalf: ganttCaptionHalf(fs)
+          });
+          const x0 = place.anchor === "start" ? place.x : place.anchor === "middle" ? place.x - lw / 2 : place.x - lw, x1 = x0 + lw;
+          if (LABEL_W - x0 > leadPx) leadPx = LABEL_W - x0;
+          if (x1 - svgWidth > trailPx) trailPx = x1 - svgWidth;
+        });
+      } catch (_) {
+        leadPx = 0;
+        trailPx = 0;
+      }
+      const cap = Math.max(8, Math.ceil(td0 * 0.22));
+      const leadD = Math.min(cap, Math.max(0, Math.ceil((leadPx + 4) / ppd0))), trailD = Math.min(cap, Math.max(0, Math.ceil((trailPx + 4) / ppd0)));
+      const afStart = addDays(minD, -leadD), afEnd = addDays(maxD, trailD + 2);
+      const afDays = Math.max(1, Math.ceil((pd2(afEnd) - pd2(afStart)) / DAY));
+      const PPU = { days: 14, weeks: 3.7, months: 1.5, quarters: 0.57 };
+      const mul = typeof opts.zoomMul === "number" && opts.zoomMul > 0 ? opts.zoomMul : 1;
+      let vis = opts.timeUnit && PPU[opts.timeUnit] ? ganttW / PPU[opts.timeUnit] : afDays;
+      vis = Math.max(3, Math.min(vis / mul, afDays * 16));
+      const panFrac = typeof opts.panFrac === "number" ? opts.panFrac : 0;
+      const scroll = afDays - vis;
+      const todayDays = (pd2(fdLocal(/* @__PURE__ */ new Date())) - pd2(afStart)) / DAY;
+      const todayFrac = scroll > 0 ? Math.max(0, Math.min(1, (todayDays - vis / 2) / scroll)) : 0;
+      const eff = Math.max(0, Math.min(1, todayFrac + panFrac));
+      const start = scroll > 0 ? addDays(afStart, Math.round(eff * scroll)) : addDays(afStart, Math.round(scroll / 2));
+      winStart = start;
+      winEnd = addDays(start, vis);
+      totalDays = Math.max(1, vis);
+      ppd = ganttW / totalDays;
+    }
+    const xOf = (d) => LABEL_W + Math.round((pd2(d) - pd2(winStart)) / DAY * ppd);
+    const months = [], cur2 = new Date(pd2(winStart));
+    cur2.setDate(1);
+    let _mGuard = 12e3;
+    while (cur2 <= pd2(winEnd) && _mGuard-- > 0) {
+      months.push({
+        x: xOf(fd2(cur2)),
+        mo: cur2.getMonth(),
+        yr: cur2.getFullYear(),
+        label: cur2.toLocaleDateString("en-US", { month: "short" })
+      });
+      cur2.setMonth(cur2.getMonth() + 1);
+    }
+    months.forEach((m, i) => {
+      m.x1 = months[i + 1] ? months[i + 1].x : svgWidth;
+      m.cx = (m.x + m.x1) / 2;
+    });
+    const yearSpans = [];
+    months.forEach((m) => {
+      const last = yearSpans[yearSpans.length - 1];
+      if (last && last.yr === m.yr) last.x1 = m.x1;
+      else yearSpans.push({ yr: m.yr, x0: m.x, x1: m.x1 });
+    });
+    yearSpans.forEach((y) => y.cx = (y.x0 + y.x1) / 2);
+    const monthPx = ppd * 30.4;
+    const monLabel = (m) => monthPx >= 30 ? m.label : m.label[0];
+    const visibleMonths = monthPx >= 22 ? months : monthPx >= 12 ? months.filter((m) => m.mo % 2 === 0) : monthPx >= 6 ? months.filter((m) => [0, 3, 6, 9].includes(m.mo)) : months.filter((m) => m.mo === 0);
+    const YEAR_TIER = 14, MON_TIER = 16, HEADER_H = YEAR_TIER + MON_TIER, svgH = HEADER_H + ROW_H2 * allTasks.length;
+    const rowBands = [], barLayer = [], labelLayer = [], nameRecords = [];
+    allTasks.forEach((t, i) => {
+      const y = HEADER_H + i * ROW_H2, bg = i % 2 ? "#f6f6f6" : "#fff";
+      const blank = !t.start || !t.end || isNaN(pd2(t.start)) || isNaN(pd2(t.end));
+      const bx = xOf(t.start), bw = Math.max(3, Math.round((pd2(t.end) - pd2(t.start)) / 864e5 * ppd));
+      const isMilestone = t.duration === 0;
+      const proj = projects.find((p) => p.tasks.some((x) => x.id === t.id));
+      const depth = proj ? getDepth(proj.tasks, t.id) : 0;
+      const isParent = proj ? proj.tasks.some((x) => x.parentId === t.id) : false;
+      const labelHtml = noLabels ? "" : (() => {
+        const indent = depth * 8, nameX = 4 + indent;
+        const maxCh = Math.floor((LABEL_W - nameX - 4) / 5.2);
+        const nm = t.name == null ? "" : String(t.name);
+        const nameStr = nm.length > maxCh ? nm.slice(0, maxCh - 1) + "…" : nm;
+        const fw = depth === 0 ? "bold" : depth === 1 ? "600" : "normal", fs = depth === 0 ? 9 : depth === 1 ? 8.5 : 8;
+        return `<text x="${nameX}" y="${y + ROW_H2 * 0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>`;
+      })();
+      const _barY = y + ROW_H2 * 0.22, _barH = ROW_H2 * 0.55, _midY = y + ROW_H2 * 0.5;
+      let blText = "";
+      if (opts.barLabels && !isParent && !blank) {
+        const L = barLabelText(t, opts.barLabels.left, opts.barLabels.year), R = barLabelText(t, opts.barLabels.right, opts.barLabels.year);
+        const lx = isMilestone ? bx - 8 : bx - 3, rx = isMilestone ? bx + 8 : bx + bw + 3;
+        if (L) blText += `<text x="${lx}" y="${y + ROW_H2 * 0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`;
+        if (R) blText += `<text x="${rx}" y="${y + ROW_H2 * 0.68}" font-size="6.5" fill="#555" font-family="Arial,sans-serif">${escapeHtml(R)}</text>`;
+      }
+      const GRAY = "#94a3b8";
+      const pct = leafPercent(t);
+      let barSvg;
+      if (blank) {
+        barSvg = "";
+      } else if (isParent) {
+        const dd = Math.min(depth, 3);
+        const NAVY = ["#2B3340", "#46506A", "#6E7790", "#8A93A8"][dd];
+        const legW = 1.1, sb = summaryBand(y, depth), SPAN = sb.SPAN, LEG = sb.LEG, sTop = sb.top;
+        barSvg = `<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/><rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN + LEG}" fill="${NAVY}"/><rect x="${bx + bw - legW}" y="${sTop}" width="${legW}" height="${SPAN + LEG}" fill="${NAVY}"/>`;
+      } else if (isMilestone) {
+        const done = pct >= 100, mb = mileBand(y, depth), h = mb.half;
+        barSvg = `<polygon points="${bx},${mb.top} ${bx + h},${mb.mid} ${bx},${mb.bot} ${bx - h},${mb.mid}" fill="${done ? GRAY : "#fff"}" stroke="${GRAY}" stroke-width="1.1"/>`;
+      } else {
+        const lb = leafBand(y), LH = lb.h, by = lb.top, bw2 = Math.max(bw, 5), r = LH / 2;
+        if (pct >= 100) {
+          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}"/>`;
+        } else if (pct <= 0) {
+          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="#fff" stroke="${GRAY}" stroke-width="1.1"/>`;
+        } else {
+          const fw = Math.max(0.5, Math.min(bw2, bw2 * pct / 100));
+          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}" opacity="0.18"/><rect x="${bx}" y="${by}" width="${fw}" height="${LH}" rx="${r}" fill="${GRAY}"/><rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
+        }
+      }
+      const nameInView = !blank && (isMilestone ? bx >= LABEL_W - 2 && bx <= svgWidth + 2 : bx + bw >= LABEL_W - 2 && bx <= svgWidth + 2);
+      if (opts.barNames !== false && nameInView) {
+        const kind = isMilestone ? "milestone" : isParent ? "summary" : "leaf";
+        const align = opts.labelAlign || resolveLabelAlign(proj);
+        const band = isMilestone ? mileBand(y, depth) : isParent ? summaryBand(y, depth) : leafBand(y);
+        const barTopY = band.top, bwN = isMilestone ? 0 : bw;
+        const fs = fitCaptionFs(ganttNameSize(PP, depth), barTopY - y);
+        const nm = t.name == null ? "" : String(t.name);
+        const lw = estLabelWidth(nm, fs);
+        const place = placeGanttLabel({
+          kind,
+          align,
+          bx,
+          bw: bwN,
+          rowTop: y,
+          barTopY,
+          labelW: lw,
+          chartL: LABEL_W,
+          chartR: svgWidth,
+          capHalf: ganttCaptionHalf(fs),
+          rowH: ROW_H2
+        });
+        nameRecords.push({
+          x: place.x,
+          y: place.y,
+          anchor: place.anchor,
+          mode: place.mode,
+          lw,
+          fs,
+          weight: ganttNameWeight(depth, kind, t.bold || t.cellFmt?.name?.bold),
+          italic: !!(t.italic || t.cellFmt?.name?.italic),
+          underline: !!(t.underline || t.cellFmt?.name?.underline),
+          str: escapeHtml(nm)
+        });
+      }
+      const unsched = blank ? `<text x="${LABEL_W + 6}" y="${y + ROW_H2 * 0.68}" font-size="7.5" fill="#9aa0a6" font-style="italic" font-family="Arial,sans-serif">Unscheduled</text>` : "";
+      rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H2}" fill="${bg}"/>`);
+      barLayer.push(barSvg);
+      labelLayer.push(`${labelHtml}${blText}${unsched}`);
+    });
+    let arrows = "";
+    if (opts.showArrows !== false) {
+      const DEP_C = { FS: "#0969da", SS: "#7c3aed", FF: "#0891b2", SF: "#be185d" };
+      let base = 0;
+      for (const p of projects) {
+        const ix = /* @__PURE__ */ new Map();
+        p.tasks.forEach((t, i) => ix.set(t.id, base + i));
+        const isParentTask = (task) => p.tasks.some((x) => x.parentId === task.id);
+        const glyphEdges = (task, gidx) => {
+          const yTop = HEADER_H + gidx * ROW_H2, sX = xOf(task.start), eX = xOf(task.end);
+          if (isParentTask(task)) {
+            const b2 = summaryBand(yTop, getDepth(p.tasks, task.id));
+            return { startX: sX, endX: eX, topY: b2.top, botY: b2.bot, rowTop: yTop };
+          }
+          if (task.duration === 0) {
+            const b2 = mileBand(yTop, getDepth(p.tasks, task.id));
+            return { startX: sX, endX: sX, topY: b2.top, botY: b2.bot, rowTop: yTop };
+          }
+          const b = leafBand(yTop);
+          return { startX: sX, endX: Math.max(eX, sX + 5), topY: b.top, botY: b.bot, rowTop: yTop };
+        };
+        const startLabelRightX = (task) => {
+          if (!opts.barLabels || isParentTask(task) || !opts.barLabels.left) return null;
+          if (!barLabelText(task, opts.barLabels.left, opts.barLabels.year)) return null;
+          return xOf(task.start) - (task.duration === 0 ? 8 : 3);
+        };
+        const raw = [];
+        for (const t of p.tasks) {
+          for (const pr of normPreds(t.predecessors)) {
+            if (!ix.has(pr.id)) continue;
+            const pt = p.tasks[ix.get(pr.id) - base];
+            if (!pt || !pt.start || !pt.end || !t.start || !t.end || isNaN(pd2(pt.start)) || isNaN(pd2(pt.end)) || isNaN(pd2(t.start)) || isNaN(pd2(t.end))) continue;
+            if (ix.get(pr.id) === ix.get(t.id)) continue;
+            raw.push({ pt, t, type: (pr.type || "FS").toUpperCase() });
+          }
+        }
+        const bySrc = /* @__PURE__ */ new Map();
+        raw.forEach((l) => {
+          const a = bySrc.get(l.pt.id) || [];
+          a.push(l);
+          bySrc.set(l.pt.id, a);
+        });
+        bySrc.forEach((a) => a.sort((x, y) => ix.get(x.t.id) - ix.get(y.t.id) || (x.type < y.type ? -1 : x.type > y.type ? 1 : 0)));
+        for (const l of raw) {
+          const group = bySrc.get(l.pt.id);
+          const src = glyphEdges(l.pt, ix.get(l.pt.id)), tgt = glyphEdges(l.t, ix.get(l.t.id));
+          const a = depAnchors({
+            type: l.type,
+            src,
+            tgt,
+            fanIndex: group.indexOf(l),
+            fanCount: group.length,
+            tgtLabelRightX: l.type === "SS" || l.type === "FS" ? startLabelRightX(l.t) : null
+          });
+          const sx = a.x1, sBot = a.y1, tx = a.x2, tTop = a.y2, vSign = a.down ? 1 : -1;
+          const dx = tx - sx, dy = tTop - sBot, vh = Math.max(6, Math.min(26, Math.abs(dy) * 0.5));
+          const c1x = sx + dx * 0.3, c1y = sBot + vSign * vh;
+          const c2x = tx - dx * 0.3, c2y = tTop - vSign * vh;
+          const ex = tx - c2x, ey = tTop - c2y, el = Math.hypot(ex, ey) || 1, ux = ex / el, uy = ey / el;
+          const a1x = tx - ux * 6 - uy * 3, a1y = tTop - uy * 6 + ux * 3, a2x = tx - ux * 6 + uy * 3, a2y = tTop - uy * 6 - ux * 3;
+          const color = DEP_C[l.type] || DEP_C.FS;
+          arrows += `<path class="dep" d="M${sx.toFixed(1)},${sBot.toFixed(1)} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${tx.toFixed(1)},${tTop.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/><path d="M${tx.toFixed(1)},${tTop.toFixed(1)} L${a1x.toFixed(1)},${a1y.toFixed(1)} L${a2x.toFixed(1)},${a2y.toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
+        }
+        base += p.tasks.length;
+      }
+    }
+    const gridRules = months.map((m) => {
+      if (m.mo === 0) return `<line x1="${m.x}" y1="0" x2="${m.x}" y2="${svgH}" stroke="#8b95a3" stroke-width="1.3"/>`;
+      if (m.mo % 3 === 0) return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#c2c9d2" stroke-width="0.8"/>`;
+      return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#e7ebf0" stroke-width="0.4"/>`;
+    }).join("");
+    const leftEdge = `<line x1="${LABEL_W}" y1="0" x2="${LABEL_W}" y2="${svgH}" stroke="#c4c8ce" stroke-width="0.8"/>`;
+    const todayStr = fdLocal(/* @__PURE__ */ new Date());
+    const todayLine = opts.showToday !== false && todayStr >= winStart && todayStr <= winEnd ? `<line x1="${xOf(todayStr)}" y1="${HEADER_H}" x2="${xOf(todayStr)}" y2="${svgH}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2"/>
+<polygon points="${xOf(todayStr) - 3.5},${HEADER_H - 5} ${xOf(todayStr) + 3.5},${HEADER_H - 5} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>` : "";
+    const headerBg = `<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${HEADER_H}" fill="#f6f8fa"/><rect x="${LABEL_W}" y="0" width="${ganttW}" height="${YEAR_TIER}" fill="#e9edf2"/>`;
+    const yearLabels = yearSpans.map((y) => `<text x="${y.cx}" y="${YEAR_TIER - 3.5}" font-size="9.5" font-weight="700" fill="#3a4452" font-family="Arial,sans-serif" text-anchor="middle" letter-spacing="0.6">${y.yr}</text>`).join("");
+    const monthLabels = visibleMonths.map((m) => {
+      const strong = m.mo % 3 === 0;
+      return `<text x="${m.cx}" y="${HEADER_H - 5}" font-size="7.5" font-weight="${strong ? 700 : 500}" fill="${strong ? "#3a4452" : "#69727f"}" font-family="Arial,sans-serif" text-anchor="middle">${monLabel(m)}</text>`;
+    }).join("");
+    const headerLines = `<line x1="${LABEL_W}" y1="${YEAR_TIER}" x2="${svgWidth}" y2="${YEAR_TIER}" stroke="#d4d8de" stroke-width="0.7"/><line x1="${LABEL_W}" y1="${HEADER_H}" x2="${svgWidth}" y2="${HEADER_H}" stroke="#b9c0c9" stroke-width="1"/>`;
+    const taskHeaderText = noLabels ? "" : `<text x="4" y="${HEADER_H - 6}" font-size="8" font-weight="bold" fill="#3a4452" font-family="Arial,sans-serif">TASK</text>`;
+    let nameLayer = "";
+    const emitName = (r) => {
+      return `<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic ? ' font-style="italic"' : ""}${r.underline ? ' text-decoration="underline"' : ""}>${r.str}</text>`;
+    };
+    try {
+      const boxOf = (r) => {
+        const x0 = r.anchor === "middle" ? r.x - r.lw / 2 : r.anchor === "end" ? r.x - r.lw : r.x;
+        return { x0, x1: x0 + r.lw, y0: r.y - r.fs * 0.72, y1: r.y + r.fs * 0.72 };
+      };
+      const recs = nameRecords.map((r) => ({ ...r, _y0: r.y })).sort((a, b) => a.y - b.y || a.x - b.x);
+      const placed = [];
+      for (const r of recs) {
+        let b = boxOf(r), tries = 0;
+        while (tries < 8) {
+          const hit = placed.find((p) => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
+          if (!hit) break;
+          r.y += hit.y1 - b.y0 + 1.5;
+          if (r.y - r._y0 > ROW_H2 * 2.2) {
+            r.y = r._y0;
+            break;
+          }
+          b = boxOf(r);
+          tries++;
+        }
+        placed.push(b);
+      }
+      nameLayer = recs.map(emitName).join("");
+    } catch (_) {
+      nameLayer = nameRecords.map(emitName).join("");
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" viewBox="0 0 ${svgWidth} ${svgH}" style="width:100%;display:block">
+<rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
+${headerBg}
+${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}${nameLayer}</svg>`;
+  }
+  var EXHIBIT_MIN_GANTT = 240;
+  function approxTextPx(str, fs) {
+    let w = 0;
+    const s = String(str == null ? "" : str);
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === " " || /[.,:;'!|il]/.test(c)) w += 0.3 * fs;
+      else if (/[fjt()/\-]/.test(c)) w += 0.38 * fs;
+      else if (/[0-9]/.test(c)) w += 0.58 * fs;
+      else if (c === "M" || c === "W") w += 0.92 * fs;
+      else if (/[A-Z]/.test(c)) w += 0.7 * fs;
+      else if (c === "m" || c === "w") w += 0.86 * fs;
+      else w += 0.54 * fs;
+    }
+    return w;
+  }
+  function layoutExhibitCols(specs, opts) {
+    const ov = opts.override || {};
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const widths = {};
+    for (const s of specs) widths[s.k] = Math.round(clamp(ov[s.k] != null ? ov[s.k] : s.base, s.min, s.max));
+    const total = () => specs.reduce((a, s) => a + widths[s.k], 0);
+    const budget = Math.max(160, opts.budget - EXHIBIT_MIN_GANTT);
+    if (total() > budget) {
+      const flex = specs.filter((s) => s.flex);
+      const slack = flex.reduce((a, s) => a + (widths[s.k] - s.min), 0);
+      if (slack > 0) {
+        const need2 = Math.min(total() - budget, slack);
+        for (const s of flex) widths[s.k] -= Math.round((widths[s.k] - s.min) / slack * need2);
+      }
+      if (total() > budget) {
+        const f = budget / total();
+        for (const s of specs) widths[s.k] = Math.max(s.min, Math.round(widths[s.k] * f));
+      }
+    }
+    const tableW = total();
+    return { widths, tableW, ganttW: Math.max(EXHIBIT_MIN_GANTT, opts.budget - tableW) };
+  }
+  function buildPDFHtml(cfg, data, forPreview) {
+    const projs = Object.values(data.projects);
+    const selProjs = projs.filter((p) => cfg.selProjects.includes(String(p.id)));
+    const COL_DEFS = [
+      { k: "id", w: 20 },
+      { k: "name", w: null },
+      { k: "start", w: 42 },
+      { k: "end", w: 42 },
+      { k: "duration", w: 28 },
+      { k: "health", w: 72 },
+      { k: "percentComplete", w: 36 },
+      { k: "responsibleParty", w: 64 },
+      { k: "predecessors", w: 36 },
+      { k: "cost", w: 56 }
+    ];
+    const COL_LABELS2 = { id: "ID", name: "Task Name", start: "Start", end: "End", duration: "Dur", health: "Status", percentComplete: "%", responsibleParty: "Owner", predecessors: "Pred", cost: "Cost" };
+    const colDefs = COL_DEFS.filter((c) => cfg.columns.includes(c.k));
+    const HC = { gray: { l: "Not Started", c: "#94a3b8" }, yellow: { l: "In Progress", c: "#d97706" }, red: { l: "Needs Attn.", c: "#dc2626" }, green: { l: "Complete", c: "#16a34a" }, paused: { l: "Paused", c: "#9ca3af" } };
+    const fmtD2 = (s) => {
+      if (!s) return "";
+      const [y, m, d] = s.split("-");
+      return String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
+    };
+    const getDepth = (tasks, id) => {
+      let dep = 0, t = tasks.find((x) => x.id === id);
+      while (t && t.parentId !== null) {
+        dep++;
+        t = tasks.find((x) => x.id === t.parentId);
+      }
+      return Math.min(dep, 3);
+    };
+    const collapsedSet = new Set(cfg.collapsedIds || []);
+    const visibleTasks = (proj) => proj.tasks.filter((t) => {
+      let pid = t.parentId;
+      while (pid != null) {
+        if (collapsedSet.has(proj.id + ":" + pid)) return false;
+        const par = proj.tasks.find((x) => x.id === pid);
+        pid = par ? par.parentId : null;
+      }
+      return true;
+    });
+    const costOfIn = (tasks, id) => {
+      const kids = tasks.filter((x) => x.parentId === id);
+      const own = Number(tasks.find((x) => x.id === id)?.cost) || 0;
+      return kids.length ? own + kids.reduce((s, c) => s + costOfIn(tasks, c.id), 0) : own;
+    };
+    let _healthCtxTasks = null, _healthCtxById = null, _healthCtxRolled = null;
+    const healthCtxFor = (tasks) => {
+      if (_healthCtxTasks !== tasks) {
+        _healthCtxTasks = tasks;
+        _healthCtxById = {};
+        tasks.forEach((x) => {
+          _healthCtxById[x.id] = x;
+        });
+        _healthCtxRolled = computeRolledHealth(tasks, data.settings);
+      }
+      return { byId: _healthCtxById, rolled: _healthCtxRolled };
+    };
+    const displayHealthOf = (t, tasks) => {
+      const { byId, rolled } = healthCtxFor(tasks);
+      const isParent = tasks.some((x) => x.parentId === t.id);
+      return isParent ? rolled[t.id] || t.health : computeDisplayHealth(t, data.settings, byId);
+    };
+    const isExpandedParentOf = (t, tasks, projId) => tasks.some((x) => x.parentId === t.id) && !collapsedSet.has(projId + ":" + t.id);
+    const cellVal = (t, k, tasks, projId) => {
+      switch (k) {
+        case "start":
+        case "end":
+          return fmtD2(t[k]);
+        case "duration":
+          return `${t.duration}d`;
+        case "percentComplete":
+          return `${displayHealthOf(t, tasks) === "green" ? 100 : effectivePercentComplete(t, tasks)}%`;
+        case "predecessors":
+          return (t.predecessors || []).map((p) => p.id || p).join(", ");
+        case "health": {
+          if (isExpandedParentOf(t, tasks, projId)) return "";
+          const dh = displayHealthOf(t, tasks);
+          const h = HC[dh] || { l: dh, c: "#94a3b8" };
+          return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;
+        }
+        case "name": {
+          const dep = getDepth(tasks, t.id);
+          const ind = dep * 14;
+          const fw = dep === 0 ? 700 : dep === 1 ? 600 : 400;
+          const fs = dep === 0 ? 10.5 : dep === 1 ? 10 : 9.5;
+          const isP = tasks.some((x) => x.parentId === t.id);
+          const key = projId + ":" + t.id;
+          const col = collapsedSet.has(key);
+          const tri = forPreview && isP ? `<span class="pl-tri${col ? "" : " open"}" data-collapse="${key}" title="${col ? "Expand" : "Collapse"}">${col ? "▸" : "▾"}</span>` : "";
+          return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;
+        }
+        case "cost": {
+          const v = costOfIn(tasks, t.id);
+          return v ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "";
+        }
+        case "responsibleParty":
+          return escapeHtml(ownerJoin(ownerListOf(t)));
+        default:
+          return escapeHtml(t[k]);
+      }
+    };
+    const isLand = cfg.orientation === "landscape";
+    const ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
+    const pgW = isLand ? ps.h : ps.w, pgR = isLand ? ps.w : ps.h;
+    const contentW = pgW - parseFloat(cfg.margins.left || 0.75) - parseFloat(cfg.margins.right || 0.75);
+    const contentPx = Math.max(300, Math.round(contentW * 96));
+    const mTopPx = Math.round(parseFloat(cfg.margins.top || 0.75) * 96);
+    const mBotPx = Math.round(parseFloat(cfg.margins.bottom || 0.75) * 96);
+    const mLeftPx = Math.round(parseFloat(cfg.margins.left || 0.75) * 96);
+    const mRightPx = Math.round(parseFloat(cfg.margins.right || 0.75) * 96);
+    const pageWpx = Math.round(pgW * 96), pageHpx = Math.round(pgR * 96);
+    let bodyHtml = "", resizeScript = "";
+    if (cfg.includeGantt) {
+      const projTaskLists = selProjs.map((proj) => {
+        let tasks = visibleTasks(proj);
+        if (cfg.healthFilter === "active") tasks = tasks.filter((t) => {
+          const h = displayHealthOf(t, proj.tasks);
+          return h === "yellow" || h === "red";
+        });
+        if (cfg.healthFilter === "complete") tasks = tasks.filter((t) => displayHealthOf(t, proj.tasks) === "green");
+        return { proj, tasks };
+      });
+      const cellText = (t, k, tasks, projId) => {
+        switch (k) {
+          case "start":
+          case "end":
+            return fmtD2(t[k]);
+          case "duration":
+            return `${t.duration}d`;
+          case "percentComplete":
+            return `${displayHealthOf(t, tasks) === "green" ? 100 : effectivePercentComplete(t, tasks)}%`;
+          case "predecessors":
+            return (t.predecessors || []).map((p) => p.id || p).join(", ");
+          case "health": {
+            if (isExpandedParentOf(t, tasks, projId)) return "";
+            const dh = displayHealthOf(t, tasks);
+            const h = HC[dh];
+            return h ? h.l : dh || "";
+          }
+          case "name":
+            return t.name == null ? "" : String(t.name);
+          case "cost": {
+            const v = costOfIn(tasks, t.id);
+            return v ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "";
+          }
+          case "responsibleParty":
+            return ownerJoin(ownerListOf(t));
+          default:
+            return t[k] == null ? "" : String(t[k]);
+        }
+      };
+      const COL_FIT = {
+        id: { fs: 8, min: 22, max: 64, flex: false, extra: 0 },
+        name: { fs: 10.5, min: 96, max: 280, flex: true, extra: 0 },
+        start: { fs: 9, min: 50, max: 96, flex: false, extra: 0 },
+        end: { fs: 9, min: 50, max: 96, flex: false, extra: 0 },
+        duration: { fs: 9, min: 34, max: 74, flex: false, extra: 0 },
+        health: { fs: 9, min: 62, max: 132, flex: false, extra: 13 },
+        percentComplete: { fs: 9, min: 34, max: 74, flex: false, extra: 0 },
+        responsibleParty: { fs: 9, min: 52, max: 144, flex: true, extra: 0 },
+        predecessors: { fs: 9, min: 40, max: 120, flex: true, extra: 0 },
+        cost: { fs: 9, min: 50, max: 132, flex: true, extra: 0 }
+      };
+      const PADX = 12, SLACK = 3;
+      const specs = colDefs.map((c) => {
+        const f = COL_FIT[c.k] || { fs: 9, min: 30, max: 130, flex: false, extra: 0 };
+        const lbl = COL_LABELS2[c.k] || c.k;
+        let base = approxTextPx(lbl.toUpperCase(), 8) * 1.04 + lbl.length * 0.45;
+        for (const { proj, tasks } of projTaskLists) {
+          for (const t of tasks) {
+            let w;
+            if (c.k === "name") {
+              const dep = getDepth(proj.tasks, t.id), fs = dep === 0 ? 10.5 : dep === 1 ? 10 : 9.5;
+              const tri = forPreview && proj.tasks.some((x) => x.parentId === t.id) ? 15 : 0;
+              w = approxTextPx(cellText(t, "name", proj.tasks), fs) + dep * 14 + tri;
+            } else {
+              w = approxTextPx(cellText(t, c.k, proj.tasks, proj.id), f.fs) + f.extra;
+            }
+            if (w > base) base = w;
+          }
+        }
+        return { k: c.k, base: base + PADX + SLACK, min: f.min, max: f.max, flex: f.flex };
+      });
+      const fit = layoutExhibitCols(specs, { override: cfg.colWidths || {}, budget: contentPx - 2 });
+      const colW = fit.widths, canResize = !!forPreview;
+      const thCols = colDefs.map((c) => `<th data-k="${c.k}" style="width:${colW[c.k]}px">${COL_LABELS2[c.k]}${canResize ? `<span class="col-rs" data-rs="${c.k}" title="Drag to resize"></span>` : ""}</th>`).join("");
+      projTaskLists.forEach(({ proj, tasks }) => {
+        const rows = tasks.map((t, i) => {
+          const cells = colDefs.map((c) => `<td class="c-${c.k}">${cellVal(t, c.k, proj.tasks, proj.id)}</td>`).join("");
+          return `<tr class="${i % 2 ? "alt" : ""}">${cells}</tr>`;
+        }).join("");
+        const ganttProj = { ...proj, tasks };
+        const ganttSvg = buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, { noLabels: true, showToday: cfg.showToday !== false, showArrows: cfg.showArrows !== false, barLabels: data.settings?.barLabels, barNames: cfg.barNames !== false, labelAlign: cfg.labelAlign, timeUnit: cfg.timeUnit, zoomMul: cfg.zoomMul, panFrac: cfg.panFrac });
+        bodyHtml += `<div class="proj-block">${selProjs.length > 1 ? `<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>` : ""}
+        <div class="split-view">
+          <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
+            <table class="aligned"><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table>
+          </div>
+          <div class="split-gantt" style="width:${fit.ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
+        </div></div>`;
+      });
+      if (forPreview) {
+        resizeScript = `<script>(function(){
+  var W=${JSON.stringify(colW)}, MINc=${JSON.stringify(Object.fromEntries(specs.map((s) => [s.k, s.min])))}, MAXc=${JSON.stringify(Object.fromEntries(specs.map((s) => [s.k, s.max])))};
+  var ORDER=${JSON.stringify(colDefs.map((c) => c.k))}, SPLIT=${fit.tableW + fit.ganttW}, MING=${EXHIBIT_MIN_GANTT};
+  function sum(){var t=0;for(var i=0;i<ORDER.length;i++)t+=W[ORDER[i]];return t;}
+  function apply(){
+    var tw=sum(), gw=Math.max(MING,SPLIT-tw);
+    document.querySelectorAll('.split-table').forEach(function(e){e.style.width=tw+'px';});
+    document.querySelectorAll('.split-gantt').forEach(function(e){e.style.width=gw+'px';});
+    ORDER.forEach(function(k){document.querySelectorAll('th[data-k="'+k+'"]').forEach(function(e){e.style.width=W[k]+'px';});});
+  }
+  var drag=null;
+  document.addEventListener('mousedown',function(ev){
+    var h=ev.target&&ev.target.closest?ev.target.closest('[data-rs]'):null; if(!h) return;
+    ev.preventDefault(); ev.stopPropagation();
+    var k=h.getAttribute('data-rs'); drag={k:k,x:ev.clientX,w0:W[k]};
+    document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
+  },true);
+  document.addEventListener('mousemove',function(ev){
+    if(!drag) return;
+    var mn=MINc[drag.k]||30, others=sum()-W[drag.k], cap=Math.min(MAXc[drag.k]||9999,Math.max(mn,(SPLIT-MING)-others));
+    W[drag.k]=Math.round(Math.max(mn,Math.min(drag.w0+(ev.clientX-drag.x),cap))); apply();
+  });
+  document.addEventListener('mouseup',function(){
+    if(!drag) return; var k=drag.k, w=W[k]; drag=null;
+    document.body.style.cursor=''; document.body.style.userSelect='';
+    try{window.parent.postMessage({type:'planarColResize',key:k,w:w},'*');}catch(_){}
+  });
+})();<\/script>`;
+      }
+    } else {
+      selProjs.forEach((proj) => {
+        let tasks = visibleTasks(proj);
+        if (cfg.healthFilter === "active") tasks = tasks.filter((t) => {
+          const h = displayHealthOf(t, proj.tasks);
+          return h === "yellow" || h === "red";
+        });
+        if (cfg.healthFilter === "complete") tasks = tasks.filter((t) => displayHealthOf(t, proj.tasks) === "green");
+        const thCols = colDefs.map((c) => `<th${c.w ? ` style="width:${c.w}px"` : ""}>${COL_LABELS2[c.k]}</th>`).join("");
+        const rows = tasks.map((t, i) => {
+          const cells = colDefs.map((c) => `<td class="c-${c.k}">${cellVal(t, c.k, proj.tasks, proj.id)}</td>`).join("");
+          return `<tr class="${i % 2 ? "alt" : ""}">${cells}</tr>`;
+        }).join("");
+        bodyHtml += `<div class="proj-block">${selProjs.length > 1 ? `<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>` : ""}<table><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table></div>`;
+      });
+    }
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>${escapeHtml(scheduleExportName(selProjs))}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@page{size:${pgW}in ${pgR}in;margin:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in}
+body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in;font-family:'Inter',Arial,sans-serif;font-size:10px;color:#1a1a1a;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+@media print{html,body{margin:0!important;padding:0!important}}
+*{box-sizing:border-box;margin:0;padding:0}
+
+/* ── Pagination ── */
+.doc-header{page-break-inside:avoid;break-inside:avoid}
+.doc-footer{page-break-inside:avoid;break-inside:avoid}
+.proj-block+.proj-block{page-break-before:always;break-before:page}
+/* Split view: do NOT repeat table headers on continuation pages — the Gantt SVG
+   beside the table can't repeat anything, so a repeated thead shifts every row
+   ~22px out of alignment with its bar on each page after the first. */
+@media print{.split-view thead{display:table-row-group}}
+/* Tables-only mode: frame the table; keep rows whole across page breaks.
+   (Split view intentionally keeps pixel slicing — pushing table rows while the
+   Gantt SVG slices freely would desync rows from bars.) */
+.proj-block>table{border:1px solid #d4d4d4}
+.proj-block>table tbody tr{page-break-inside:avoid;break-inside:avoid}
+
+.doc-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;margin-bottom:18px;border-bottom:2.5px solid #1a1a1a}
+.dh-left .exhibit{font-size:8.5px;font-weight:700;color:#4f46e5;letter-spacing:.12em;text-transform:uppercase;margin-bottom:3px}
+.dh-left .title{font-size:17px;font-weight:700;color:#1a1a1a;line-height:1.15}
+.dh-left .subline{font-size:9.5px;color:#555;margin-top:4px}
+.dh-right{text-align:right;font-size:9px;color:#555;line-height:2}
+.dh-right strong{color:#1a1a1a;font-weight:600}
+.dh-right .conf{color:#b91c1c;font-weight:700;font-size:9px;margin-top:2px}
+.proj-block{margin-bottom:20px}
+.proj-name{font-size:14px;font-weight:700;color:#4f46e5;letter-spacing:0;padding-bottom:5px;margin-bottom:9px;border-bottom:2px solid #4f46e5}
+.split-view{display:flex;align-items:flex-start;width:100%;border:1px solid #d4d4d4}
+.split-table{border-right:1px solid #d4d4d4}
+.split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
+.split-table table.aligned thead th{position:relative;height:30px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+/* B392 — drag-to-resize handle on each header cell's right edge (preview only). */
+.col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
+.col-rs:hover{background:rgba(99,102,241,.5)}
+@media print{.col-rs{display:none}}
+.split-table table.aligned tbody tr{height:18px}
+.split-table table.aligned tbody tr.alt{background:#f6f6f6}
+.split-table table.aligned tbody td{padding:0 6px;vertical-align:middle;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #ebebeb}
+.pl-tri{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;font-size:8px;line-height:1;border-radius:3px;color:#64748b;background:#f1f3f5;border:1px solid #d4d8de;cursor:pointer;margin-right:3px;vertical-align:middle;user-select:none}
+.c-cost{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pl-tri.open{background:#e8f0fe;color:#4f46e5;border-color:#b6cef7}
+.pl-tri:hover{background:#eef0fe;color:#4f46e5;border-color:#c2c7f5}
+@media print{.pl-tri{display:none}}
+table{width:100%;border-collapse:collapse;font-size:9px}
+thead tr{background:#1a1a1a}
+thead th{padding:5px 6px;text-align:left;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:#fff;white-space:nowrap}
+tbody tr{border-bottom:1px solid #ebebeb}
+tbody tr.alt{background:#f8f8f8}
+td{padding:4px 6px;vertical-align:middle;line-height:1.3}
+.c-id{color:#999;font-size:8px;white-space:nowrap}
+.c-duration,.c-percentComplete,.c-predecessors{color:#666;white-space:nowrap}
+.c-responsibleParty{color:#444}
+.c-start,.c-end{white-space:nowrap;color:#555}
+.gantt-wrap{margin-top:22px}
+.section-label{font-size:9px;font-weight:700;color:#4f46e5;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #ddd}
+.doc-footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:8px;color:#aaa}
+.print-bar{position:fixed;bottom:20px;right:20px;display:flex;gap:8px;z-index:999}
+.btn-pdf{background:#4f46e5;color:#fff;border:none;padding:10px 22px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.btn-cl{background:#fff;color:#555;border:1px solid #ddd;padding:10px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
+@media print{.print-bar{display:none}}
+</style></head><body>
+<div class="print-bar"${forPreview ? ' style="display:none"' : ""}><button class="btn-cl" onclick="window.close()">&#x2715; Close</button><button class="btn-pdf" onclick="window.print()">&#8595; Save as PDF</button></div>
+<script>
+/*__PAGINATE_SRC__*/
+(function(){
+  var MODE='${forPreview ? "preview" : "print"}';
+  var MT=${mTopPx}, MB=${mBotPx}, ML=${mLeftPx}, MR=${mRightPx};
+  var PW=${pageWpx}, PH=${pageHpx};
+  var CW=PW-ML-MR, CH=Math.max(160,PH-MT-MB)-2;  /* printable height, 2px sub-pixel slack */
+  var GANTT_HEAD=30, GANTT_ROW=18;               /* must match buildGanttSVG HEADER_H (YEAR_TIER+MON_TIER) + ROW_H */
+  var FRAME='#d4d4d4';
+
+  function outerH(el){
+    if(!el) return 0;
+    var cs=getComputedStyle(el);
+    return el.getBoundingClientRect().height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0);
+  }
+
+/*__PACK_SRC__*/
+  /* Pure pagination: every page is a self-contained unit. Each chunk carries its
+     own column header (headOv = frame + thead); continuation chunks add a
+     "(continued)" label (contH). Whole rows only - a row never splits. */
+  function packPages(model, BUDGET){
+    var pages=[], cur=null, used=0;
+    function open(){ cur={doc:false,proj:-1,name:false,cont:false,r0:0,r1:0,foot:false}; used=0; }
+    function close(){ if(cur) pages.push(cur); cur=null; }
+    open();
+    if(model.docH){ cur.doc=true; used+=model.docH; }
+    for(var p=0;p<model.projs.length;p++){
+      var pr=model.projs[p];
+      if(p>0){ close(); open(); }                 /* each project starts a fresh page */
+      var i=0, first=true;
+      while(i<pr.rows.length || first){
+        var ov=(first?pr.nameH:pr.contH)+pr.headOv;
+        var avail=BUDGET-used-ov;
+        var cnt=0,h=0;
+        while(i+cnt<pr.rows.length && h+pr.rows[i+cnt]<=avail){ h+=pr.rows[i+cnt]; cnt++; }
+        if(cnt===0 && i<pr.rows.length){
+          if(used>0){ close(); open(); continue; }/* retry on a clean page */
+          cnt=1; h=pr.rows[i];                    /* single row taller than a page: force */
+        }
+        cur.proj=p;
+        if(first) cur.name=true; else cur.cont=true;
+        cur.r0=i; cur.r1=i+cnt;
+        used+=ov+h; i+=cnt; first=false;
+        if(i<pr.rows.length){ close(); open(); }
+        else break;
+      }
+    }
+    if(model.footH){
+      if(used+model.footH>BUDGET && used>0){ close(); open(); }
+      cur.foot=true; used+=model.footH;
+    }
+    close();
+    return pages;
+  }
+/*__PACK_END__*/
+
+  function paginate(){
+    var body=document.body;
+    /* 1. Stage the document offscreen at exact printable width and measure. */
+    var master=document.createElement('div');
+    master.style.cssText='width:'+CW+'px;position:absolute;left:-100000px;top:0;background:#fff';
+    var kids=[].slice.call(body.children);
+    for(var i=0;i<kids.length;i++){
+      var el=kids[i];
+      if(el.tagName==='SCRIPT'||el.tagName==='STYLE') continue;
+      if(el.classList&&el.classList.contains('print-bar')) continue;
+      master.appendChild(el);
+    }
+    body.style.padding='0'; body.style.margin='0';
+    body.appendChild(master);
+
+    var docEl=master.querySelector('.doc-header');
+    var footEl=master.querySelector('.doc-footer');
+    var blocks=[].slice.call(master.querySelectorAll('.proj-block'));
+    /* continuation label sample - measured once, reused */
+    var contSample=document.createElement('div');
+    contSample.style.cssText='font:600 9px Arial,sans-serif;color:#4f46e5;letter-spacing:.04em;padding:0 0 4px';
+    contSample.textContent='X - continued';
+    master.appendChild(contSample);
+    var contH=outerH(contSample);
+    master.removeChild(contSample);
+
+    var projs=[];
+    for(var b=0;b<blocks.length;b++){
+      var blk=blocks[b];
+      var nameEl=blk.querySelector('.proj-name');
+      var sv=blk.querySelector('.split-view');
+      var tableEl=sv?sv.querySelector('table'):blk.querySelector('table');
+      var theadEl=tableEl?tableEl.querySelector('thead'):null;
+      var rowEls=tableEl?[].slice.call(tableEl.querySelectorAll('tbody tr')):[];
+      var svgEl=sv?sv.querySelector('svg'):null;
+      var tHalf=sv?sv.querySelector('.split-table'):null;
+      projs.push({
+        nameEl:nameEl, nameH:outerH(nameEl),
+        nameTxt:nameEl?nameEl.textContent:'',
+        split:!!sv,
+        tableW:tHalf?tHalf.getBoundingClientRect().width:0,
+        ganttW:svgEl?svgEl.getBoundingClientRect().width:0,
+        theadEl:theadEl, rowEls:rowEls, svgEl:svgEl,
+        contH:contH,
+        headOv:2+(theadEl?theadEl.getBoundingClientRect().height:0),
+        rows:rowEls.map(function(r){return r.getBoundingClientRect().height;})
+      });
+    }
+    var model={docH:outerH(docEl), footH:outerH(footEl), projs:projs};
+    var pages=packPages(model, CH);
+
+    /* 2. Assemble each page as a real, self-contained DOM unit. */
+    function svgWindow(svgEl,y0,h,w){
+      var win=document.createElement('div');
+      win.style.cssText='width:'+w+'px;height:'+h+'px;overflow:hidden;position:relative;flex-shrink:0';
+      var c=svgEl.cloneNode(true);
+      c.style.position='absolute'; c.style.left='0'; c.style.top=(-y0)+'px'; c.style.width=w+'px';
+      win.appendChild(c);
+      return win;
+    }
+    function buildPage(pg){
+      var page=document.createElement('div');
+      page.style.cssText='width:'+CW+'px;background:#fff';
+      if(pg.doc&&docEl) page.appendChild(docEl);
+      if(pg.proj>=0){
+        var pr=projs[pg.proj];
+        if(pg.name&&pr.nameEl) page.appendChild(pr.nameEl);
+        if(pg.cont){
+          var cl=document.createElement('div');
+          cl.style.cssText='font:600 9px Arial,sans-serif;color:#4f46e5;letter-spacing:.04em;padding:0 0 4px';
+          cl.textContent=pr.nameTxt+' - continued';
+          page.appendChild(cl);
+        }
+        var framed=document.createElement('div');
+        framed.style.cssText='border:1px solid '+FRAME+';background:#fff'+(pr.split?';display:flex;align-items:flex-start':'');
+        var tbl=document.createElement('table');
+        tbl.className='aligned';
+        if(pr.theadEl) tbl.appendChild(pr.theadEl.cloneNode(true));
+        var tb=document.createElement('tbody');
+        for(var r=pg.r0;r<pg.r1;r++) tb.appendChild(pr.rowEls[r]);   /* move real rows */
+        tbl.appendChild(tb);
+        if(pr.split){
+          var left=document.createElement('div');
+          left.className='split-table';
+          left.style.cssText='width:'+pr.tableW+'px;flex-shrink:0';
+          left.appendChild(tbl);
+          framed.appendChild(left);
+          var right=document.createElement('div');
+          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B392) */
+          right.style.cssText='width:'+pr.ganttW+'px;flex-shrink:0';
+          if(pr.svgEl){                                                                                   /* a project filtered to zero rows yields an empty Gantt (no <svg>) → svgEl null; guard so svgWindow's cloneNode can't throw and blank the whole PDF */
+            right.appendChild(svgWindow(pr.svgEl,0,GANTT_HEAD,pr.ganttW));                                /* date band: repeats every page */
+            if(pg.r1>pg.r0) right.appendChild(svgWindow(pr.svgEl,GANTT_HEAD+pg.r0*GANTT_ROW,(pg.r1-pg.r0)*GANTT_ROW,pr.ganttW));
+          }
+          framed.appendChild(right);
+        } else {
+          framed.appendChild(tbl);
+        }
+        page.appendChild(framed);
+      }
+      if(pg.foot&&footEl) page.appendChild(footEl);
+      return page;
+    }
+
+    var pageEls=pages.map(buildPage);
+    master.parentNode.removeChild(master);
+
+    /* 3. Render: preview = sheets on gray; print = one block per page. */
+    if(MODE==='preview'){
+      var wrap=document.createElement('div');
+      wrap.style.cssText='width:'+PW+'px;padding:14px 0 6px;box-sizing:border-box';
+      for(var p=0;p<pageEls.length;p++){
+        var sheet=document.createElement('div');
+        sheet.style.cssText='width:'+PW+'px;height:'+PH+'px;background:#fff;box-sizing:border-box;padding:'+MT+'px '+MR+'px '+MB+'px '+ML+'px;overflow:hidden;box-shadow:0 1px 5px rgba(0,0,0,.35)';
+        sheet.appendChild(pageEls[p]);
+        wrap.appendChild(sheet);
+        var lbl=document.createElement('div');
+        lbl.textContent='Page '+(p+1)+' of '+pageEls.length;
+        lbl.style.cssText='text-align:center;font:600 8px Arial,sans-serif;color:#56616b;letter-spacing:.9px;text-transform:uppercase;padding:7px 0 11px';
+        wrap.appendChild(lbl);
+      }
+      body.style.background='#a9b2bb';
+      body.appendChild(wrap);
+      window.parent.postMessage({type:'planarPreviewHeight', h: body.scrollHeight}, '*');
+    } else {
+      var st=document.createElement('style');
+      st.textContent='.pg{page-break-after:always;break-after:page;page-break-inside:avoid;break-inside:avoid}'
+        +'.pg:last-child{page-break-after:auto;break-after:auto}'
+        +'@media screen{body{background:#eef0f2;padding:18px 0}.pg{margin:0 auto 16px;outline:1px solid #d8d8d8;background:#fff;padding:'+MT+'px '+MR+'px '+MB+'px '+ML+'px;width:'+PW+'px;box-sizing:border-box}}'
+        +'@media print{.pg{width:'+CW+'px}}';
+      document.head.appendChild(st);
+      for(var q=0;q<pageEls.length;q++){ pageEls[q].className='pg'; body.appendChild(pageEls[q]); }
+    }
+  }
+  function go(){
+    if(document.fonts && document.fonts.ready){ document.fonts.ready.then(function(){ setTimeout(paginate,30); }); }
+    else setTimeout(paginate,80);
+  }
+  window.addEventListener('load',go);
+})();
+/*__PAGINATE_END__*/
+<\/script>
+<div class="doc-header">
+  <div class="dh-left">
+    ${cfg.exhibitLabel ? `<div class="exhibit">${escapeHtml(cfg.exhibitLabel)}</div>` : ""}
+    <div class="title">${escapeHtml(cfg.projectTitle)}</div>
+    ${cfg.preparedFor ? `<div class="subline">Prepared for: <strong>${escapeHtml(cfg.preparedFor)}</strong></div>` : ""}
+  </div>
+  <div class="dh-right">
+    <div>Date:&nbsp;<strong>${escapeHtml(cfg.docDate)}</strong></div>
+    ${cfg.preparedBy ? `<div>Prepared by:&nbsp;<strong>${escapeHtml(cfg.preparedBy)}</strong></div>` : ""}
+    ${cfg.confidential ? `<div class="conf">${escapeHtml(cfg.confidential)}</div>` : ""}
+  </div>
+</div>
+${bodyHtml}
+<div class="doc-footer">
+  <span>Generated ${(/* @__PURE__ */ new Date()).toLocaleString()}</span>
+  <span>${escapeHtml(cfg.confidential || "")}</span>
+  <span>planar</span>
+</div>
+${forPreview ? `<script>(function(){document.addEventListener("click",function(e){var el=e.target.closest&&e.target.closest("[data-collapse]");if(!el)return;e.preventDefault();e.stopPropagation();try{window.parent.postMessage({type:"planarToggleCollapse",key:el.getAttribute("data-collapse")},"*");}catch(_){}}, true);})();<\/script>` : ""}
+${resizeScript}
+</body></html>`;
+  }
+  exposeToHarness({
+    PAGE_SIZES: [() => PAGE_SIZES],
+    buildGanttSVG: [() => buildGanttSVG],
+    EXHIBIT_MIN_GANTT: [() => EXHIBIT_MIN_GANTT],
+    approxTextPx: [() => approxTextPx],
+    layoutExhibitCols: [() => layoutExhibitCols],
+    buildPDFHtml: [() => buildPDFHtml]
+  });
+
   // src/workspaces/scheduler/page/main.jsx
-  var { useState: useState3, useEffect: useEffect2, useRef: useRef3, useMemo: useMemo2, useCallback: useCallback2 } = React;
+  var { useState: useState4, useEffect: useEffect3, useRef: useRef4, useMemo: useMemo3, useCallback: useCallback2 } = React;
   function removeScheduleFromDoc(d, id) {
     if (!d || !d.projects || !d.projects[id]) return d;
     const newProjects = { ...d.projects };
@@ -7946,21 +9524,8 @@ ${extraNote}` : list;
     } catch (e) {
     }
   }
-  var ROW_H = 24;
   var GRID_LINE = "1px solid var(--bd)";
   var GRID_LINE_RANGE = "1px solid #93c5fd";
-  var PPD = 22;
-  var TL_H = 30;
-  var BUF = 6;
-  var WIN_CHUNK = 8;
-  var WIN_OVER = 12;
-  var rowWindowTop = (st) => Math.floor(Math.max(0, st) / ROW_H / WIN_CHUNK) * WIN_CHUNK;
-  var rowWindow = (winTop, viewH, total) => ({
-    startIdx: Math.max(0, winTop - WIN_OVER),
-    endIdx: Math.min(total, winTop + WIN_CHUNK + Math.ceil(viewH / ROW_H) + 1 + WIN_OVER)
-  });
-  var GRID_SCROLL_MEMO = /* @__PURE__ */ new Map();
-  var GANTT_SCROLL_MEMO = /* @__PURE__ */ new Map();
   var ROW_COLORS = [
     { color: "#fef3c7", label: "Yellow tint" },
     { color: "#ffedd5", label: "Orange tint" },
@@ -7983,7 +9548,6 @@ ${extraNote}` : list;
     { color: "#dbeafe", label: "Blue tint" },
     { color: "#e0e7ff", label: "Indigo tint" }
   ];
-  var escapeHtml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   var pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map((f) => `linear-gradient(${f},${f})`).join(",");
   var SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
   var isValidColor = (v) => v == null || SAFE_COLOR_RE.test(v);
@@ -7999,19 +9563,6 @@ ${extraNote}` : list;
     }
     const prev = FONT_SIZE_STEPS.filter((v) => v < base);
     return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
-  };
-  var fmtBarDate = (s, withYear) => {
-    if (!s) return "";
-    const d = /* @__PURE__ */ new Date(s + "T12:00:00");
-    return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()}` + (withYear === false ? "" : `/${String(d.getFullYear()).slice(2)}`);
-  };
-  var barLabelText = (t, field, withYear) => {
-    if (!field || field === "none") return "";
-    if (field === "start") return fmtBarDate(t.start, withYear);
-    if (field === "end") return fmtBarDate(t.end, withYear);
-    if (field === "owner") return ownerDisplayParts(ownerListOf(t)).label;
-    if (field === "pct") return `${t.percentComplete || 0}%`;
-    return "";
   };
   setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
   var askConfirm = /* @__PURE__ */ (() => {
@@ -9357,11 +10908,11 @@ ${extraNote}` : list;
     ))))));
   }
   function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
-    const [rows, setRows] = useState3(null);
-    const [previewRow, setPreviewRow] = useState3(null);
-    const [previewData, setPreviewData] = useState3(null);
-    const [busy, setBusy] = useState3(false);
-    useEffect2(() => {
+    const [rows, setRows] = useState4(null);
+    const [previewRow, setPreviewRow] = useState4(null);
+    const [previewData, setPreviewData] = useState4(null);
+    const [busy, setBusy] = useState4(false);
+    useEffect3(() => {
       let alive = true;
       (async () => {
         const list = await window.storage.getHistory("hs-v1", 100);
@@ -9764,8 +11315,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
   }
   function InlineDate({ value, onCommit }) {
     const disp = value ? toShortDate(value) : "";
-    const [txt, setTxt] = useState3(disp);
-    useEffect2(() => {
+    const [txt, setTxt] = useState4(disp);
+    useEffect3(() => {
       setTxt(disp);
     }, [disp]);
     const commit = () => {
@@ -9816,21 +11367,21 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     return { body: tidy(head), quoted: qtext, hasQuoted: qtext.length > 0 };
   }
   function SuggestionsView({ data, updateTask, setData, rows, setRows, loading, onClose, gridProps, activeIdx, setActiveIdx }) {
-    const [edits, setEdits] = useState3({});
-    const [view, setView] = useState3("grid");
-    const [split, setSplit] = useState3(50);
-    const [toast, setToast] = useState3(null);
-    const [showPicker, setShowPicker] = useState3(false);
-    const [showQuoted, setShowQuoted] = useState3(false);
-    const bodyRef = useRef3(null), targetRef = useRef3(null), canvasRef = useRef3(null);
-    const toastTimer = useRef3(null), undoRef = useRef3(null);
-    const [mailReaderOpen, setMailReaderOpen] = useState3(false);
-    const [mailOverflow, setMailOverflow] = useState3(false);
-    const mailBodyRef = useRef3(null);
-    useEffect2(() => {
+    const [edits, setEdits] = useState4({});
+    const [view, setView] = useState4("grid");
+    const [split, setSplit] = useState4(50);
+    const [toast, setToast] = useState4(null);
+    const [showPicker, setShowPicker] = useState4(false);
+    const [showQuoted, setShowQuoted] = useState4(false);
+    const bodyRef = useRef4(null), targetRef = useRef4(null), canvasRef = useRef4(null);
+    const toastTimer = useRef4(null), undoRef = useRef4(null);
+    const [mailReaderOpen, setMailReaderOpen] = useState4(false);
+    const [mailOverflow, setMailOverflow] = useState4(false);
+    const mailBodyRef = useRef4(null);
+    useEffect3(() => {
       setActiveIdx((i) => Math.max(0, Math.min(i, rows.length - 1)));
     }, [rows.length]);
-    useEffect2(() => {
+    useEffect3(() => {
       setShowPicker(false);
       setShowQuoted(false);
       setMailReaderOpen(false);
@@ -10165,7 +11716,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     };
     const prev = () => setActiveIdx((i) => Math.max(0, i - 1));
     const next = () => setActiveIdx((i) => Math.min(rows.length - 1, i + 1));
-    useEffect2(() => {
+    useEffect3(() => {
       const h = (e) => {
         const t = e.target;
         if (mailReaderOpen) {
@@ -10209,7 +11760,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("keydown", h);
       return () => window.removeEventListener("keydown", h);
     });
-    useEffect2(() => {
+    useEffect3(() => {
       if (!matched) return;
       const id = setTimeout(() => {
         if (view === "grid" && targetRef.current) targetRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -10220,7 +11771,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }, 60);
       return () => clearTimeout(id);
     }, [activeIdx, view, matched, targetId]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!(matched && gridProps && gridProps.setSelectedId && targetId != null)) return;
       const id = setTimeout(() => gridProps.setSelectedId(targetId), 60);
       return () => clearTimeout(id);
@@ -10730,13 +12281,13 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     return applyTaskFocus({ ...d, ...patch });
   }
   function App() {
-    const [data, setData] = useState3(null);
-    const dataRef = useRef3(null);
-    useEffect2(() => {
+    const [data, setData] = useState4(null);
+    const dataRef = useRef4(null);
+    useEffect3(() => {
       dataRef.current = data;
     }, [data]);
-    const rollToastRef = useRef3(null);
-    useEffect2(() => {
+    const rollToastRef = useRef4(null);
+    useEffect3(() => {
       if (rollToastRef.current) {
         showToast(rollToastRef.current);
         rollToastRef.current = null;
@@ -10754,55 +12305,55 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       return idxs;
     };
     const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
-    const [successorPrompt, setSuccessorPrompt] = useState3(null);
-    const [successorPromptQueue, setSuccessorPromptQueue] = useState3([]);
-    useEffect2(() => {
+    const [successorPrompt, setSuccessorPrompt] = useState4(null);
+    const [successorPromptQueue, setSuccessorPromptQueue] = useState4([]);
+    useEffect3(() => {
       if (!successorPrompt && successorPromptQueue.length > 0) {
         setSuccessorPrompt(successorPromptQueue[0]);
         setSuccessorPromptQueue((q) => q.slice(1));
       }
     }, [successorPrompt, successorPromptQueue]);
-    const [notesCtx, setNotesCtx] = useState3(null);
-    const [isMobile, setIsMobile] = useState3(() => typeof window !== "undefined" && window.innerWidth < 768);
-    const [mobMenuOpen, setMobMenuOpen] = useState3(false);
-    useEffect2(() => {
+    const [notesCtx, setNotesCtx] = useState4(null);
+    const [isMobile, setIsMobile] = useState4(() => typeof window !== "undefined" && window.innerWidth < 768);
+    const [mobMenuOpen, setMobMenuOpen] = useState4(false);
+    useEffect3(() => {
       const h = () => setIsMobile(window.innerWidth < 768);
       window.addEventListener("resize", h);
       return () => window.removeEventListener("resize", h);
     }, []);
-    const [coarsePointer, setCoarsePointer] = useState3(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-    useEffect2(() => {
+    const [coarsePointer, setCoarsePointer] = useState4(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    useEffect3(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
       const mq = window.matchMedia("(pointer: coarse)");
       const h = () => setCoarsePointer(mq.matches);
       mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
       return () => mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h);
     }, []);
-    const [pdfExportOpen, setPdfExportOpen] = useState3(false);
-    const [projCtx, setProjCtx] = useState3(null);
-    const [taskCtx, setTaskCtx] = useState3(null);
-    const [iconPickerCtx, setIconPickerCtx] = useState3(null);
-    const clipboardRef = useRef3(null);
-    const pasteSelectRef = useRef3(null);
-    const [, setClipboardTick] = useState3(0);
-    const [renameModal, setRenameModal] = useState3(null);
-    const [deleteChoice, setDeleteChoice] = useState3(null);
-    const [moveToCtx, setMoveToCtx] = useState3(null);
-    const moveSelectRef = useRef3(null);
-    const [edit, setEdit] = useState3(null);
-    const editLiveRef = useRef3(null);
-    useEffect2(() => {
+    const [pdfExportOpen, setPdfExportOpen] = useState4(false);
+    const [projCtx, setProjCtx] = useState4(null);
+    const [taskCtx, setTaskCtx] = useState4(null);
+    const [iconPickerCtx, setIconPickerCtx] = useState4(null);
+    const clipboardRef = useRef4(null);
+    const pasteSelectRef = useRef4(null);
+    const [, setClipboardTick] = useState4(0);
+    const [renameModal, setRenameModal] = useState4(null);
+    const [deleteChoice, setDeleteChoice] = useState4(null);
+    const [moveToCtx, setMoveToCtx] = useState4(null);
+    const moveSelectRef = useRef4(null);
+    const [edit, setEdit] = useState4(null);
+    const editLiveRef = useRef4(null);
+    useEffect3(() => {
       editLiveRef.current = edit;
     }, [edit]);
-    const focusReselectRef = useRef3(null);
-    const [editStartChar, setEditStartChar] = useState3(null);
-    const [selectedId, setSelectedId] = useState3(null);
-    const [selRange, setSelRange] = useState3(null);
-    const [focusPins, setFocusPins] = useState3(() => /* @__PURE__ */ new Set());
-    const [selectedColIdx, setSelectedColIdx] = useState3(0);
-    const [, setTodayTick] = useState3(0);
-    const [, setHealthTick] = useState3(0);
-    useEffect2(() => {
+    const focusReselectRef = useRef4(null);
+    const [editStartChar, setEditStartChar] = useState4(null);
+    const [selectedId, setSelectedId] = useState4(null);
+    const [selRange, setSelRange] = useState4(null);
+    const [focusPins, setFocusPins] = useState4(() => /* @__PURE__ */ new Set());
+    const [selectedColIdx, setSelectedColIdx] = useState4(0);
+    const [, setTodayTick] = useState4(0);
+    const [, setHealthTick] = useState4(0);
+    useEffect3(() => {
       const refresh = () => {
         const t = fdLocal(/* @__PURE__ */ new Date());
         if (t !== NOW) {
@@ -10828,26 +12379,26 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearInterval(iv);
       };
     }, []);
-    const [goToFocus, setGoToFocus] = useState3(null);
-    const [offlineFallback, setOfflineFallback] = useState3(false);
-    const [authRequired, setAuthRequired] = useState3(false);
-    const [driftNotice, setDriftNotice] = useState3(null);
-    const [ancestorPredNotice, setAncestorPredNotice] = useState3(null);
-    const [staleNotice, setStaleNotice] = useState3(false);
-    const didInitialLoad = useRef3(false);
-    const prevCoreRef = useRef3(null);
-    const [formatOpen, setFormatOpen] = useState3(false);
-    const [settingsOpen, setSettingsOpen] = useState3(false);
-    const [settingsSection, setSettingsSection] = useState3(null);
-    const [meetingCalOpen, setMeetingCalOpen] = useState3(false);
-    const [automationOpen, setAutomationOpen] = useState3(false);
-    const [contactsOpen, setContactsOpen] = useState3(false);
-    const [historyOpen, setHistoryOpen] = useState3(false);
-    const [reviewOpen, setReviewOpen] = useState3(false);
-    const [reviewRows, setReviewRows] = useState3([]);
-    const [reviewLoading, setReviewLoading] = useState3(true);
-    const [reviewIdx, setReviewIdx] = useState3(0);
-    useEffect2(() => {
+    const [goToFocus, setGoToFocus] = useState4(null);
+    const [offlineFallback, setOfflineFallback] = useState4(false);
+    const [authRequired, setAuthRequired] = useState4(false);
+    const [driftNotice, setDriftNotice] = useState4(null);
+    const [ancestorPredNotice, setAncestorPredNotice] = useState4(null);
+    const [staleNotice, setStaleNotice] = useState4(false);
+    const didInitialLoad = useRef4(false);
+    const prevCoreRef = useRef4(null);
+    const [formatOpen, setFormatOpen] = useState4(false);
+    const [settingsOpen, setSettingsOpen] = useState4(false);
+    const [settingsSection, setSettingsSection] = useState4(null);
+    const [meetingCalOpen, setMeetingCalOpen] = useState4(false);
+    const [automationOpen, setAutomationOpen] = useState4(false);
+    const [contactsOpen, setContactsOpen] = useState4(false);
+    const [historyOpen, setHistoryOpen] = useState4(false);
+    const [reviewOpen, setReviewOpen] = useState4(false);
+    const [reviewRows, setReviewRows] = useState4([]);
+    const [reviewLoading, setReviewLoading] = useState4(true);
+    const [reviewIdx, setReviewIdx] = useState4(0);
+    useEffect3(() => {
       const openTo = (e) => {
         if ((e?.detail || null) === "meetings") {
           setMeetingCalOpen(true);
@@ -10863,18 +12414,18 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       document.addEventListener("planar-open-settings", openTo);
       return () => document.removeEventListener("planar-open-settings", openTo);
     }, []);
-    const [ganttPPD, setGanttPPD] = useState3(() => {
+    const [ganttPPD, setGanttPPD] = useState4(() => {
       const ganttW = window.innerWidth * 0.46;
       return Math.max(1, Math.floor(ganttW / 365));
     });
-    const [gridZoom, setGridZoom] = useState3(() => data?.gridZoom ?? 1);
-    useEffect2(() => {
+    const [gridZoom, setGridZoom] = useState4(() => data?.gridZoom ?? 1);
+    useEffect3(() => {
       if (data && typeof data.gridZoom === "number") setGridZoom(data.gridZoom);
     }, [data?.gridZoom]);
-    const hoverZoneRef = useRef3("gantt");
-    const fileHandleRef = useRef3(null);
-    const fileHtmlRef = useRef3(null);
-    useEffect2(() => {
+    const hoverZoneRef = useRef4("gantt");
+    const fileHandleRef = useRef4(null);
+    const fileHtmlRef = useRef4(null);
+    useEffect3(() => {
       const sb = window.__sb;
       if (!sb) {
         setReviewLoading(false);
@@ -10914,19 +12465,19 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }
       };
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!reviewOpen || !data) return;
       const a = reviewRows[reviewIdx];
       if (a && a.project_id != null && data.aPid !== a.project_id && data.projects && data.projects[a.project_id]) setData((d) => ({ ...d, aPid: a.project_id }));
     }, [reviewOpen, reviewIdx, reviewRows, data?.aPid]);
-    const fileSaveTimer = useRef3(null);
-    const [fileLinked, setFileLinked] = useState3(false);
-    const [savePulse, setSavePulse] = useState3(false);
-    const [saveStatus, setSaveStatus] = useState3("saved");
-    const saveSeq = useRef3(0);
-    const latestData = useRef3(null);
-    const saveStatusRef = useRef3("saved");
-    useEffect2(() => {
+    const fileSaveTimer = useRef4(null);
+    const [fileLinked, setFileLinked] = useState4(false);
+    const [savePulse, setSavePulse] = useState4(false);
+    const [saveStatus, setSaveStatus] = useState4("saved");
+    const saveSeq = useRef4(0);
+    const latestData = useRef4(null);
+    const saveStatusRef = useRef4("saved");
+    useEffect3(() => {
       saveStatusRef.current = saveStatus;
     }, [saveStatus]);
     const attemptCloudSave = (d) => {
@@ -10938,14 +12489,14 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         if (saveSeq.current === seq) setSaveStatus("error");
       });
     };
-    const [dlOpen, setDlOpen] = useState3(false);
-    const history = useRef3([]);
-    const future = useRef3([]);
-    const prevData = useRef3(null);
-    const isUndoing = useRef3(false);
-    const isDerivedUpdate = useRef3(false);
-    const flatTasksRef = useRef3([]);
-    const lastSelIdxRef = useRef3(null);
+    const [dlOpen, setDlOpen] = useState4(false);
+    const history = useRef4([]);
+    const future = useRef4([]);
+    const prevData = useRef4(null);
+    const isUndoing = useRef4(false);
+    const isDerivedUpdate = useRef4(false);
+    const flatTasksRef = useRef4([]);
+    const lastSelIdxRef = useRef4(null);
     const viewportTopFlatIdx = (tasks) => {
       const g2 = document.querySelector('[data-grid-scroll="1"]');
       if (!g2) return null;
@@ -10960,11 +12511,11 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       return null;
     };
-    const projIdRef = useRef3(null);
-    const prevHolKey = useRef3(null);
-    const skipHolRecasc = useRef3(false);
-    const prevHealthKey = useRef3(null);
-    useEffect2(() => {
+    const projIdRef = useRef4(null);
+    const prevHolKey = useRef4(null);
+    const skipHolRecasc = useRef4(false);
+    const prevHealthKey = useRef4(null);
+    useEffect3(() => {
       if (!data) return;
       if (isUndoing.current) {
         isUndoing.current = false;
@@ -10982,10 +12533,10 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       prevData.current = data;
     }, [data]);
-    const applyLoadedDataRef = useRef3(null);
-    const [loadTick, setLoadTick] = useState3(0);
-    const loadAttemptRef = useRef3(0);
-    useEffect2(() => {
+    const applyLoadedDataRef = useRef4(null);
+    const [loadTick, setLoadTick] = useState4(0);
+    const loadAttemptRef = useRef4(0);
+    useEffect3(() => {
       let cancelled = false, retryTimer = null;
       (async () => {
         applyLoadedDataRef.current = (parsed) => {
@@ -11104,7 +12655,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(retryTimer);
       };
     }, [loadTick]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!data) return;
       latestData.current = data;
       persistViewState(prevCoreRef.current, data);
@@ -11115,7 +12666,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       if (!isFirstLoad && coreIsNew) attemptCloudSave(data);
       if (isFirstLoad || coreIsNew) {
         setHolidaySet(buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS));
-        ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
+        setRowH(Math.min(34, Math.max(20, data.settings?.rowHeight || 24)));
         rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
         const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
         if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick((x) => x + 1);
@@ -11170,7 +12721,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }, 700);
       }
     }, [data]);
-    useEffect2(() => {
+    useEffect3(() => {
       let t;
       const onSaved = () => {
         setSavePulse(true);
@@ -11184,7 +12735,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(t);
       };
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (saveStatus !== "error") return;
       const retry = () => {
         if (latestData.current) attemptCloudSave(latestData.current);
@@ -11196,7 +12747,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         window.removeEventListener("online", retry);
       };
     }, [saveStatus]);
-    useEffect2(() => {
+    useEffect3(() => {
       let stopped = false;
       const check = async () => {
         if (stopped || !window.storage || !window.storage.checkRemote) return;
@@ -11235,12 +12786,12 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         document.removeEventListener("visibilitychange", check);
       };
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const onStale = () => setStaleNotice(true);
       window.addEventListener("planar:stale", onStale);
       return () => window.removeEventListener("planar:stale", onStale);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const onMerged = (e) => {
         const merged = e && e.detail && e.detail.value;
         const anc = e && e.detail && e.detail.base;
@@ -11267,7 +12818,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("planar:merged", onMerged);
       return () => window.removeEventListener("planar:merged", onMerged);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const onBeforeUnload = (e) => {
         if (saveStatusRef.current === "saved") return;
         e.preventDefault();
@@ -11276,8 +12827,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("beforeunload", onBeforeUnload);
       return () => window.removeEventListener("beforeunload", onBeforeUnload);
     }, []);
-    const overlayOpenRef = useRef3(false);
-    useEffect2(() => {
+    const overlayOpenRef = useRef4(false);
+    useEffect3(() => {
       overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal || deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen || reviewOpen || meetingCalOpen);
     }, [
       successorPrompt,
@@ -11295,15 +12846,15 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       reviewOpen,
       meetingCalOpen
     ]);
-    const overlayAtKeyStartRef = useRef3(false);
-    useEffect2(() => {
+    const overlayAtKeyStartRef = useRef4(false);
+    useEffect3(() => {
       const latch = () => {
         overlayAtKeyStartRef.current = overlayOpenRef.current;
       };
       window.addEventListener("keydown", latch, true);
       return () => window.removeEventListener("keydown", latch, true);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const onKey = (e) => {
         if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
         const tag = document.activeElement.tagName;
@@ -11614,9 +13165,9 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       if (!(row && row.isExpanded && row.hideableCount > 0))
         showToast(`Focus ${g2.focused ? "off" : "on"} for "${g2.name || "Untitled"}"` + (g2.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
     };
-    const zoomRafRef = useRef3(null);
-    const zoomAccRef = useRef3(0);
-    useEffect2(() => {
+    const zoomRafRef = useRef4(null);
+    const zoomAccRef = useRef4(0);
+    useEffect3(() => {
       let armed = false;
       const arm = (on) => {
         if (on === armed) return;
@@ -12028,7 +13579,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : "Cell"
       };
     };
-    const rowJumpRef = useRef3(false);
+    const rowJumpRef = useRef4(false);
     const goToTask = useCallback2((pid, taskId) => {
       rowJumpRef.current = true;
       setData((d) => {
@@ -12059,8 +13610,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       setSelRange(null);
       setGoToFocus({ taskId, n: Date.now() });
     }, []);
-    const revealRef = useRef3(null);
-    const openNameEditOnReveal = useRef3(false);
+    const revealRef = useRef4(null);
+    const openNameEditOnReveal = useRef4(false);
     const revealInserted = useCallback2(() => {
       const shouldOpenEdit = openNameEditOnReveal.current;
       openNameEditOnReveal.current = false;
@@ -12357,7 +13908,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         setClipboardTick((t) => t + 1);
       }
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (pasteSelectRef.current == null) return;
       const id = pasteSelectRef.current;
       pasteSelectRef.current = null;
@@ -12396,7 +13947,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(sorted)) } } };
       });
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (moveSelectRef.current == null) return;
       const id = moveSelectRef.current;
       moveSelectRef.current = null;
@@ -12554,13 +14105,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       });
     }, []);
     const inShell = typeof window !== "undefined" && window.self !== window.top;
-    useEffect2(() => {
+    useEffect3(() => {
       if (!data) return;
       const pid = pickActivePid(data.projects, data.aPid);
       if (pid != null && pid !== data.aPid) setData((d) => d && d.aPid !== pid ? { ...d, aPid: pid } : d);
     }, [data && data.aPid, data && data.projects]);
-    const navSigRef = useRef3("");
-    useEffect2(() => {
+    const navSigRef = useRef4("");
+    useEffect3(() => {
       if (!inShell || !data) return;
       const rowLink = rowJumpRef.current;
       rowJumpRef.current = false;
@@ -12581,7 +14132,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       }
     }, [data, inShell]);
     const [, setSiteNamesTick] = React.useState(0);
-    useEffect2(() => {
+    useEffect3(() => {
       const onNames = (e) => {
         if (!e || e.origin !== window.location.origin) return;
         const m = e && e.data;
@@ -12593,7 +14144,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onNames);
       return () => window.removeEventListener("message", onNames);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!inShell) return;
       const onLoadMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -12608,7 +14159,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onLoadMsg);
       return () => window.removeEventListener("message", onLoadMsg);
     }, [inShell]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!inShell) return;
       const onMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -12716,8 +14267,8 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onMsg);
       return () => window.removeEventListener("message", onMsg);
     }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
-    const tbSigRef = useRef3("");
-    useEffect2(() => {
+    const tbSigRef = useRef4("");
+    useEffect3(() => {
       if (!inShell || !data) return;
       const sec = data.section ?? "projects";
       const section2 = sec === "suggestions" ? "projects" : sec;
@@ -12767,7 +14318,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       formatOpen,
       historyOpen
     ]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!inShell) return;
       const onCmd = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -12838,7 +14389,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       return () => window.removeEventListener("message", onCmd);
     }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
     const proj = activeProjectOf(data);
-    const flatTasks = useMemo2(() => {
+    const flatTasks = useMemo3(() => {
       if (!proj) return [];
       const settings = data?.settings;
       const childSet = focusGroupIds(proj.tasks);
@@ -12939,13 +14490,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       const i = flatTasks.findIndex((t) => t.id === selectedId);
       if (i >= 0) lastSelIdxRef.current = i;
     }, [selectedId, flatTasks]);
-    useEffect2(() => {
+    useEffect3(() => {
       projIdRef.current = data?.aPid ?? null;
     }, [data]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!edit) setEditStartChar(null);
     }, [edit]);
-    const succMap = useMemo2(() => {
+    const succMap = useMemo3(() => {
       if (!proj) return {};
       const m = {};
       proj.tasks.forEach((t) => normPreds(t.predecessors).forEach((p) => {
@@ -13038,7 +14589,7 @@ A backup snapshot of the current state is saved first.`,
         "text/html"
       );
     };
-    const rolledHealthMap = useMemo2(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
+    const rolledHealthMap = useMemo3(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
     if (!data) return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", color: "#e6a817", fontFamily: "'Inter',system-ui,sans-serif", fontSize: 14, letterSpacing: ".1em" } }, "LOADING...");
     if (!proj) return /* @__PURE__ */ React.createElement("div", { "data-schedule-empty": "1", style: { height: "100vh", background: "var(--bg)", color: "var(--txt)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "'Inter',system-ui,sans-serif", textAlign: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "No schedules yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, maxWidth: 360, lineHeight: 1.5 } }, "This account has no schedule to show. Create one to start planning — nothing has been removed."), /* @__PURE__ */ React.createElement("button", { onClick: () => addProject(), style: { cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, background: "var(--accent)", color: "var(--on-accent,#fff)", border: "none", borderRadius: 6, padding: "8px 16px" } }, "New schedule"));
     const setHoverZone = (zone) => {
@@ -13810,12 +15361,12 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
-    const [open, setOpen] = useState3(false);
-    const [editingId, setEditingId] = useState3(null);
-    const [editVal, setEditVal] = useState3("");
-    const editRef = useRef3(null);
-    const btnRef = useRef3(null);
-    const menuRef = useRef3(null);
+    const [open, setOpen] = useState4(false);
+    const [editingId, setEditingId] = useState4(null);
+    const [editVal, setEditVal] = useState4("");
+    const editRef = useRef4(null);
+    const btnRef = useRef4(null);
+    const menuRef = useRef4(null);
     const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
     const projHealth = (p) => {
       if (!p.tasks.length) return "gray";
@@ -13825,7 +15376,7 @@ A backup snapshot of the current state is saved first.`,
       return "gray";
     };
     const toggle = () => setOpen((o) => !o);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) {
         setEditingId(null);
         return;
@@ -13836,7 +15387,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", down);
       return () => document.removeEventListener("mousedown", down);
     }, [open]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
     }, [editingId]);
     const cur = activeProjectOf(data);
@@ -14066,9 +15617,9 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function RenameModal({ name, onConfirm, onClose }) {
-    const [val, setVal] = useState3(name);
-    const inputRef = useRef3(null);
-    useEffect2(() => {
+    const [val, setVal] = useState4(name);
+    const inputRef = useRef4(null);
+    useEffect3(() => {
       inputRef.current?.select();
     }, []);
     const confirm = () => {
@@ -14116,8 +15667,8 @@ A backup snapshot of the current state is saved first.`,
     );
   }
   function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
-    const menuRef = useRef3(null);
-    useEffect2(() => {
+    const menuRef = useRef4(null);
+    useEffect3(() => {
       const down = (e) => {
         if (!menuRef.current?.contains(e.target)) onClose();
       };
@@ -14237,9 +15788,9 @@ A backup snapshot of the current state is saved first.`,
   );
   var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
     const fb = fmt;
-    const [openCaret, setOpenCaret] = useState3(null);
-    const popRef = useRef3(null);
-    useEffect2(() => {
+    const [openCaret, setOpenCaret] = useState4(null);
+    const popRef = useRef4(null);
+    useEffect3(() => {
       if (!openCaret) return;
       const down = (e) => {
         if (popRef.current?.contains(e.target)) return;
@@ -14250,8 +15801,8 @@ A backup snapshot of the current state is saved first.`,
       return () => document.removeEventListener("mousedown", down, true);
     }, [openCaret]);
     const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
-    const [sizeText, setSizeText] = useState3(sizeDisplay);
-    useEffect2(() => {
+    const [sizeText, setSizeText] = useState4(sizeDisplay);
+    useEffect3(() => {
       setSizeText(sizeDisplay);
     }, [sizeDisplay]);
     const commitSize = (raw) => {
@@ -14416,9 +15967,9 @@ A backup snapshot of the current state is saved first.`,
     );
   });
   function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
-    const menuRef = useRef3(null);
-    const toolbarRef = useRef3(null);
-    useEffect2(() => {
+    const menuRef = useRef4(null);
+    const toolbarRef = useRef4(null);
+    useEffect3(() => {
       const down = (e) => {
         if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
       };
@@ -14488,7 +16039,7 @@ A backup snapshot of the current state is saved first.`,
       scopeLabel: null
     };
     const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
-    const [subMeet, setSubMeet] = useState3(false);
+    const [subMeet, setSubMeet] = useState4(false);
     const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
     const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
     const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
@@ -14579,11 +16130,11 @@ A backup snapshot of the current state is saved first.`,
     return null;
   }
   function HealthColHeader({ current, onChange }) {
-    const [open, setOpen] = useState3(false);
-    const ref = useRef3(null);
-    const anchorRef = useRef3(null);
+    const [open, setOpen] = useState4(false);
+    const ref = useRef4(null);
+    const anchorRef = useRef4(null);
     const pos = useAnchoredPopover(open, anchorRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const down = (e) => {
         if (!ref.current?.contains(e.target)) setOpen(false);
@@ -14667,13 +16218,13 @@ A backup snapshot of the current state is saved first.`,
     { dot: "#4f46e5", bar: "#e0e7ff", dark: "#3730a3" }
   ];
   function StatusHeaderDropdown({ data, setData }) {
-    const [open, setOpen] = useState3(false);
-    const [adding, setAdding] = useState3(false);
-    const [newLabel, setNewLabel] = useState3("");
-    const [newColor, setNewColor] = useState3(STATUS_PALETTE[0].dot);
-    const [editing, setEditing] = useState3(null);
-    const ref = useRef3(null);
-    const menuRef = useRef3(null);
+    const [open, setOpen] = useState4(false);
+    const [adding, setAdding] = useState4(false);
+    const [newLabel, setNewLabel] = useState4("");
+    const [newColor, setNewColor] = useState4(STATUS_PALETTE[0].dot);
+    const [editing, setEditing] = useState4(null);
+    const ref = useRef4(null);
+    const menuRef = useRef4(null);
     const menuPos = useAnchoredPopover(
       open,
       ref,
@@ -14685,7 +16236,7 @@ A backup snapshot of the current state is saved first.`,
         setNewLabel("");
       }
     );
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const down = (e) => {
         if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target)) {
@@ -14957,23 +16508,23 @@ A backup snapshot of the current state is saved first.`,
   }
   var NOTE_SIZES = [{ k: "sm", l: "Small", px: 11 }, { k: "md", l: "Medium", px: 13 }, { k: "lg", l: "Large", px: 15 }];
   function NotesColHeader({ data, setData }) {
-    const [open, setOpen] = useState3(false);
-    const [confirm, setConfirm] = useState3(null);
-    const [size, setSize] = useState3(() => {
+    const [open, setOpen] = useState4(false);
+    const [confirm, setConfirm] = useState4(null);
+    const [size, setSize] = useState4(() => {
       try {
         return localStorage.getItem("planar_noteSize") || "sm";
       } catch {
         return "sm";
       }
     });
-    const ref = useRef3(null);
-    const menuRef = useRef3(null);
+    const ref = useRef4(null);
+    const menuRef = useRef4(null);
     const menuPos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => {
       setOpen(false);
       setConfirm(null);
     });
     const hasNotes = data ? Object.values(data.projects || {}).some((p) => (p.tasks || []).some((t) => (t.notes || []).length > 0)) : false;
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) {
         setConfirm(null);
         return;
@@ -15192,11 +16743,11 @@ A backup snapshot of the current state is saved first.`,
   }
   function FormulaColumnEditor({ mode, initLabel, initFormula, columnNames, existingLabels, preview, onSave, onDelete, onClose }) {
     const PF = window.PlanyrFormula;
-    const [label, setLabel] = useState3(initLabel || "");
-    const [formula, setFormula] = useState3(initFormula || "");
-    const [caret, setCaret] = useState3((initFormula || "").length);
-    const [sugIdx, setSugIdx] = useState3(0);
-    const taRef = useRef3(null);
+    const [label, setLabel] = useState4(initLabel || "");
+    const [formula, setFormula] = useState4(initFormula || "");
+    const [caret, setCaret] = useState4((initFormula || "").length);
+    const [sugIdx, setSugIdx] = useState4(0);
+    const taRef = useRef4(null);
     const FNS = PF && PF.FUNCTION_NAMES || [];
     const FN_HELP = PF && PF.FUNCTION_HELP || {};
     const ctxAt = (() => {
@@ -15390,29 +16941,29 @@ A backup snapshot of the current state is saved first.`,
     );
   }
   function GridView({ tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom = 1, setHoverZone, onColWidths, review, moveRows }) {
-    const taskById = useMemo2(() => {
+    const taskById = useMemo3(() => {
       const m = {};
       (proj?.tasks || []).forEach((t) => m[t.id] = t);
       return m;
     }, [proj?.tasks]);
-    const [winTop, setWinTop] = useState3(0);
-    const localRef = useRef3(null);
+    const [winTop, setWinTop] = useState4(0);
+    const localRef = useRef4(null);
     const ref = scrollRef || localRef;
     const vh = (ref.current?.clientHeight || window.innerHeight) - 80;
     const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
     const totalRows = tasks.length + emptyPad;
     const { startIdx, endIdx } = rowWindow(winTop, ref.current?.clientHeight || window.innerHeight, totalRows);
-    const isDraggingCells = useRef3(false);
-    const cellDragPin = useRef3(null);
-    const _healthClickSel = useRef3(null);
-    const colBtnRef = useRef3(null);
-    const rowDragRef = useRef3(null);
-    const rowDragCancelRef = useRef3(null);
-    useEffect2(() => () => {
+    const isDraggingCells = useRef4(false);
+    const cellDragPin = useRef4(null);
+    const _healthClickSel = useRef4(null);
+    const colBtnRef = useRef4(null);
+    const rowDragRef = useRef4(null);
+    const rowDragCancelRef = useRef4(null);
+    useEffect3(() => () => {
       rowDragCancelRef.current?.();
     }, []);
-    const dragLineRef = useRef3(null);
-    const dragNestRef = useRef3(null);
+    const dragLineRef = useRef4(null);
+    const dragNestRef = useRef4(null);
     const dragTargetIds = (anchorId) => {
       if (!selRange) return [anchorId];
       const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
@@ -15596,7 +17147,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("keydown", onKey, true);
       window.addEventListener("blur", cancel);
     };
-    useEffect2(() => {
+    useEffect3(() => {
       const up = () => {
         isDraggingCells.current = false;
         if (cellDragPin.current) {
@@ -15607,7 +17158,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mouseup", up);
       return () => document.removeEventListener("mouseup", up);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const NAV = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "PageUp", "PageDown", "Home", "End", "Enter"]);
       const ptr = { x: null, y: null }, at = { x: null, y: null };
       const onKey = (e) => {
@@ -15644,9 +17195,9 @@ A backup snapshot of the current state is saved first.`,
       if (ed.right && !(stripJoinsRange && ci === stripCi)) s.push("inset -2px 0 0 0 #2563eb");
       return s.join(",");
     };
-    const cellSessionRef = useRef3(null);
-    const skipColClickRef = useRef3(false);
-    const liveGridRef = useRef3({ tasks, allCols: [], gridZoom, stripCi: -1 });
+    const cellSessionRef = useRef4(null);
+    const skipColClickRef = useRef4(false);
+    const liveGridRef = useRef4({ tasks, allCols: [], gridZoom, stripCi: -1 });
     const beginCellDrag = (startEvent, { rowMode, apply, onEnd }) => {
       cellSessionRef.current?.stop("cancel");
       const el = ref.current;
@@ -15739,7 +17290,7 @@ A backup snapshot of the current state is saved first.`,
       window.addEventListener("blur", onCancel);
       raf = requestAnimationFrame(tick);
     };
-    useEffect2(() => () => cellSessionRef.current?.stop("cancel"), []);
+    useEffect3(() => () => cellSessionRef.current?.stop("cancel"), []);
     const currentSelection = () => {
       if (selRange) return selRange;
       const ri0 = selectedId != null ? tasks.findIndex((t) => t.id === selectedId) : -1;
@@ -15847,12 +17398,12 @@ A backup snapshot of the current state is saved first.`,
       if (setTaskCtx) setTaskCtx({ task, projId: proj?.id, x: e.clientX, y: e.clientY });
     };
     const hasRange = selIsRange(selRange);
-    const colWidthsRef = useRef3(null);
-    const pinRef = useRef3({ lw: 0, rw: 0, l: [], r: [], w: {} });
-    const expandAnchorRef = useRef3(null);
-    const suppressSelChaseRef = useRef3(false);
-    const heldListRef = useRef3(tasks);
-    const selChaseAllowedRef = useRef3(false);
+    const colWidthsRef = useRef4(null);
+    const pinRef = useRef4({ lw: 0, rw: 0, l: [], r: [], w: {} });
+    const expandAnchorRef = useRef4(null);
+    const suppressSelChaseRef = useRef4(false);
+    const heldListRef = useRef4(tasks);
+    const selChaseAllowedRef = useRef4(false);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prev = heldListRef.current;
@@ -15892,7 +17443,7 @@ A backup snapshot of the current state is saved first.`,
       const delta = (now - anchorIdx) * ROW_H;
       if (delta) el.scrollTop = Math.max(0, st + delta);
     }, [tasks]);
-    const heldRowHRef = useRef3(ROW_H);
+    const heldRowHRef = useRef4(ROW_H);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prevRH = heldRowHRef.current;
@@ -15932,12 +17483,12 @@ A backup snapshot of the current state is saved first.`,
         }
       }
     };
-    const revealCellRef = useRef3(null);
+    const revealCellRef = useRef4(null);
     revealCellRef.current = (row, masterCol) => {
       revealRowIdx(row);
       revealColKey(allCols[masterCol]?.k);
     };
-    useEffect2(() => {
+    useEffect3(() => {
       const on = (e) => {
         const d = e.detail || {};
         if (revealCellRef.current) revealCellRef.current(d.row, d.col);
@@ -15945,8 +17496,8 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("planar-reveal-cell", on);
       return () => document.removeEventListener("planar-reveal-cell", on);
     }, []);
-    const chasedSelRef = useRef3({ id: selectedId, col: selectedColIdx });
-    useEffect2(() => {
+    const chasedSelRef = useRef4({ id: selectedId, col: selectedColIdx });
+    useEffect3(() => {
       const suppressSelChase = suppressSelChaseRef.current;
       suppressSelChaseRef.current = false;
       const prevSel = chasedSelRef.current;
@@ -15963,11 +17514,11 @@ A backup snapshot of the current state is saved first.`,
       revealColKey(allCols[selectedColIdx]?.k);
     }, [selectedId, selectedColIdx, tasks]);
     const rvAnchorId = review ? tasks.find((t) => t.__rvTarget)?.id ?? tasks.find((t) => t.__rvProposed)?.id ?? null : null;
-    const [rvEdit, setRvEdit] = useState3(null);
-    useEffect2(() => {
+    const [rvEdit, setRvEdit] = useState4(null);
+    useEffect3(() => {
       setRvEdit(null);
     }, [rvAnchorId]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!review || rvAnchorId == null) return;
       const el = ref.current;
       if (!el) return;
@@ -15978,7 +17529,7 @@ A backup snapshot of the current state is saved first.`,
       }, 50);
       return () => clearTimeout(id);
     }, [rvAnchorId]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!goToFocus) return;
       const el = ref.current;
       if (!el) return;
@@ -16107,18 +17658,18 @@ A backup snapshot of the current state is saved first.`,
       if (col === "start" || col === "end" || col === "duration" || col === "predecessors") setSelRange(null);
     };
     const pid = proj?.id;
-    const formulaCols = useMemo2(() => formulaColsOf(proj), [proj?.formulaCols]);
-    const allCols = useMemo2(() => effectiveColsOf(proj), [proj?.formulaCols]);
-    const colByK = useMemo2(() => Object.fromEntries(allCols.map((c) => [c.k, c])), [allCols]);
-    const cfg = useMemo2(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, proj?.meetingBodies, proj?.tasks, data.gridColOrder, data.gridColWidths, pid]);
+    const formulaCols = useMemo3(() => formulaColsOf(proj), [proj?.formulaCols]);
+    const allCols = useMemo3(() => effectiveColsOf(proj), [proj?.formulaCols]);
+    const colByK = useMemo3(() => Object.fromEntries(allCols.map((c) => [c.k, c])), [allCols]);
+    const cfg = useMemo3(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, proj?.meetingBodies, proj?.tasks, data.gridColOrder, data.gridColWidths, pid]);
     const colOrder = cfg.visible;
-    const formulaValues = useMemo2(
+    const formulaValues = useMemo3(
       () => computeFormulaValues(tasks, formulaCols, proj),
       [tasks, formulaCols, data.settings?.holidays, NOW]
     );
-    const [liveW, setLiveW] = useState3(null);
+    const [liveW, setLiveW] = useState4(null);
     const widthOf = (k) => liveW && liveW.k === k ? liveW.w : cfg.widths[k] ?? colByK[k]?.w ?? 100;
-    const colWidths = useMemo2(() => {
+    const colWidths = useMemo3(() => {
       const o = {};
       allCols.forEach((c) => {
         o[c.k] = liveW && liveW.k === c.k ? liveW.w : cfg.widths[c.k] ?? c.w;
@@ -16126,13 +17677,13 @@ A backup snapshot of the current state is saved first.`,
       return o;
     }, [cfg, liveW, allCols]);
     colWidthsRef.current = colWidths;
-    useEffect2(() => {
+    useEffect3(() => {
       if (onColWidths) onColWidths({ order: colOrder, widths: colWidths });
     }, [colWidths, colOrder]);
     const orderedCols = colOrder.map((k) => colByK[k]).filter(Boolean);
-    const [gridW, setGridW] = useState3(0);
-    const [scrollSide, setScrollSide] = useState3({ l: false, r: false });
-    useEffect2(() => {
+    const [gridW, setGridW] = useState4(0);
+    const [scrollSide, setScrollSide] = useState4({ l: false, r: false });
+    useEffect3(() => {
       const el = ref.current;
       if (!el) return;
       const measure = () => setGridW(Math.floor(el.getBoundingClientRect().width / (gridZoom || 1)));
@@ -16187,7 +17738,7 @@ A backup snapshot of the current state is saved first.`,
       setScrollSide((p) => p.l === l && p.r === r ? p : { l, r });
     };
     const totalW = orderedCols.reduce((s, c) => s + dispW[c.k], 0);
-    useEffect2(() => {
+    useEffect3(() => {
       syncScrollSide(ref.current);
     }, [gridW, totalW, pinOn]);
     pinRef.current = { lw: pinLW, rw: pinRW, l: pinL, r: pinR, w: dispW };
@@ -16206,7 +17757,7 @@ A backup snapshot of the current state is saved first.`,
       sh.push("inset -2px 0 0 0 #2563eb");
       return sh.join(",");
     };
-    useEffect2(() => {
+    useEffect3(() => {
       if (selectedId === null || !colMasterIdxs.length) return;
       if (colMasterIdxs.includes(selectedColIdx)) return;
       const target = colMasterIdxs.reduce(
@@ -16215,7 +17766,7 @@ A backup snapshot of the current state is saved first.`,
       );
       if (target !== selectedColIdx) setSelectedColIdx(target);
     }, [colOrder, selectedColIdx, selectedId]);
-    const [formulaEditor, setFormulaEditor] = useState3(null);
+    const [formulaEditor, setFormulaEditor] = useState4(null);
     const saveFormulaCol = ({ colKey, label, formula }) => setData((d) => {
       const p = d.projects?.[pid];
       if (!p) return d;
@@ -16263,10 +17814,10 @@ A backup snapshot of the current state is saved first.`,
       const res = PF.evaluateFormula(formula, { columns: colMap(sample), rows: aggRows, rowIndex: 0, calendar: formulaCalendar(), today: formulaToday(), formatDate: dateFmt });
       return { ...res, display: res.ok ? PF.formatValue(res.value, { formatDate: dateFmt }) : res.error, sampleName: sample.name || "Task " + sample.id };
     };
-    const [dragColKey, setDragColKey] = useState3(null);
-    const [dragOverKey, setDragOverKey] = useState3(null);
-    const [colMenuOpen, setColMenuOpen] = useState3(false);
-    const [hdrCtx, setHdrCtx] = useState3(null);
+    const [dragColKey, setDragColKey] = useState4(null);
+    const [dragOverKey, setDragOverKey] = useState4(null);
+    const [colMenuOpen, setColMenuOpen] = useState4(false);
+    const [hdrCtx, setHdrCtx] = useState4(null);
     const persistVisible = (visible) => writeGridCfg(setData, pid, { visible, widths: cfg.widths });
     const persistWidths = (widths) => writeGridCfg(setData, pid, { visible: colOrder, widths });
     const reorderCols = (fromKey, toKey) => {
@@ -16873,20 +18424,20 @@ A backup snapshot of the current state is saved first.`,
   }
   var PICKER_EVENT = "planar-picker-open";
   function HealthPicker({ value, onChange }) {
-    const [open, setOpen] = useState3(false);
-    const [hiIdx, setHiIdx] = useState3(-1);
-    const dotRef = useRef3(null);
-    const menuRef = useRef3(null);
-    const idRef = useRef3(`hp-${Math.random()}`);
+    const [open, setOpen] = useState4(false);
+    const [hiIdx, setHiIdx] = useState4(-1);
+    const dotRef = useRef4(null);
+    const menuRef = useRef4(null);
+    const idRef = useRef4(`hp-${Math.random()}`);
     const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.left + r.width / 2 - 10 }), () => setOpen(false));
-    useEffect2(() => {
+    useEffect3(() => {
       const onOther = (e) => {
         if (e.detail !== idRef.current) setOpen(false);
       };
       document.addEventListener(PICKER_EVENT, onOther);
       return () => document.removeEventListener(PICKER_EVENT, onOther);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       setHiIdx(-1);
       const handleDown = (e) => {
@@ -16896,7 +18447,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", handleDown);
       return () => document.removeEventListener("mousedown", handleDown);
     }, [open]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const handleKey = (e) => {
         if (e.key === "Tab") {
@@ -17046,20 +18597,20 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function StatusPicker({ value, onChange }) {
-    const [open, setOpen] = useState3(false);
-    const [hiIdx, setHiIdx] = useState3(-1);
-    const ref = useRef3(null);
-    const menuRef = useRef3(null);
-    const idRef = useRef3(`sp-${Math.random()}`);
+    const [open, setOpen] = useState4(false);
+    const [hiIdx, setHiIdx] = useState4(-1);
+    const ref = useRef4(null);
+    const menuRef = useRef4(null);
+    const idRef = useRef4(`sp-${Math.random()}`);
     const pos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect2(() => {
+    useEffect3(() => {
       const onOther = (e) => {
         if (e.detail !== idRef.current) setOpen(false);
       };
       document.addEventListener(PICKER_EVENT, onOther);
       return () => document.removeEventListener(PICKER_EVENT, onOther);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       setHiIdx(-1);
       const handleDown = (e) => {
@@ -17069,7 +18620,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", handleDown);
       return () => document.removeEventListener("mousedown", handleDown);
     }, [open]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const handleKey = (e) => {
         if (e.key === "Tab") {
@@ -17206,7 +18757,7 @@ A backup snapshot of the current state is saved first.`,
     }).join(" · ");
   };
   function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit, tabStep }) {
-    const [hint, setHint] = useState3(() => predLagPlainEnglish(seedVal));
+    const [hint, setHint] = useState4(() => predLagPlainEnglish(seedVal));
     return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -17984,598 +19535,6 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         return /* @__PURE__ */ React.createElement("span", { style: s }, task[col.k]);
     }
   }
-  var GANTT_INK = "#1a1a1a";
-  var resolveLabelAlign = (proj) => {
-    const a = proj && proj.labelAlign;
-    return a === "left" || a === "center" || a === "right" ? a : "right";
-  };
-  var writeLabelAlign = (setData, pid, align) => setData((d) => d.projects && d.projects[pid] ? { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], labelAlign: align } } } : d);
-  var ganttNameWeight = (depth, kind, bold) => {
-    const d = Math.min(depth || 0, 3);
-    let w;
-    if (kind === "summary") w = [800, 700, 600, 600][d];
-    else if (kind === "milestone") w = 600;
-    else w = 500;
-    return bold ? Math.max(w, 700) : w;
-  };
-  var estLabelWidth = (s, fs) => Math.max(1, String(s == null ? "" : s).length) * fs * 0.6 + 4;
-  var placeGanttLabel = ({
-    align,
-    bx,
-    bw,
-    rowTop,
-    barTopY,
-    labelW,
-    chartL,
-    chartR,
-    capHalf = 6,
-    rowH = null
-  }) => {
-    const barStart = bx, barEnd = bx + bw;
-    const confineY = (r) => {
-      if (rowH == null) return r;
-      const y = Math.max(rowTop + capHalf, Math.min(rowTop + rowH - capHalf, r.y));
-      return y === r.y ? r : { ...r, y };
-    };
-    const aboveY = Math.max(
-      rowTop + capHalf,
-      Math.min(rowTop + capHalf + 1, (barTopY != null ? barTopY : rowTop) - 1 - capHalf)
-    );
-    const clampX = (x, anchor) => {
-      let x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
-      const x1 = x0 + labelW;
-      if (x1 > chartR) x -= x1 - chartR;
-      x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
-      if (x0 < chartL) x += chartL - x0;
-      return x;
-    };
-    const above = (x, anchor) => confineY({ x: clampX(x, anchor), y: aboveY, anchor, mode: "above" });
-    return align === "left" ? above(barStart, "start") : align === "right" ? above(barEnd, "end") : above(barStart + bw / 2, "middle");
-  };
-  var GANTT_CAPTION_LH = 1.2;
-  var ganttCaptionNeed = (fs) => fs * GANTT_CAPTION_LH;
-  var ganttCaptionHalf = (fs) => fs * GANTT_CAPTION_LH / 2;
-  var fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, (headroom + 1e-6) / GANTT_CAPTION_LH));
-  var GANTT_PROFILES = {
-    screen: {
-      names: [10, 9.25, 8.5, 8],
-      span: [6, 5, 4, 4],
-      leg: [0.16, 0.12, 0.09, 0.07],
-      minSpan: 2,
-      minLeg: 2,
-      leafFrac: 0.25,
-      mileHalf: 3 * Math.SQRT2,
-      mileMin: 2.5,
-      leafBase: 1,
-      summaryBase: 2,
-      mileBase: 1
-    },
-    print: {
-      names: [9, 8.5, 8, 7.5],
-      span: [4, 3.5, 3, 3],
-      leg: [0.14, 0.1, 0.08, 0.06],
-      minSpan: 2,
-      minLeg: 1.5,
-      leafFrac: 0.3,
-      mileHalf: 4,
-      mileMin: 2.5,
-      leafBase: 2,
-      summaryBase: 2,
-      mileBase: 2
-    }
-  };
-  var ganttNameSize = (P, level) => P.names[Math.min(Math.max(level || 0, 0), 3)];
-  var ganttLeafGeom = (P, rowH) => {
-    const bot = rowH - P.leafBase;
-    const h = Math.max(3, Math.min(P.leafFrac * rowH, bot - ganttCaptionNeed(P.names[0])));
-    return { top: bot - h, bot, h };
-  };
-  var ganttSummaryGeom = (P, rowH, level) => {
-    const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.summaryBase;
-    const nom0 = P.span[0] + P.leg[0] * rowH;
-    const s = Math.min(1, Math.max(0, bot - ganttCaptionNeed(P.names[0])) / nom0);
-    const nomLeg = P.leg[d] * rowH;
-    let span = Math.max(Math.min(P.minSpan, P.span[d]), P.span[d] * s), leg = Math.max(Math.min(P.minLeg, nomLeg), nomLeg * s);
-    const room = Math.max(0, bot - ganttCaptionNeed(P.names[d]));
-    if (span + leg > room) {
-      const k = room / (span + leg);
-      span *= k;
-      leg *= k;
-    }
-    const top = bot - leg - span;
-    return { span, leg, top, bot, mid: top + span / 2 };
-  };
-  var ganttMilestoneGeom = (P, rowH, level) => {
-    const d = Math.min(Math.max(level || 0, 0), 3), bot = rowH - P.mileBase;
-    const half = Math.max(P.mileMin, Math.min(P.mileHalf, rowH * 0.25, (bot - ganttCaptionNeed(P.names[d])) / 2));
-    const cy = bot - half;
-    return { half, cy, top: cy - half, bot };
-  };
-  var ARROW_REACH = 7;
-  var depAnchors = ({ type, src, tgt, fanIndex = 0, fanCount = 1, tgtLabelRightX = null }) => {
-    const down = tgt.rowTop >= src.rowTop;
-    const srcConnX = type === "SS" || type === "SF" ? src.startX : src.endX;
-    const tgtConnX = type === "FF" || type === "SF" ? tgt.endX : tgt.startX;
-    const y1 = down ? src.botY : src.topY;
-    const y2 = down ? tgt.topY : tgt.botY;
-    const srcCenterX = (src.startX + src.endX) / 2;
-    const halfW = Math.abs(srcCenterX - srcConnX);
-    const toCenter = Math.sign(srcCenterX - srcConnX) || -1;
-    const arc = halfW > 0.5 ? halfW : fanCount > 1 ? 4 : 0;
-    const spread = Math.min(arc, 7 * Math.max(0, fanCount - 1));
-    const step = fanCount > 1 ? spread / (fanCount - 1) : 0;
-    const x1 = srcConnX + toCenter * step * fanIndex;
-    let x2 = tgtConnX;
-    if (tgtLabelRightX != null && x2 - ARROW_REACH < tgtLabelRightX + 2)
-      x2 = Math.min(tgt.endX, tgtLabelRightX + ARROW_REACH + 2);
-    return { x1, y1, x2, y2, down };
-  };
-  function GanttView({ tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings, rowZoom = 1 }) {
-    const [winTop, setWinTop] = useState3(0);
-    const localRef = useRef3(null);
-    const ref = scrollRef || localRef;
-    const ppd = pxPerDay || 22;
-    const vh = (ref.current ? ref.current.clientHeight : window.innerHeight) - 80;
-    const taskById = useMemo2(() => {
-      const m = {};
-      (proj?.tasks || tasks).forEach((t) => m[t.id] = t);
-      return m;
-    }, [proj?.tasks, tasks]);
-    const childParentIds = useMemo2(() => {
-      const allTasks = proj?.tasks || tasks;
-      return new Set(allTasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
-    }, [proj?.tasks, tasks]);
-    const _progressMap = useMemo2(() => {
-      const allTasks = proj?.tasks || tasks;
-      if (!allTasks.length) return {};
-      const getDesc = (id) => {
-        const kids = allTasks.filter((t) => t.parentId === id);
-        return [...kids, ...kids.flatMap((k) => getDesc(k.id))];
-      };
-      const map = {};
-      childParentIds.forEach((pid) => {
-        const desc = getDesc(pid);
-        if (!desc.length) return;
-        map[pid] = Math.round(desc.filter((t) => t.health === "green").length / desc.length * 100);
-      });
-      return map;
-    }, [proj?.tasks, tasks, childParentIds]);
-    const { minD, totD } = useMemo2(() => {
-      const windowStart = addD(NOW, -365 * 5);
-      const windowEnd = addD(NOW, 365 * 15);
-      if (!tasks.length) return { minD: windowStart, totD: dif(windowStart, windowEnd) };
-      const starts = tasks.map((t) => t.start).filter(Boolean).slice().sort();
-      const ends = tasks.map((t) => t.end).filter(Boolean).slice().sort();
-      if (!starts.length || !ends.length) return { minD: windowStart, totD: dif(windowStart, windowEnd) };
-      let mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
-      let mx = ends[ends.length - 1] > windowEnd ? addD(ends[ends.length - 1], 60) : windowEnd;
-      const hardBack = addD(NOW, -365 * 30), hardFwd = addD(NOW, 365 * 50);
-      if (mn < hardBack) mn = hardBack;
-      if (mx > hardFwd) mx = hardFwd;
-      return { minD: mn, totD: dif(mn, mx) };
-    }, [tasks]);
-    const totalW = totD * ppd;
-    const xOf = (d) => Math.max(0, Math.min(totalW, dif(minD, d) * ppd));
-    const todayX = xOf(NOW);
-    const months = useMemo2(() => {
-      const out = [];
-      const endD = addD(minD, totD);
-      let cur = new Date(pd(minD).getFullYear(), pd(minD).getMonth(), 1);
-      while (fd(cur) <= endD) {
-        const x0 = dif(minD, fd(cur)) * ppd;
-        const nxt = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-        out.push({ label: cur.toLocaleString("default", { month: "short" }), x0, w: dif(minD, fd(nxt)) * ppd - x0 });
-        cur = nxt;
-      }
-      return out;
-    }, [minD, totD, ppd]);
-    const years = useMemo2(() => {
-      const out = [];
-      const endD = addD(minD, totD);
-      let cur = new Date(pd(minD).getFullYear(), 0, 1);
-      while (fd(cur) <= endD) {
-        const nxt = new Date(cur.getFullYear() + 1, 0, 1);
-        const x0 = dif(minD, fd(cur)) * ppd;
-        const x1 = dif(minD, fd(nxt)) * ppd;
-        out.push({ label: String(cur.getFullYear()), x0, w: x1 - x0 });
-        cur = nxt;
-      }
-      return out;
-    }, [minD, totD, ppd]);
-    const glyphEdges = (t, idx) => {
-      const rowTop = idx * ROW_H;
-      const sX = xOf(t.start), eX = xOf(t.end);
-      if (childParentIds.has(t.id)) {
-        const g2 = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, t.level);
-        return { startX: sX, endX: eX, topY: rowTop + g2.top, botY: rowTop + g2.bot, rowTop };
-      }
-      if (t.duration === 0) {
-        const g2 = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, t.level);
-        return { startX: sX, endX: sX, topY: rowTop + g2.top, botY: rowTop + g2.bot, rowTop };
-      }
-      const lg = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H);
-      return { startX: sX, endX: sX + Math.max(9, eX - sX), topY: rowTop + lg.top, botY: rowTop + lg.bot, rowTop };
-    };
-    const startDateLabelRightX = (t) => {
-      const bl = settings?.barLabels;
-      if (!bl || !bl.left) return null;
-      if (childParentIds.has(t.id)) return null;
-      if (!barLabelText(t, bl.left, bl.year)) return null;
-      return xOf(t.start) - (t.duration === 0 ? 8 : 4);
-    };
-    const depLines = useMemo2(() => {
-      const idxOf = new Map(tasks.map((t, i) => [t.id, i]));
-      const raw = [];
-      tasks.forEach((task) => normPreds(task.predecessors).forEach((p) => {
-        const pred = idxOf.has(p.id) ? tasks[idxOf.get(p.id)] : null;
-        if (!pred) return;
-        if (!pred.start || !pred.end || !task.start || !task.end || isNaN(pd(pred.start)) || isNaN(pd(pred.end)) || isNaN(pd(task.start)) || isNaN(pd(task.end))) return;
-        raw.push({ pred, task, type: (p.type || "FS").toUpperCase() });
-      }));
-      const bySrc = /* @__PURE__ */ new Map();
-      raw.forEach((l) => {
-        const a = bySrc.get(l.pred.id) || [];
-        a.push(l);
-        bySrc.set(l.pred.id, a);
-      });
-      bySrc.forEach((a) => a.sort((x, y) => idxOf.get(x.task.id) - idxOf.get(y.task.id) || (x.type < y.type ? -1 : x.type > y.type ? 1 : 0)));
-      return raw.map((l) => {
-        const group = bySrc.get(l.pred.id);
-        const src = glyphEdges(l.pred, idxOf.get(l.pred.id));
-        const tgt = glyphEdges(l.task, idxOf.get(l.task.id));
-        const a = depAnchors({
-          type: l.type,
-          src,
-          tgt,
-          fanIndex: group.indexOf(l),
-          fanCount: group.length,
-          tgtLabelRightX: l.type === "SS" || l.type === "FS" ? startDateLabelRightX(l.task) : null
-        });
-        return {
-          key: `${l.pred.id}-${l.task.id}-${l.type}`,
-          x1: a.x1,
-          y1: a.y1,
-          x2: a.x2,
-          y2: a.y2,
-          down: a.down,
-          type: l.type,
-          srcIdx: idxOf.get(l.pred.id),
-          tgtIdx: idxOf.get(l.task.id)
-        };
-      });
-    }, [tasks, minD, ppd, childParentIds, settings, ROW_H]);
-    const labelAlign = resolveLabelAlign(proj);
-    const chartL = 0, chartR = Math.max(totalW, 400);
-    const NAME_SIZE = (lvl) => ganttNameSize(GANTT_PROFILES.screen, lvl);
-    const GanttName = ({ task, kind, place, fs }) => {
-      const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
-      return /* @__PURE__ */ React.createElement("span", { "data-gantt-name": task.id, "data-gantt-mode": place.mode, style: {
-        position: "absolute",
-        left: place.x,
-        top: place.y,
-        transform: `translate(${ax}, -50%)`,
-        fontSize: fs,
-        lineHeight: 1.2,
-        fontWeight: ganttNameWeight(task.level, kind, task.bold || task.cellFmt?.name?.bold),
-        fontStyle: task.italic || task.cellFmt?.name?.italic ? "italic" : "normal",
-        textDecoration: task.underline || task.cellFmt?.name?.underline ? "underline" : "none",
-        color: GANTT_INK,
-        fontFamily: "'Inter',system-ui,sans-serif",
-        whiteSpace: "nowrap",
-        pointerEvents: "none",
-        zIndex: 7
-      } }, task.name);
-    };
-    const ganttMemoKey = proj?.id ?? null;
-    React.useLayoutEffect(() => {
-      const el = ref.current;
-      if (!el || ganttMemoKey == null) return;
-      const saved = GANTT_SCROLL_MEMO.get(ganttMemoKey);
-      if (saved != null) {
-        el.scrollTop = saved;
-        setWinTop(rowWindowTop(el.scrollTop));
-      }
-    }, [ganttMemoKey]);
-    const handleScroll = (e) => {
-      if (ganttMemoKey != null) GANTT_SCROLL_MEMO.set(ganttMemoKey, e.currentTarget.scrollTop);
-      setWinTop(rowWindowTop(e.currentTarget.scrollTop));
-      if (onScroll) onScroll(e);
-    };
-    const { startIdx, endIdx } = rowWindow(winTop, ref.current ? ref.current.clientHeight : window.innerHeight, tasks.length);
-    const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
-    const _zoom = (dir) => {
-      if (onZoomChange) onZoomChange(dir > 0 ? Math.min(80, Math.ceil(ppd * 1.35)) : Math.max(1, Math.floor(ppd / 1.35)));
-    };
-    useEffect2(() => {
-      const el = ref.current;
-      if (!el) return;
-      const w = el.clientWidth || 800;
-      el.scrollLeft = Math.max(0, todayX - w * 0.35);
-    }, []);
-    const prevPpdRef = useRef3(ppd);
-    useEffect2(() => {
-      const el = ref.current;
-      if (!el || prevPpdRef.current === ppd) return;
-      const oldPpd = prevPpdRef.current;
-      const centerDayOffset = (el.scrollLeft + el.clientWidth / 2) / oldPpd;
-      el.scrollLeft = Math.max(0, centerDayOffset * ppd - el.clientWidth / 2);
-      prevPpdRef.current = ppd;
-    }, [ppd]);
-    const isPanning = useRef3(false);
-    const panPin = useRef3(null);
-    const panOrigin = useRef3({ x: 0, y: 0, sl: 0, st: 0 });
-    const overscrollY = useRef3(0);
-    const animFrame = useRef3(null);
-    const springBack = () => {
-      const el = ref.current;
-      if (!el) return;
-      const cur = overscrollY.current;
-      if (cur <= 0.5) {
-        overscrollY.current = 0;
-        el.style.transform = "";
-        return;
-      }
-      const next = cur * 0.74;
-      overscrollY.current = next;
-      el.style.transform = `translateY(${next}px)`;
-      animFrame.current = requestAnimationFrame(springBack);
-    };
-    const onPanDown = (e) => {
-      if (e.button !== 0) return;
-      const el = ref.current;
-      if (!el) return;
-      if (animFrame.current) cancelAnimationFrame(animFrame.current);
-      isPanning.current = true;
-      panOrigin.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
-      if (panPin.current) panPin.current();
-      panPin.current = window.pinSchedCursor("grabbing", { onExit: () => {
-        isPanning.current = false;
-        panPin.current = null;
-      } });
-      e.preventDefault();
-    };
-    const onPanMove = (e) => {
-      if (!isPanning.current) return;
-      const el = ref.current;
-      if (!el) return;
-      const rawSL = panOrigin.current.sl - (e.clientX - panOrigin.current.x);
-      const rawST = panOrigin.current.st - (e.clientY - panOrigin.current.y);
-      el.scrollLeft = Math.max(0, rawSL);
-      if (rawST < 0) {
-        el.scrollTop = 0;
-        const pull = -rawST * 0.32;
-        overscrollY.current = pull;
-        el.style.transform = `translateY(${pull}px)`;
-      } else {
-        el.scrollTop = rawST;
-        overscrollY.current = 0;
-        el.style.transform = "";
-      }
-    };
-    const onPanUp = () => {
-      isPanning.current = false;
-      if (panPin.current) {
-        panPin.current();
-        panPin.current = null;
-      }
-      const el = ref.current;
-      if (!el) return;
-      if (overscrollY.current > 0) springBack();
-    };
-    return /* @__PURE__ */ React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref,
-        "data-gantt-scroll": "1",
-        style: { flex: 1, overflow: "auto", background: "var(--bg)", cursor: "grab", zoom: rowZoom, paddingBottom: `calc(var(--fab-dock, 0px) / ${rowZoom})` },
-        onMouseEnter,
-        onScroll: handleScroll,
-        onMouseDown: onPanDown,
-        onMouseMove: onPanMove,
-        onMouseUp: onPanUp,
-        onMouseLeave: onPanUp
-      },
-      /* @__PURE__ */ React.createElement("div", { style: { position: "sticky", top: 0, zIndex: 10, height: TL_H, background: "var(--surf)", borderBottom: "2px solid var(--amber)", width: Math.max(totalW, 400) } }, years.map((y) => /* @__PURE__ */ React.createElement("div", { key: y.label, style: { position: "absolute", left: y.x0, width: y.w, height: 13, top: 0, borderRight: "1px solid var(--bd2)", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "center", padding: "0 6px", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--txt)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".04em", whiteSpace: "nowrap" } }, y.label))), months.map((m) => /* @__PURE__ */ React.createElement("div", { key: m.label + m.x0, style: { position: "absolute", left: m.x0, width: m.w, height: TL_H - 13, top: 13, borderRight: "1px solid var(--bd)", display: "flex", alignItems: "center", padding: "0 4px", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", textTransform: "uppercase", letterSpacing: ".04em", whiteSpace: "nowrap" } }, m.label)))),
-      /* @__PURE__ */ React.createElement(
-        "div",
-        { style: {
-          position: "relative",
-          height: (tasks.length + emptyPad) * ROW_H,
-          width: Math.max(totalW, 400),
-          background: "var(--bg)"
-        } },
-        Array.from({ length: emptyPad }, (_, i) => /* @__PURE__ */ React.createElement("div", { key: `ph${i}`, style: {
-          position: "absolute",
-          top: (tasks.length + i) * ROW_H,
-          left: 0,
-          right: 0,
-          height: ROW_H,
-          borderBottom: "1px solid rgba(0,0,0,0.07)",
-          pointerEvents: "none"
-        } })),
-        /* month lines removed per user preference */
-        false,
-        years.map((y) => /* @__PURE__ */ React.createElement("div", { key: "yl" + y.x0, style: { position: "absolute", left: y.x0, top: 0, bottom: 0, width: 1, background: "rgba(0,0,0,0.07)", zIndex: 2 } })),
-        /* @__PURE__ */ React.createElement("div", { style: {
-          position: "absolute",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 2,
-          background: "#ef4444",
-          opacity: 0.9,
-          zIndex: 4,
-          pointerEvents: "none",
-          transform: `translateX(${todayX}px)`,
-          willChange: "transform"
-        } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: -1, background: "#ef4444", borderRadius: "0 2px 2px 0", padding: "1px 4px", whiteSpace: "nowrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, color: "#fff", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", fontWeight: 700 } }, "TODAY"))),
-        /* @__PURE__ */ React.createElement("svg", { style: { position: "absolute", top: 0, left: 0, width: totalW, height: tasks.length * ROW_H, pointerEvents: "none", zIndex: 3, overflow: "visible" } }, depLines.filter((l) => l.srcIdx >= startIdx && l.srcIdx < endIdx && l.tgtIdx >= startIdx && l.tgtIdx < endIdx).map((l) => {
-          const color = l.type === "SS" ? "#7c3aed" : l.type === "FF" ? "#0891b2" : l.type === "SF" ? "#be185d" : "#0969da";
-          const dx = l.x2 - l.x1, dy = l.y2 - l.y1;
-          const vh2 = Math.max(6, Math.min(28, Math.abs(dy) * 0.5));
-          const vSign = l.down ? 1 : -1;
-          const c1x = l.x1 + dx * 0.25, c1y = l.y1 + vSign * vh2;
-          const c2x = l.x2 - dx * 0.25, c2y = l.y2 - vSign * vh2;
-          const ex = l.x2 - c2x, ey = l.y2 - c2y, el = Math.hypot(ex, ey) || 1, ux = ex / el, uy = ey / el;
-          const a1x = l.x2 - ux * 6 - uy * 3, a1y = l.y2 - uy * 6 + ux * 3, a2x = l.x2 - ux * 6 + uy * 3, a2y = l.y2 - uy * 6 - ux * 3;
-          return /* @__PURE__ */ React.createElement("g", { key: l.key }, /* @__PURE__ */ React.createElement(
-            "path",
-            {
-              d: `M${l.x1},${l.y1} C${c1x},${c1y} ${c2x},${c2y} ${l.x2},${l.y2}`,
-              stroke: color,
-              strokeWidth: "1.2",
-              fill: "none",
-              strokeDasharray: "4 3",
-              opacity: ".55"
-            }
-          ), /* @__PURE__ */ React.createElement("path", { d: `M${l.x2},${l.y2} L${a1x},${a1y} L${a2x},${a2y}Z`, fill: color, opacity: ".55" }));
-        })),
-        tasks.slice(startIdx, endIdx).map((task, i) => {
-          const ri = startIdx + i;
-          const isBlankDates = !task.start || !task.end;
-          const bx = isBlankDates ? 0 : xOf(task.start);
-          const bw = isBlankDates ? 0 : Math.max(6, xOf(task.end) - bx);
-          const isSummary = childParentIds.has(task.id);
-          const isMilestone = task.duration === 0;
-          const _isCollapsed = isSummary && !task.isExpanded;
-          const isExpandedParent = isSummary && task.isExpanded;
-          const displayHealth2 = isSummary ? rolledHealthMap?.[task.id] || task.health : computeDisplayHealth(task, settings, taskById);
-          const _h = HEALTH[displayHealth2] || HEALTH["gray"];
-          const rowBg = task.rowColor || (isExpandedParent ? ri % 2 ? "#f8fafc" : "var(--bg)" : displayHealth2 === "red" ? "#ffdfdf" : displayHealth2 === "yellow" ? "#fff7b9" : displayHealth2 === "green" ? "#d6fae2" : displayHealth2 === "paused" ? "#f3f4f6" : ri % 2 ? "#f8fafc" : "var(--bg)");
-          const isGanttSel = selectedId === task.id;
-          const LEAF_H = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).h;
-          if (isBlankDates) {
-            return /* @__PURE__ */ React.createElement(
-              "div",
-              {
-                key: task.id,
-                "data-gantt-row": task.id,
-                onClick: () => setSelectedId?.(task.id),
-                style: {
-                  position: "absolute",
-                  top: ri * ROW_H,
-                  left: 0,
-                  right: 0,
-                  height: ROW_H,
-                  display: "flex",
-                  alignItems: "center",
-                  borderBottom: "1px solid rgba(0,0,0,0.1)",
-                  borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent",
-                  background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg
-                }
-              },
-              /* @__PURE__ */ React.createElement("span", { style: {
-                position: "sticky",
-                left: 8,
-                display: "inline-flex",
-                alignItems: "center",
-                height: 14,
-                padding: "0 6px",
-                fontSize: 8,
-                fontWeight: 600,
-                letterSpacing: ".05em",
-                textTransform: "uppercase",
-                color: "#6b7280",
-                background: "var(--bg)",
-                border: "1px dashed #cbd5e1",
-                borderRadius: 7,
-                whiteSpace: "nowrap",
-                pointerEvents: "none",
-                fontFamily: "'Inter',system-ui,sans-serif"
-              } }, "Unscheduled")
-            );
-          }
-          return /* @__PURE__ */ React.createElement("div", { key: task.id, "data-gantt-row": task.id, onClick: () => setSelectedId?.(task.id), style: { position: "absolute", top: ri * ROW_H, left: 0, right: 0, height: ROW_H, borderBottom: "1px solid rgba(0,0,0,0.1)", borderLeft: isGanttSel ? "3px solid var(--blue)" : "3px solid transparent", background: isGanttSel ? task.rowColor || "#eff6ff" : rowBg } }, isMilestone && !isSummary ? /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
-            const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level);
-            const fs = fitCaptionFs(NAME_SIZE(task.level), mg.top);
-            const place = placeGanttLabel({
-              kind: "milestone",
-              align: labelAlign,
-              bx,
-              bw: 0,
-              rowTop: 0,
-              barTopY: mg.top,
-              labelW: estLabelWidth(task.name, fs),
-              chartL,
-              chartR,
-              capHalf: ganttCaptionHalf(fs),
-              rowH: ROW_H
-            });
-            return /* @__PURE__ */ React.createElement(GanttName, { task, kind: "milestone", place, fs });
-          })(), (() => {
-            const hue = "#94a3b8";
-            const done = displayHealth2 === "green" || isCompleteTask(task);
-            const mg = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level), side = mg.half * Math.SQRT2;
-            return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { position: "absolute", left: bx - side / 2, top: mg.cy - side / 2, width: side, height: side, transform: "rotate(45deg)", background: done ? hue : "#fff", border: "1.25px solid #475569", boxSizing: "border-box", zIndex: 5 } });
-          })(), (() => {
-            const bl = settings?.barLabels;
-            if (!bl) return null;
-            const L = barLabelText(task, bl.left, bl.year), R = barLabelText(task, bl.right, bl.year);
-            const mlTop = ganttMilestoneGeom(GANTT_PROFILES.screen, ROW_H, task.level).cy - 4.8;
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, L && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx - 8, transform: "translateX(-100%)", top: mlTop, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, L), R && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx + 8, top: mlTop, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, R));
-          })()) : isSummary ? (() => {
-            const d = Math.min(task.level || 0, 3);
-            const col = ["#2B3340", "#46506A", "#6E7790", "#8A93A8"][d];
-            const sg = ganttSummaryGeom(GANTT_PROFILES.screen, ROW_H, task.level);
-            const SPAN = sg.span, LEG = sg.leg, spanTop = sg.top;
-            const legW = 1.5;
-            const fs = fitCaptionFs(NAME_SIZE(task.level), spanTop);
-            const place = placeGanttLabel({
-              kind: "summary",
-              align: labelAlign,
-              bx,
-              bw,
-              rowTop: 0,
-              barTopY: spanTop,
-              labelW: estLabelWidth(task.name, fs),
-              chartL,
-              chartR,
-              capHalf: ganttCaptionHalf(fs),
-              rowH: ROW_H
-            });
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(GanttName, { task, kind: "summary", place, fs }), /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, "data-gantt-kind": "summary", style: { position: "absolute", left: bx, width: bw, top: spanTop, height: SPAN + LEG, zIndex: 5, pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, right: 0, top: 0, height: SPAN, background: col, borderRadius: 1 } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: 0, top: 0, width: legW, height: SPAN + LEG, background: col } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", right: 0, top: 0, width: legW, height: SPAN + LEG, background: col } })));
-          })() : /* @__PURE__ */ React.createElement(React.Fragment, null, (() => {
-            const barTopY = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
-            const fs = fitCaptionFs(NAME_SIZE(task.level), barTopY);
-            const place = placeGanttLabel({
-              kind: "leaf",
-              align: labelAlign,
-              bx,
-              bw,
-              rowTop: 0,
-              barTopY,
-              labelW: estLabelWidth(task.name, fs),
-              chartL,
-              chartR,
-              capHalf: ganttCaptionHalf(fs),
-              rowH: ROW_H
-            });
-            return /* @__PURE__ */ React.createElement(GanttName, { task, kind: "leaf", place, fs });
-          })(), (() => {
-            const bl = settings?.barLabels;
-            if (!bl) return null;
-            const L = barLabelText(task, bl.left, bl.year), R = barLabelText(task, bl.right, bl.year);
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, L && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx - 4, transform: "translateX(-100%)", top: ROW_H - 11.5, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, L), R && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: bx + bw + 4, top: ROW_H - 11.5, fontSize: 8, color: "#6b7280", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 6, fontFamily: "'Inter',system-ui,sans-serif" } }, R));
-          })(), (() => {
-            const hue = "#94a3b8";
-            const EDGE = "#475569";
-            const pct = displayHealth2 === "green" ? 100 : leafPercent(task);
-            const top = ganttLeafGeom(GANTT_PROFILES.screen, ROW_H).top;
-            const barW = Math.max(bw, 9);
-            const base = { position: "absolute", left: bx, top, height: LEAF_H, width: barW, zIndex: 5, borderRadius: LEAF_H / 2, boxSizing: "border-box" };
-            if (pct >= 100)
-              return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: hue, border: `1px solid ${EDGE}` } });
-            if (pct <= 0)
-              return /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: "var(--bg)", border: `1.5px solid ${EDGE}` } });
-            return (
-              // In progress → partial fill
-              /* @__PURE__ */ React.createElement("div", { "data-gantt-bar": task.id, style: { ...base, background: "var(--bg)", border: `1px solid ${EDGE}`, overflow: "hidden", display: "flex", alignItems: "stretch" } }, /* @__PURE__ */ React.createElement("div", { style: { width: `${pct}%`, background: hue, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, background: hue, opacity: 0.22 } }))
-            );
-          })()));
-        })
-      )
-    ));
-  }
   var MB_WD = [{ v: 0, l: "Sun" }, { v: 1, l: "Mon" }, { v: 2, l: "Tue" }, { v: 3, l: "Wed" }, { v: 4, l: "Thu" }, { v: 5, l: "Fri" }, { v: 6, l: "Sat" }];
   var MB_POSITIONS = [{ v: 1, l: "1st" }, { v: 2, l: "2nd" }, { v: 3, l: "3rd" }, { v: 4, l: "4th" }, { v: 5, l: "5th" }, { v: -2, l: "2nd-to-last" }, { v: -1, l: "Last" }];
   var MB_MONTHS = [{ v: 1, l: "Jan" }, { v: 2, l: "Feb" }, { v: 3, l: "Mar" }, { v: 4, l: "Apr" }, { v: 5, l: "May" }, { v: 6, l: "Jun" }, { v: 7, l: "Jul" }, { v: 8, l: "Aug" }, { v: 9, l: "Sep" }, { v: 10, l: "Oct" }, { v: 11, l: "Nov" }, { v: 12, l: "Dec" }];
@@ -18600,10 +19559,10 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   };
   var MB_ACTIVE_POPOVER_CLOSE = null;
   function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
-    const [open, setOpen] = useState3(false);
-    const btnRef = useRef3(null), popRef = useRef3(null);
+    const [open, setOpen] = useState4(false);
+    const btnRef = useRef4(null), popRef = useRef4(null);
     const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const close = () => setOpen(false);
       MB_ACTIVE_POPOVER_CLOSE = close;
@@ -18671,7 +19630,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ));
   }
   function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
-    const [picked, setPicked] = useState3(() => /* @__PURE__ */ new Set());
+    const [picked, setPicked] = useState4(() => /* @__PURE__ */ new Set());
     const toggle = (key) => setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -18703,13 +19662,13 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
     const initial = Array.isArray(bodies) ? bodies : [];
-    const [draft, setDraft] = useState3(() => JSON.parse(JSON.stringify(initial)));
-    const savedRef = useRef3(JSON.stringify(initial));
-    const [savedFlash, setSavedFlash] = useState3(false);
-    const [confirmClose, setConfirmClose] = useState3(false);
+    const [draft, setDraft] = useState4(() => JSON.parse(JSON.stringify(initial)));
+    const savedRef = useRef4(JSON.stringify(initial));
+    const [savedFlash, setSavedFlash] = useState4(false);
+    const [confirmClose, setConfirmClose] = useState4(false);
     const list = draft;
     const dirty = JSON.stringify(draft) !== savedRef.current;
-    const [selId, setSelId] = useState3(() => list[0] && list[0].id || null);
+    const [selId, setSelId] = useState4(() => list[0] && list[0].id || null);
     const sel = list.find((b) => b.id === selId) || null;
     const save = () => {
       onChange(JSON.parse(JSON.stringify(draft)));
@@ -18721,9 +19680,9 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       if (dirty) setConfirmClose(true);
       else onClose();
     };
-    const backdropRef = useRef3(null);
-    const downOnBackdropRef = useRef3(false);
-    useEffect2(() => {
+    const backdropRef = useRef4(null);
+    const downOnBackdropRef = useRef4(false);
+    useEffect3(() => {
       const onKey = (e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
@@ -18754,7 +19713,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       setDraft((prev) => prev.filter((b) => b.id !== id));
       if (selId === id) setSelId(rest[0] && rest[0].id || null);
     };
-    const [importOpen, setImportOpen] = useState3(false);
+    const [importOpen, setImportOpen] = useState4(false);
     const importBodies = (sourceBodies) => {
       const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
       setDraft(next);
@@ -18886,16 +19845,16 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return { ...d, settings: { ...d.settings, holidays }, projects: newProjects };
     });
     const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter((t) => t.pinnedStart).length, 0);
-    const [open, setOpen] = useState3(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
+    const [open, setOpen] = useState4(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
     const tog = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
-    useEffect2(() => {
+    useEffect3(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
       document.addEventListener("keydown", onKey);
       return () => document.removeEventListener("keydown", onKey);
     }, [onClose]);
-    useEffect2(() => {
+    useEffect3(() => {
       if (!initialSection) return;
       const el = document.querySelector(`[data-section="${initialSection}"]`);
       if (el) el.scrollIntoView({ block: "start" });
@@ -19119,7 +20078,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   function FormatPanel({ data, setData, onClose }) {
     const s = data.settings || {};
     const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    useEffect2(() => {
+    useEffect3(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
@@ -19207,11 +20166,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 6, lineHeight: 1.4 } }, "Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.")));
   }
   function RuleColorPicker({ value, onChange }) {
-    const [open, setOpen] = useState3(false);
-    const dotRef = useRef3(null);
-    const menuRef = useRef3(null);
+    const [open, setOpen] = useState4(false);
+    const dotRef = useRef4(null);
+    const menuRef = useRef4(null);
     const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.right - 110 }), () => setOpen(false));
-    useEffect2(() => {
+    useEffect3(() => {
       if (!open) return;
       const onDown = (e) => {
         if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
@@ -19483,24 +20442,24 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function DesktopSplitView(props) {
     const settings = props.data?.settings || DEFAULT_SETTINGS;
-    const gridRef = useRef3(null);
-    const ganttRef = useRef3(null);
-    const [split, setSplit] = useState3(() => settings.defaultSplit || 60);
-    const containerRef = useRef3(null);
-    const divDragging = useRef3(false);
-    const [snapMode, setSnapMode] = useState3(() => settings.snapDefault !== false);
-    const [dragging, setDragging] = useState3(false);
-    const [_hintY, setHintY] = useState3(0);
-    const snapModeRef = useRef3(settings.snapDefault !== false);
-    useEffect2(() => {
+    const gridRef = useRef4(null);
+    const ganttRef = useRef4(null);
+    const [split, setSplit] = useState4(() => settings.defaultSplit || 60);
+    const containerRef = useRef4(null);
+    const divDragging = useRef4(false);
+    const [snapMode, setSnapMode] = useState4(() => settings.snapDefault !== false);
+    const [dragging, setDragging] = useState4(false);
+    const [_hintY, setHintY] = useState4(0);
+    const snapModeRef = useRef4(settings.snapDefault !== false);
+    useEffect3(() => {
       snapModeRef.current = snapMode;
     }, [snapMode]);
-    useEffect2(() => {
+    useEffect3(() => {
       const v = settings.snapDefault !== false;
       setSnapMode(v);
       snapModeRef.current = v;
     }, [settings.snapDefault]);
-    const echo = useRef3({ grid: null, gantt: null });
+    const echo = useRef4({ grid: null, gantt: null });
     const sync = (src) => (e) => {
       const st = e.currentTarget.scrollTop, dst = src === "grid" ? "gantt" : "grid";
       if (echo.current[src] === st) {
@@ -19519,7 +20478,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         }));
       }
     };
-    const liveColWidths = useRef3(null);
+    const liveColWidths = useRef4(null);
     const onDividerDown = (e) => {
       e.preventDefault();
       divDragging.current = true;
@@ -19629,909 +20588,6 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "hidden", display: "flex" } }, /* @__PURE__ */ React.createElement(GanttView, { tasks: props.tasks, updateTask: props.updateTask, pxPerDay: props.ganttPPD, onZoomChange: props.setGanttPPD, scrollRef: ganttRef, onScroll: sync("gantt"), rolledHealthMap: props.rolledHealthMap, proj: props.proj, onMouseEnter: () => props.setHoverZone?.("gantt"), selectedId: props.selectedId, setSelectedId: props.setSelectedId, settings: props.data?.settings, rowZoom: props.gridZoom || 1 })));
   }
   installProjectOrderListener();
-  var PAGE_SIZES = {
-    letter: { label: "Letter (8.5 × 11 in)", w: 8.5, h: 11, css: "letter", short: "Letter" },
-    legal: { label: "Legal (8.5 × 14 in)", w: 8.5, h: 14, css: "legal", short: "Legal" },
-    tabloid: { label: "Tabloid (11 × 17 in)", w: 11, h: 17, css: "11in 17in", short: "11×17" },
-    a4: { label: "A4 (8.27 × 11.69 in)", w: 8.27, h: 11.69, css: "A4", short: "A4" }
-  };
-  function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
-    const noLabels = !!opts.noLabels;
-    const ROW_H2 = 18, LABEL_W = noLabels ? 0 : orientation === "landscape" ? 200 : 155;
-    const ganttW = svgWidth - LABEL_W;
-    const PP = GANTT_PROFILES.print;
-    const leafBand = (yTop) => {
-      const g2 = ganttLeafGeom(PP, ROW_H2), top = yTop + g2.top;
-      return { top, bot: top + g2.h, mid: top + g2.h / 2, h: g2.h };
-    };
-    const mileBand = (yTop, depth) => {
-      const g2 = ganttMilestoneGeom(PP, ROW_H2, depth);
-      return { top: yTop + g2.top, bot: yTop + g2.bot, mid: yTop + g2.cy, half: g2.half };
-    };
-    const summaryBand = (yTop, depth) => {
-      const g2 = ganttSummaryGeom(PP, ROW_H2, depth);
-      return { top: yTop + g2.top, bot: yTop + g2.bot, mid: yTop + g2.mid, SPAN: g2.span, LEG: g2.leg };
-    };
-    const pd2 = (s) => /* @__PURE__ */ new Date(s + "T12:00:00"), fd2 = (d) => d.toISOString().slice(0, 10);
-    const allTasks = projects.flatMap((p) => p.tasks);
-    if (!allTasks.length) return "";
-    const dates = allTasks.flatMap((t) => [t.start, t.end]).filter((d) => d && !isNaN(pd2(d))).sort();
-    if (!dates.length) return "";
-    const minD = dates[0], maxD = dates[dates.length - 1];
-    const DAY = 864e5;
-    const addDays = (s, n) => fd2(new Date(pd2(s).getTime() + Math.round(n) * DAY));
-    const getDepth = (tasks, id) => {
-      let dep = 0, t = tasks.find((x) => x.id === id);
-      while (t && t.parentId !== null) {
-        dep++;
-        t = tasks.find((x) => x.id === t.parentId);
-      }
-      return Math.min(dep, 3);
-    };
-    let winStart, winEnd, totalDays, ppd;
-    {
-      const td0 = Math.max(1, Math.ceil((pd2(maxD) - pd2(minD)) / DAY) + 2), ppd0 = ganttW / td0;
-      const xo0 = (d) => LABEL_W + Math.round((pd2(d) - pd2(minD)) / DAY * ppd0);
-      let leadPx = 0, trailPx = 0;
-      try {
-        allTasks.forEach((t) => {
-          if (!t || !t.start || !t.end || isNaN(pd2(t.start)) || isNaN(pd2(t.end))) return;
-          const proj = projects.find((p) => p.tasks.some((x) => x.id === t.id));
-          const depth = proj ? getDepth(proj.tasks, t.id) : 0;
-          const isMile = t.duration === 0, isParent = proj ? proj.tasks.some((x) => x.parentId === t.id) : false;
-          if (opts.barNames === false) return;
-          const bx = xo0(t.start), bw = Math.max(3, Math.round((pd2(t.end) - pd2(t.start)) / DAY * ppd0));
-          const kind = isMile ? "milestone" : isParent ? "summary" : "leaf";
-          const align = opts.labelAlign || resolveLabelAlign(proj);
-          const fs = ganttNameSize(GANTT_PROFILES.print, depth);
-          const nm = t.name == null ? "" : String(t.name), lw = estLabelWidth(nm, fs);
-          const place = placeGanttLabel({
-            kind,
-            align,
-            bx,
-            bw: isMile ? 0 : bw,
-            rowTop: 0,
-            barTopY: 0,
-            labelW: lw,
-            chartL: -1e9,
-            chartR: 1e9,
-            capHalf: ganttCaptionHalf(fs)
-          });
-          const x0 = place.anchor === "start" ? place.x : place.anchor === "middle" ? place.x - lw / 2 : place.x - lw, x1 = x0 + lw;
-          if (LABEL_W - x0 > leadPx) leadPx = LABEL_W - x0;
-          if (x1 - svgWidth > trailPx) trailPx = x1 - svgWidth;
-        });
-      } catch (_) {
-        leadPx = 0;
-        trailPx = 0;
-      }
-      const cap = Math.max(8, Math.ceil(td0 * 0.22));
-      const leadD = Math.min(cap, Math.max(0, Math.ceil((leadPx + 4) / ppd0))), trailD = Math.min(cap, Math.max(0, Math.ceil((trailPx + 4) / ppd0)));
-      const afStart = addDays(minD, -leadD), afEnd = addDays(maxD, trailD + 2);
-      const afDays = Math.max(1, Math.ceil((pd2(afEnd) - pd2(afStart)) / DAY));
-      const PPU = { days: 14, weeks: 3.7, months: 1.5, quarters: 0.57 };
-      const mul = typeof opts.zoomMul === "number" && opts.zoomMul > 0 ? opts.zoomMul : 1;
-      let vis = opts.timeUnit && PPU[opts.timeUnit] ? ganttW / PPU[opts.timeUnit] : afDays;
-      vis = Math.max(3, Math.min(vis / mul, afDays * 16));
-      const panFrac = typeof opts.panFrac === "number" ? opts.panFrac : 0;
-      const scroll = afDays - vis;
-      const todayDays = (pd2(fdLocal(/* @__PURE__ */ new Date())) - pd2(afStart)) / DAY;
-      const todayFrac = scroll > 0 ? Math.max(0, Math.min(1, (todayDays - vis / 2) / scroll)) : 0;
-      const eff = Math.max(0, Math.min(1, todayFrac + panFrac));
-      const start = scroll > 0 ? addDays(afStart, Math.round(eff * scroll)) : addDays(afStart, Math.round(scroll / 2));
-      winStart = start;
-      winEnd = addDays(start, vis);
-      totalDays = Math.max(1, vis);
-      ppd = ganttW / totalDays;
-    }
-    const xOf = (d) => LABEL_W + Math.round((pd2(d) - pd2(winStart)) / DAY * ppd);
-    const months = [], cur2 = new Date(pd2(winStart));
-    cur2.setDate(1);
-    let _mGuard = 12e3;
-    while (cur2 <= pd2(winEnd) && _mGuard-- > 0) {
-      months.push({
-        x: xOf(fd2(cur2)),
-        mo: cur2.getMonth(),
-        yr: cur2.getFullYear(),
-        label: cur2.toLocaleDateString("en-US", { month: "short" })
-      });
-      cur2.setMonth(cur2.getMonth() + 1);
-    }
-    months.forEach((m, i) => {
-      m.x1 = months[i + 1] ? months[i + 1].x : svgWidth;
-      m.cx = (m.x + m.x1) / 2;
-    });
-    const yearSpans = [];
-    months.forEach((m) => {
-      const last = yearSpans[yearSpans.length - 1];
-      if (last && last.yr === m.yr) last.x1 = m.x1;
-      else yearSpans.push({ yr: m.yr, x0: m.x, x1: m.x1 });
-    });
-    yearSpans.forEach((y) => y.cx = (y.x0 + y.x1) / 2);
-    const monthPx = ppd * 30.4;
-    const monLabel = (m) => monthPx >= 30 ? m.label : m.label[0];
-    const visibleMonths = monthPx >= 22 ? months : monthPx >= 12 ? months.filter((m) => m.mo % 2 === 0) : monthPx >= 6 ? months.filter((m) => [0, 3, 6, 9].includes(m.mo)) : months.filter((m) => m.mo === 0);
-    const YEAR_TIER = 14, MON_TIER = 16, HEADER_H = YEAR_TIER + MON_TIER, svgH = HEADER_H + ROW_H2 * allTasks.length;
-    const rowBands = [], barLayer = [], labelLayer = [], nameRecords = [];
-    allTasks.forEach((t, i) => {
-      const y = HEADER_H + i * ROW_H2, bg = i % 2 ? "#f6f6f6" : "#fff";
-      const blank = !t.start || !t.end || isNaN(pd2(t.start)) || isNaN(pd2(t.end));
-      const bx = xOf(t.start), bw = Math.max(3, Math.round((pd2(t.end) - pd2(t.start)) / 864e5 * ppd));
-      const isMilestone = t.duration === 0;
-      const proj = projects.find((p) => p.tasks.some((x) => x.id === t.id));
-      const depth = proj ? getDepth(proj.tasks, t.id) : 0;
-      const isParent = proj ? proj.tasks.some((x) => x.parentId === t.id) : false;
-      const labelHtml = noLabels ? "" : (() => {
-        const indent = depth * 8, nameX = 4 + indent;
-        const maxCh = Math.floor((LABEL_W - nameX - 4) / 5.2);
-        const nm = t.name == null ? "" : String(t.name);
-        const nameStr = nm.length > maxCh ? nm.slice(0, maxCh - 1) + "…" : nm;
-        const fw = depth === 0 ? "bold" : depth === 1 ? "600" : "normal", fs = depth === 0 ? 9 : depth === 1 ? 8.5 : 8;
-        return `<text x="${nameX}" y="${y + ROW_H2 * 0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>`;
-      })();
-      const _barY = y + ROW_H2 * 0.22, _barH = ROW_H2 * 0.55, _midY = y + ROW_H2 * 0.5;
-      let blText = "";
-      if (opts.barLabels && !isParent && !blank) {
-        const L = barLabelText(t, opts.barLabels.left, opts.barLabels.year), R = barLabelText(t, opts.barLabels.right, opts.barLabels.year);
-        const lx = isMilestone ? bx - 8 : bx - 3, rx = isMilestone ? bx + 8 : bx + bw + 3;
-        if (L) blText += `<text x="${lx}" y="${y + ROW_H2 * 0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`;
-        if (R) blText += `<text x="${rx}" y="${y + ROW_H2 * 0.68}" font-size="6.5" fill="#555" font-family="Arial,sans-serif">${escapeHtml(R)}</text>`;
-      }
-      const GRAY = "#94a3b8";
-      const pct = leafPercent(t);
-      let barSvg;
-      if (blank) {
-        barSvg = "";
-      } else if (isParent) {
-        const dd = Math.min(depth, 3);
-        const NAVY = ["#2B3340", "#46506A", "#6E7790", "#8A93A8"][dd];
-        const legW = 1.1, sb = summaryBand(y, depth), SPAN = sb.SPAN, LEG = sb.LEG, sTop = sb.top;
-        barSvg = `<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/><rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN + LEG}" fill="${NAVY}"/><rect x="${bx + bw - legW}" y="${sTop}" width="${legW}" height="${SPAN + LEG}" fill="${NAVY}"/>`;
-      } else if (isMilestone) {
-        const done = pct >= 100, mb = mileBand(y, depth), h = mb.half;
-        barSvg = `<polygon points="${bx},${mb.top} ${bx + h},${mb.mid} ${bx},${mb.bot} ${bx - h},${mb.mid}" fill="${done ? GRAY : "#fff"}" stroke="${GRAY}" stroke-width="1.1"/>`;
-      } else {
-        const lb = leafBand(y), LH = lb.h, by = lb.top, bw2 = Math.max(bw, 5), r = LH / 2;
-        if (pct >= 100) {
-          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}"/>`;
-        } else if (pct <= 0) {
-          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="#fff" stroke="${GRAY}" stroke-width="1.1"/>`;
-        } else {
-          const fw = Math.max(0.5, Math.min(bw2, bw2 * pct / 100));
-          barSvg = `<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}" opacity="0.18"/><rect x="${bx}" y="${by}" width="${fw}" height="${LH}" rx="${r}" fill="${GRAY}"/><rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
-        }
-      }
-      const nameInView = !blank && (isMilestone ? bx >= LABEL_W - 2 && bx <= svgWidth + 2 : bx + bw >= LABEL_W - 2 && bx <= svgWidth + 2);
-      if (opts.barNames !== false && nameInView) {
-        const kind = isMilestone ? "milestone" : isParent ? "summary" : "leaf";
-        const align = opts.labelAlign || resolveLabelAlign(proj);
-        const band = isMilestone ? mileBand(y, depth) : isParent ? summaryBand(y, depth) : leafBand(y);
-        const barTopY = band.top, bwN = isMilestone ? 0 : bw;
-        const fs = fitCaptionFs(ganttNameSize(PP, depth), barTopY - y);
-        const nm = t.name == null ? "" : String(t.name);
-        const lw = estLabelWidth(nm, fs);
-        const place = placeGanttLabel({
-          kind,
-          align,
-          bx,
-          bw: bwN,
-          rowTop: y,
-          barTopY,
-          labelW: lw,
-          chartL: LABEL_W,
-          chartR: svgWidth,
-          capHalf: ganttCaptionHalf(fs),
-          rowH: ROW_H2
-        });
-        nameRecords.push({
-          x: place.x,
-          y: place.y,
-          anchor: place.anchor,
-          mode: place.mode,
-          lw,
-          fs,
-          weight: ganttNameWeight(depth, kind, t.bold || t.cellFmt?.name?.bold),
-          italic: !!(t.italic || t.cellFmt?.name?.italic),
-          underline: !!(t.underline || t.cellFmt?.name?.underline),
-          str: escapeHtml(nm)
-        });
-      }
-      const unsched = blank ? `<text x="${LABEL_W + 6}" y="${y + ROW_H2 * 0.68}" font-size="7.5" fill="#9aa0a6" font-style="italic" font-family="Arial,sans-serif">Unscheduled</text>` : "";
-      rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H2}" fill="${bg}"/>`);
-      barLayer.push(barSvg);
-      labelLayer.push(`${labelHtml}${blText}${unsched}`);
-    });
-    let arrows = "";
-    if (opts.showArrows !== false) {
-      const DEP_C = { FS: "#0969da", SS: "#7c3aed", FF: "#0891b2", SF: "#be185d" };
-      let base = 0;
-      for (const p of projects) {
-        const ix = /* @__PURE__ */ new Map();
-        p.tasks.forEach((t, i) => ix.set(t.id, base + i));
-        const isParentTask = (task) => p.tasks.some((x) => x.parentId === task.id);
-        const glyphEdges = (task, gidx) => {
-          const yTop = HEADER_H + gidx * ROW_H2, sX = xOf(task.start), eX = xOf(task.end);
-          if (isParentTask(task)) {
-            const b2 = summaryBand(yTop, getDepth(p.tasks, task.id));
-            return { startX: sX, endX: eX, topY: b2.top, botY: b2.bot, rowTop: yTop };
-          }
-          if (task.duration === 0) {
-            const b2 = mileBand(yTop, getDepth(p.tasks, task.id));
-            return { startX: sX, endX: sX, topY: b2.top, botY: b2.bot, rowTop: yTop };
-          }
-          const b = leafBand(yTop);
-          return { startX: sX, endX: Math.max(eX, sX + 5), topY: b.top, botY: b.bot, rowTop: yTop };
-        };
-        const startLabelRightX = (task) => {
-          if (!opts.barLabels || isParentTask(task) || !opts.barLabels.left) return null;
-          if (!barLabelText(task, opts.barLabels.left, opts.barLabels.year)) return null;
-          return xOf(task.start) - (task.duration === 0 ? 8 : 3);
-        };
-        const raw = [];
-        for (const t of p.tasks) {
-          for (const pr of normPreds(t.predecessors)) {
-            if (!ix.has(pr.id)) continue;
-            const pt = p.tasks[ix.get(pr.id) - base];
-            if (!pt || !pt.start || !pt.end || !t.start || !t.end || isNaN(pd2(pt.start)) || isNaN(pd2(pt.end)) || isNaN(pd2(t.start)) || isNaN(pd2(t.end))) continue;
-            if (ix.get(pr.id) === ix.get(t.id)) continue;
-            raw.push({ pt, t, type: (pr.type || "FS").toUpperCase() });
-          }
-        }
-        const bySrc = /* @__PURE__ */ new Map();
-        raw.forEach((l) => {
-          const a = bySrc.get(l.pt.id) || [];
-          a.push(l);
-          bySrc.set(l.pt.id, a);
-        });
-        bySrc.forEach((a) => a.sort((x, y) => ix.get(x.t.id) - ix.get(y.t.id) || (x.type < y.type ? -1 : x.type > y.type ? 1 : 0)));
-        for (const l of raw) {
-          const group = bySrc.get(l.pt.id);
-          const src = glyphEdges(l.pt, ix.get(l.pt.id)), tgt = glyphEdges(l.t, ix.get(l.t.id));
-          const a = depAnchors({
-            type: l.type,
-            src,
-            tgt,
-            fanIndex: group.indexOf(l),
-            fanCount: group.length,
-            tgtLabelRightX: l.type === "SS" || l.type === "FS" ? startLabelRightX(l.t) : null
-          });
-          const sx = a.x1, sBot = a.y1, tx = a.x2, tTop = a.y2, vSign = a.down ? 1 : -1;
-          const dx = tx - sx, dy = tTop - sBot, vh = Math.max(6, Math.min(26, Math.abs(dy) * 0.5));
-          const c1x = sx + dx * 0.3, c1y = sBot + vSign * vh;
-          const c2x = tx - dx * 0.3, c2y = tTop - vSign * vh;
-          const ex = tx - c2x, ey = tTop - c2y, el = Math.hypot(ex, ey) || 1, ux = ex / el, uy = ey / el;
-          const a1x = tx - ux * 6 - uy * 3, a1y = tTop - uy * 6 + ux * 3, a2x = tx - ux * 6 + uy * 3, a2y = tTop - uy * 6 - ux * 3;
-          const color = DEP_C[l.type] || DEP_C.FS;
-          arrows += `<path class="dep" d="M${sx.toFixed(1)},${sBot.toFixed(1)} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${tx.toFixed(1)},${tTop.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/><path d="M${tx.toFixed(1)},${tTop.toFixed(1)} L${a1x.toFixed(1)},${a1y.toFixed(1)} L${a2x.toFixed(1)},${a2y.toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
-        }
-        base += p.tasks.length;
-      }
-    }
-    const gridRules = months.map((m) => {
-      if (m.mo === 0) return `<line x1="${m.x}" y1="0" x2="${m.x}" y2="${svgH}" stroke="#8b95a3" stroke-width="1.3"/>`;
-      if (m.mo % 3 === 0) return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#c2c9d2" stroke-width="0.8"/>`;
-      return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#e7ebf0" stroke-width="0.4"/>`;
-    }).join("");
-    const leftEdge = `<line x1="${LABEL_W}" y1="0" x2="${LABEL_W}" y2="${svgH}" stroke="#c4c8ce" stroke-width="0.8"/>`;
-    const todayStr = fdLocal(/* @__PURE__ */ new Date());
-    const todayLine = opts.showToday !== false && todayStr >= winStart && todayStr <= winEnd ? `<line x1="${xOf(todayStr)}" y1="${HEADER_H}" x2="${xOf(todayStr)}" y2="${svgH}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2"/>
-<polygon points="${xOf(todayStr) - 3.5},${HEADER_H - 5} ${xOf(todayStr) + 3.5},${HEADER_H - 5} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>` : "";
-    const headerBg = `<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${HEADER_H}" fill="#f6f8fa"/><rect x="${LABEL_W}" y="0" width="${ganttW}" height="${YEAR_TIER}" fill="#e9edf2"/>`;
-    const yearLabels = yearSpans.map((y) => `<text x="${y.cx}" y="${YEAR_TIER - 3.5}" font-size="9.5" font-weight="700" fill="#3a4452" font-family="Arial,sans-serif" text-anchor="middle" letter-spacing="0.6">${y.yr}</text>`).join("");
-    const monthLabels = visibleMonths.map((m) => {
-      const strong = m.mo % 3 === 0;
-      return `<text x="${m.cx}" y="${HEADER_H - 5}" font-size="7.5" font-weight="${strong ? 700 : 500}" fill="${strong ? "#3a4452" : "#69727f"}" font-family="Arial,sans-serif" text-anchor="middle">${monLabel(m)}</text>`;
-    }).join("");
-    const headerLines = `<line x1="${LABEL_W}" y1="${YEAR_TIER}" x2="${svgWidth}" y2="${YEAR_TIER}" stroke="#d4d8de" stroke-width="0.7"/><line x1="${LABEL_W}" y1="${HEADER_H}" x2="${svgWidth}" y2="${HEADER_H}" stroke="#b9c0c9" stroke-width="1"/>`;
-    const taskHeaderText = noLabels ? "" : `<text x="4" y="${HEADER_H - 6}" font-size="8" font-weight="bold" fill="#3a4452" font-family="Arial,sans-serif">TASK</text>`;
-    let nameLayer = "";
-    const emitName = (r) => {
-      return `<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic ? ' font-style="italic"' : ""}${r.underline ? ' text-decoration="underline"' : ""}>${r.str}</text>`;
-    };
-    try {
-      const boxOf = (r) => {
-        const x0 = r.anchor === "middle" ? r.x - r.lw / 2 : r.anchor === "end" ? r.x - r.lw : r.x;
-        return { x0, x1: x0 + r.lw, y0: r.y - r.fs * 0.72, y1: r.y + r.fs * 0.72 };
-      };
-      const recs = nameRecords.map((r) => ({ ...r, _y0: r.y })).sort((a, b) => a.y - b.y || a.x - b.x);
-      const placed = [];
-      for (const r of recs) {
-        let b = boxOf(r), tries = 0;
-        while (tries < 8) {
-          const hit = placed.find((p) => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
-          if (!hit) break;
-          r.y += hit.y1 - b.y0 + 1.5;
-          if (r.y - r._y0 > ROW_H2 * 2.2) {
-            r.y = r._y0;
-            break;
-          }
-          b = boxOf(r);
-          tries++;
-        }
-        placed.push(b);
-      }
-      nameLayer = recs.map(emitName).join("");
-    } catch (_) {
-      nameLayer = nameRecords.map(emitName).join("");
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" viewBox="0 0 ${svgWidth} ${svgH}" style="width:100%;display:block">
-<rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
-${headerBg}
-${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}${nameLayer}</svg>`;
-  }
-  var EXHIBIT_MIN_GANTT = 240;
-  function approxTextPx(str, fs) {
-    let w = 0;
-    const s = String(str == null ? "" : str);
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (c === " " || /[.,:;'!|il]/.test(c)) w += 0.3 * fs;
-      else if (/[fjt()/\-]/.test(c)) w += 0.38 * fs;
-      else if (/[0-9]/.test(c)) w += 0.58 * fs;
-      else if (c === "M" || c === "W") w += 0.92 * fs;
-      else if (/[A-Z]/.test(c)) w += 0.7 * fs;
-      else if (c === "m" || c === "w") w += 0.86 * fs;
-      else w += 0.54 * fs;
-    }
-    return w;
-  }
-  function layoutExhibitCols(specs, opts) {
-    const ov = opts.override || {};
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const widths = {};
-    for (const s of specs) widths[s.k] = Math.round(clamp(ov[s.k] != null ? ov[s.k] : s.base, s.min, s.max));
-    const total = () => specs.reduce((a, s) => a + widths[s.k], 0);
-    const budget = Math.max(160, opts.budget - EXHIBIT_MIN_GANTT);
-    if (total() > budget) {
-      const flex = specs.filter((s) => s.flex);
-      const slack = flex.reduce((a, s) => a + (widths[s.k] - s.min), 0);
-      if (slack > 0) {
-        const need2 = Math.min(total() - budget, slack);
-        for (const s of flex) widths[s.k] -= Math.round((widths[s.k] - s.min) / slack * need2);
-      }
-      if (total() > budget) {
-        const f = budget / total();
-        for (const s of specs) widths[s.k] = Math.max(s.min, Math.round(widths[s.k] * f));
-      }
-    }
-    const tableW = total();
-    return { widths, tableW, ganttW: Math.max(EXHIBIT_MIN_GANTT, opts.budget - tableW) };
-  }
-  function buildPDFHtml(cfg, data, forPreview) {
-    const projs = Object.values(data.projects);
-    const selProjs = projs.filter((p) => cfg.selProjects.includes(String(p.id)));
-    const COL_DEFS = [
-      { k: "id", w: 20 },
-      { k: "name", w: null },
-      { k: "start", w: 42 },
-      { k: "end", w: 42 },
-      { k: "duration", w: 28 },
-      { k: "health", w: 72 },
-      { k: "percentComplete", w: 36 },
-      { k: "responsibleParty", w: 64 },
-      { k: "predecessors", w: 36 },
-      { k: "cost", w: 56 }
-    ];
-    const COL_LABELS2 = { id: "ID", name: "Task Name", start: "Start", end: "End", duration: "Dur", health: "Status", percentComplete: "%", responsibleParty: "Owner", predecessors: "Pred", cost: "Cost" };
-    const colDefs = COL_DEFS.filter((c) => cfg.columns.includes(c.k));
-    const HC = { gray: { l: "Not Started", c: "#94a3b8" }, yellow: { l: "In Progress", c: "#d97706" }, red: { l: "Needs Attn.", c: "#dc2626" }, green: { l: "Complete", c: "#16a34a" }, paused: { l: "Paused", c: "#9ca3af" } };
-    const fmtD2 = (s) => {
-      if (!s) return "";
-      const [y, m, d] = s.split("-");
-      return String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
-    };
-    const getDepth = (tasks, id) => {
-      let dep = 0, t = tasks.find((x) => x.id === id);
-      while (t && t.parentId !== null) {
-        dep++;
-        t = tasks.find((x) => x.id === t.parentId);
-      }
-      return Math.min(dep, 3);
-    };
-    const collapsedSet = new Set(cfg.collapsedIds || []);
-    const visibleTasks = (proj) => proj.tasks.filter((t) => {
-      let pid = t.parentId;
-      while (pid != null) {
-        if (collapsedSet.has(proj.id + ":" + pid)) return false;
-        const par = proj.tasks.find((x) => x.id === pid);
-        pid = par ? par.parentId : null;
-      }
-      return true;
-    });
-    const costOfIn = (tasks, id) => {
-      const kids = tasks.filter((x) => x.parentId === id);
-      const own = Number(tasks.find((x) => x.id === id)?.cost) || 0;
-      return kids.length ? own + kids.reduce((s, c) => s + costOfIn(tasks, c.id), 0) : own;
-    };
-    let _healthCtxTasks = null, _healthCtxById = null, _healthCtxRolled = null;
-    const healthCtxFor = (tasks) => {
-      if (_healthCtxTasks !== tasks) {
-        _healthCtxTasks = tasks;
-        _healthCtxById = {};
-        tasks.forEach((x) => {
-          _healthCtxById[x.id] = x;
-        });
-        _healthCtxRolled = computeRolledHealth(tasks, data.settings);
-      }
-      return { byId: _healthCtxById, rolled: _healthCtxRolled };
-    };
-    const displayHealthOf = (t, tasks) => {
-      const { byId, rolled } = healthCtxFor(tasks);
-      const isParent = tasks.some((x) => x.parentId === t.id);
-      return isParent ? rolled[t.id] || t.health : computeDisplayHealth(t, data.settings, byId);
-    };
-    const isExpandedParentOf = (t, tasks, projId) => tasks.some((x) => x.parentId === t.id) && !collapsedSet.has(projId + ":" + t.id);
-    const cellVal = (t, k, tasks, projId) => {
-      switch (k) {
-        case "start":
-        case "end":
-          return fmtD2(t[k]);
-        case "duration":
-          return `${t.duration}d`;
-        case "percentComplete":
-          return `${displayHealthOf(t, tasks) === "green" ? 100 : effectivePercentComplete(t, tasks)}%`;
-        case "predecessors":
-          return (t.predecessors || []).map((p) => p.id || p).join(", ");
-        case "health": {
-          if (isExpandedParentOf(t, tasks, projId)) return "";
-          const dh = displayHealthOf(t, tasks);
-          const h = HC[dh] || { l: dh, c: "#94a3b8" };
-          return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;
-        }
-        case "name": {
-          const dep = getDepth(tasks, t.id);
-          const ind = dep * 14;
-          const fw = dep === 0 ? 700 : dep === 1 ? 600 : 400;
-          const fs = dep === 0 ? 10.5 : dep === 1 ? 10 : 9.5;
-          const isP = tasks.some((x) => x.parentId === t.id);
-          const key = projId + ":" + t.id;
-          const col = collapsedSet.has(key);
-          const tri = forPreview && isP ? `<span class="pl-tri${col ? "" : " open"}" data-collapse="${key}" title="${col ? "Expand" : "Collapse"}">${col ? "▸" : "▾"}</span>` : "";
-          return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;
-        }
-        case "cost": {
-          const v = costOfIn(tasks, t.id);
-          return v ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "";
-        }
-        case "responsibleParty":
-          return escapeHtml(ownerJoin(ownerListOf(t)));
-        default:
-          return escapeHtml(t[k]);
-      }
-    };
-    const isLand = cfg.orientation === "landscape";
-    const ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
-    const pgW = isLand ? ps.h : ps.w, pgR = isLand ? ps.w : ps.h;
-    const contentW = pgW - parseFloat(cfg.margins.left || 0.75) - parseFloat(cfg.margins.right || 0.75);
-    const contentPx = Math.max(300, Math.round(contentW * 96));
-    const mTopPx = Math.round(parseFloat(cfg.margins.top || 0.75) * 96);
-    const mBotPx = Math.round(parseFloat(cfg.margins.bottom || 0.75) * 96);
-    const mLeftPx = Math.round(parseFloat(cfg.margins.left || 0.75) * 96);
-    const mRightPx = Math.round(parseFloat(cfg.margins.right || 0.75) * 96);
-    const pageWpx = Math.round(pgW * 96), pageHpx = Math.round(pgR * 96);
-    let bodyHtml = "", resizeScript = "";
-    if (cfg.includeGantt) {
-      const projTaskLists = selProjs.map((proj) => {
-        let tasks = visibleTasks(proj);
-        if (cfg.healthFilter === "active") tasks = tasks.filter((t) => {
-          const h = displayHealthOf(t, proj.tasks);
-          return h === "yellow" || h === "red";
-        });
-        if (cfg.healthFilter === "complete") tasks = tasks.filter((t) => displayHealthOf(t, proj.tasks) === "green");
-        return { proj, tasks };
-      });
-      const cellText = (t, k, tasks, projId) => {
-        switch (k) {
-          case "start":
-          case "end":
-            return fmtD2(t[k]);
-          case "duration":
-            return `${t.duration}d`;
-          case "percentComplete":
-            return `${displayHealthOf(t, tasks) === "green" ? 100 : effectivePercentComplete(t, tasks)}%`;
-          case "predecessors":
-            return (t.predecessors || []).map((p) => p.id || p).join(", ");
-          case "health": {
-            if (isExpandedParentOf(t, tasks, projId)) return "";
-            const dh = displayHealthOf(t, tasks);
-            const h = HC[dh];
-            return h ? h.l : dh || "";
-          }
-          case "name":
-            return t.name == null ? "" : String(t.name);
-          case "cost": {
-            const v = costOfIn(tasks, t.id);
-            return v ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "";
-          }
-          case "responsibleParty":
-            return ownerJoin(ownerListOf(t));
-          default:
-            return t[k] == null ? "" : String(t[k]);
-        }
-      };
-      const COL_FIT = {
-        id: { fs: 8, min: 22, max: 64, flex: false, extra: 0 },
-        name: { fs: 10.5, min: 96, max: 280, flex: true, extra: 0 },
-        start: { fs: 9, min: 50, max: 96, flex: false, extra: 0 },
-        end: { fs: 9, min: 50, max: 96, flex: false, extra: 0 },
-        duration: { fs: 9, min: 34, max: 74, flex: false, extra: 0 },
-        health: { fs: 9, min: 62, max: 132, flex: false, extra: 13 },
-        percentComplete: { fs: 9, min: 34, max: 74, flex: false, extra: 0 },
-        responsibleParty: { fs: 9, min: 52, max: 144, flex: true, extra: 0 },
-        predecessors: { fs: 9, min: 40, max: 120, flex: true, extra: 0 },
-        cost: { fs: 9, min: 50, max: 132, flex: true, extra: 0 }
-      };
-      const PADX = 12, SLACK = 3;
-      const specs = colDefs.map((c) => {
-        const f = COL_FIT[c.k] || { fs: 9, min: 30, max: 130, flex: false, extra: 0 };
-        const lbl = COL_LABELS2[c.k] || c.k;
-        let base = approxTextPx(lbl.toUpperCase(), 8) * 1.04 + lbl.length * 0.45;
-        for (const { proj, tasks } of projTaskLists) {
-          for (const t of tasks) {
-            let w;
-            if (c.k === "name") {
-              const dep = getDepth(proj.tasks, t.id), fs = dep === 0 ? 10.5 : dep === 1 ? 10 : 9.5;
-              const tri = forPreview && proj.tasks.some((x) => x.parentId === t.id) ? 15 : 0;
-              w = approxTextPx(cellText(t, "name", proj.tasks), fs) + dep * 14 + tri;
-            } else {
-              w = approxTextPx(cellText(t, c.k, proj.tasks, proj.id), f.fs) + f.extra;
-            }
-            if (w > base) base = w;
-          }
-        }
-        return { k: c.k, base: base + PADX + SLACK, min: f.min, max: f.max, flex: f.flex };
-      });
-      const fit = layoutExhibitCols(specs, { override: cfg.colWidths || {}, budget: contentPx - 2 });
-      const colW = fit.widths, canResize = !!forPreview;
-      const thCols = colDefs.map((c) => `<th data-k="${c.k}" style="width:${colW[c.k]}px">${COL_LABELS2[c.k]}${canResize ? `<span class="col-rs" data-rs="${c.k}" title="Drag to resize"></span>` : ""}</th>`).join("");
-      projTaskLists.forEach(({ proj, tasks }) => {
-        const rows = tasks.map((t, i) => {
-          const cells = colDefs.map((c) => `<td class="c-${c.k}">${cellVal(t, c.k, proj.tasks, proj.id)}</td>`).join("");
-          return `<tr class="${i % 2 ? "alt" : ""}">${cells}</tr>`;
-        }).join("");
-        const ganttProj = { ...proj, tasks };
-        const ganttSvg = buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, { noLabels: true, showToday: cfg.showToday !== false, showArrows: cfg.showArrows !== false, barLabels: data.settings?.barLabels, barNames: cfg.barNames !== false, labelAlign: cfg.labelAlign, timeUnit: cfg.timeUnit, zoomMul: cfg.zoomMul, panFrac: cfg.panFrac });
-        bodyHtml += `<div class="proj-block">${selProjs.length > 1 ? `<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>` : ""}
-        <div class="split-view">
-          <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
-            <table class="aligned"><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table>
-          </div>
-          <div class="split-gantt" style="width:${fit.ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
-        </div></div>`;
-      });
-      if (forPreview) {
-        resizeScript = `<script>(function(){
-  var W=${JSON.stringify(colW)}, MINc=${JSON.stringify(Object.fromEntries(specs.map((s) => [s.k, s.min])))}, MAXc=${JSON.stringify(Object.fromEntries(specs.map((s) => [s.k, s.max])))};
-  var ORDER=${JSON.stringify(colDefs.map((c) => c.k))}, SPLIT=${fit.tableW + fit.ganttW}, MING=${EXHIBIT_MIN_GANTT};
-  function sum(){var t=0;for(var i=0;i<ORDER.length;i++)t+=W[ORDER[i]];return t;}
-  function apply(){
-    var tw=sum(), gw=Math.max(MING,SPLIT-tw);
-    document.querySelectorAll('.split-table').forEach(function(e){e.style.width=tw+'px';});
-    document.querySelectorAll('.split-gantt').forEach(function(e){e.style.width=gw+'px';});
-    ORDER.forEach(function(k){document.querySelectorAll('th[data-k="'+k+'"]').forEach(function(e){e.style.width=W[k]+'px';});});
-  }
-  var drag=null;
-  document.addEventListener('mousedown',function(ev){
-    var h=ev.target&&ev.target.closest?ev.target.closest('[data-rs]'):null; if(!h) return;
-    ev.preventDefault(); ev.stopPropagation();
-    var k=h.getAttribute('data-rs'); drag={k:k,x:ev.clientX,w0:W[k]};
-    document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
-  },true);
-  document.addEventListener('mousemove',function(ev){
-    if(!drag) return;
-    var mn=MINc[drag.k]||30, others=sum()-W[drag.k], cap=Math.min(MAXc[drag.k]||9999,Math.max(mn,(SPLIT-MING)-others));
-    W[drag.k]=Math.round(Math.max(mn,Math.min(drag.w0+(ev.clientX-drag.x),cap))); apply();
-  });
-  document.addEventListener('mouseup',function(){
-    if(!drag) return; var k=drag.k, w=W[k]; drag=null;
-    document.body.style.cursor=''; document.body.style.userSelect='';
-    try{window.parent.postMessage({type:'planarColResize',key:k,w:w},'*');}catch(_){}
-  });
-})();<\/script>`;
-      }
-    } else {
-      selProjs.forEach((proj) => {
-        let tasks = visibleTasks(proj);
-        if (cfg.healthFilter === "active") tasks = tasks.filter((t) => {
-          const h = displayHealthOf(t, proj.tasks);
-          return h === "yellow" || h === "red";
-        });
-        if (cfg.healthFilter === "complete") tasks = tasks.filter((t) => displayHealthOf(t, proj.tasks) === "green");
-        const thCols = colDefs.map((c) => `<th${c.w ? ` style="width:${c.w}px"` : ""}>${COL_LABELS2[c.k]}</th>`).join("");
-        const rows = tasks.map((t, i) => {
-          const cells = colDefs.map((c) => `<td class="c-${c.k}">${cellVal(t, c.k, proj.tasks, proj.id)}</td>`).join("");
-          return `<tr class="${i % 2 ? "alt" : ""}">${cells}</tr>`;
-        }).join("");
-        bodyHtml += `<div class="proj-block">${selProjs.length > 1 ? `<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>` : ""}<table><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table></div>`;
-      });
-    }
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>${escapeHtml(scheduleExportName(selProjs))}</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@page{size:${pgW}in ${pgR}in;margin:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in}
-body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in;font-family:'Inter',Arial,sans-serif;font-size:10px;color:#1a1a1a;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-@media print{html,body{margin:0!important;padding:0!important}}
-*{box-sizing:border-box;margin:0;padding:0}
-
-/* ── Pagination ── */
-.doc-header{page-break-inside:avoid;break-inside:avoid}
-.doc-footer{page-break-inside:avoid;break-inside:avoid}
-.proj-block+.proj-block{page-break-before:always;break-before:page}
-/* Split view: do NOT repeat table headers on continuation pages — the Gantt SVG
-   beside the table can't repeat anything, so a repeated thead shifts every row
-   ~22px out of alignment with its bar on each page after the first. */
-@media print{.split-view thead{display:table-row-group}}
-/* Tables-only mode: frame the table; keep rows whole across page breaks.
-   (Split view intentionally keeps pixel slicing — pushing table rows while the
-   Gantt SVG slices freely would desync rows from bars.) */
-.proj-block>table{border:1px solid #d4d4d4}
-.proj-block>table tbody tr{page-break-inside:avoid;break-inside:avoid}
-
-.doc-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;margin-bottom:18px;border-bottom:2.5px solid #1a1a1a}
-.dh-left .exhibit{font-size:8.5px;font-weight:700;color:#4f46e5;letter-spacing:.12em;text-transform:uppercase;margin-bottom:3px}
-.dh-left .title{font-size:17px;font-weight:700;color:#1a1a1a;line-height:1.15}
-.dh-left .subline{font-size:9.5px;color:#555;margin-top:4px}
-.dh-right{text-align:right;font-size:9px;color:#555;line-height:2}
-.dh-right strong{color:#1a1a1a;font-weight:600}
-.dh-right .conf{color:#b91c1c;font-weight:700;font-size:9px;margin-top:2px}
-.proj-block{margin-bottom:20px}
-.proj-name{font-size:14px;font-weight:700;color:#4f46e5;letter-spacing:0;padding-bottom:5px;margin-bottom:9px;border-bottom:2px solid #4f46e5}
-.split-view{display:flex;align-items:flex-start;width:100%;border:1px solid #d4d4d4}
-.split-table{border-right:1px solid #d4d4d4}
-.split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
-.split-table table.aligned thead th{position:relative;height:30px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
-/* B392 — drag-to-resize handle on each header cell's right edge (preview only). */
-.col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
-.col-rs:hover{background:rgba(99,102,241,.5)}
-@media print{.col-rs{display:none}}
-.split-table table.aligned tbody tr{height:18px}
-.split-table table.aligned tbody tr.alt{background:#f6f6f6}
-.split-table table.aligned tbody td{padding:0 6px;vertical-align:middle;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #ebebeb}
-.pl-tri{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;font-size:8px;line-height:1;border-radius:3px;color:#64748b;background:#f1f3f5;border:1px solid #d4d8de;cursor:pointer;margin-right:3px;vertical-align:middle;user-select:none}
-.c-cost{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.pl-tri.open{background:#e8f0fe;color:#4f46e5;border-color:#b6cef7}
-.pl-tri:hover{background:#eef0fe;color:#4f46e5;border-color:#c2c7f5}
-@media print{.pl-tri{display:none}}
-table{width:100%;border-collapse:collapse;font-size:9px}
-thead tr{background:#1a1a1a}
-thead th{padding:5px 6px;text-align:left;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:#fff;white-space:nowrap}
-tbody tr{border-bottom:1px solid #ebebeb}
-tbody tr.alt{background:#f8f8f8}
-td{padding:4px 6px;vertical-align:middle;line-height:1.3}
-.c-id{color:#999;font-size:8px;white-space:nowrap}
-.c-duration,.c-percentComplete,.c-predecessors{color:#666;white-space:nowrap}
-.c-responsibleParty{color:#444}
-.c-start,.c-end{white-space:nowrap;color:#555}
-.gantt-wrap{margin-top:22px}
-.section-label{font-size:9px;font-weight:700;color:#4f46e5;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #ddd}
-.doc-footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:8px;color:#aaa}
-.print-bar{position:fixed;bottom:20px;right:20px;display:flex;gap:8px;z-index:999}
-.btn-pdf{background:#4f46e5;color:#fff;border:none;padding:10px 22px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.btn-cl{background:#fff;color:#555;border:1px solid #ddd;padding:10px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
-@media print{.print-bar{display:none}}
-</style></head><body>
-<div class="print-bar"${forPreview ? ' style="display:none"' : ""}><button class="btn-cl" onclick="window.close()">&#x2715; Close</button><button class="btn-pdf" onclick="window.print()">&#8595; Save as PDF</button></div>
-<script>
-/*__PAGINATE_SRC__*/
-(function(){
-  var MODE='${forPreview ? "preview" : "print"}';
-  var MT=${mTopPx}, MB=${mBotPx}, ML=${mLeftPx}, MR=${mRightPx};
-  var PW=${pageWpx}, PH=${pageHpx};
-  var CW=PW-ML-MR, CH=Math.max(160,PH-MT-MB)-2;  /* printable height, 2px sub-pixel slack */
-  var GANTT_HEAD=30, GANTT_ROW=18;               /* must match buildGanttSVG HEADER_H (YEAR_TIER+MON_TIER) + ROW_H */
-  var FRAME='#d4d4d4';
-
-  function outerH(el){
-    if(!el) return 0;
-    var cs=getComputedStyle(el);
-    return el.getBoundingClientRect().height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0);
-  }
-
-/*__PACK_SRC__*/
-  /* Pure pagination: every page is a self-contained unit. Each chunk carries its
-     own column header (headOv = frame + thead); continuation chunks add a
-     "(continued)" label (contH). Whole rows only - a row never splits. */
-  function packPages(model, BUDGET){
-    var pages=[], cur=null, used=0;
-    function open(){ cur={doc:false,proj:-1,name:false,cont:false,r0:0,r1:0,foot:false}; used=0; }
-    function close(){ if(cur) pages.push(cur); cur=null; }
-    open();
-    if(model.docH){ cur.doc=true; used+=model.docH; }
-    for(var p=0;p<model.projs.length;p++){
-      var pr=model.projs[p];
-      if(p>0){ close(); open(); }                 /* each project starts a fresh page */
-      var i=0, first=true;
-      while(i<pr.rows.length || first){
-        var ov=(first?pr.nameH:pr.contH)+pr.headOv;
-        var avail=BUDGET-used-ov;
-        var cnt=0,h=0;
-        while(i+cnt<pr.rows.length && h+pr.rows[i+cnt]<=avail){ h+=pr.rows[i+cnt]; cnt++; }
-        if(cnt===0 && i<pr.rows.length){
-          if(used>0){ close(); open(); continue; }/* retry on a clean page */
-          cnt=1; h=pr.rows[i];                    /* single row taller than a page: force */
-        }
-        cur.proj=p;
-        if(first) cur.name=true; else cur.cont=true;
-        cur.r0=i; cur.r1=i+cnt;
-        used+=ov+h; i+=cnt; first=false;
-        if(i<pr.rows.length){ close(); open(); }
-        else break;
-      }
-    }
-    if(model.footH){
-      if(used+model.footH>BUDGET && used>0){ close(); open(); }
-      cur.foot=true; used+=model.footH;
-    }
-    close();
-    return pages;
-  }
-/*__PACK_END__*/
-
-  function paginate(){
-    var body=document.body;
-    /* 1. Stage the document offscreen at exact printable width and measure. */
-    var master=document.createElement('div');
-    master.style.cssText='width:'+CW+'px;position:absolute;left:-100000px;top:0;background:#fff';
-    var kids=[].slice.call(body.children);
-    for(var i=0;i<kids.length;i++){
-      var el=kids[i];
-      if(el.tagName==='SCRIPT'||el.tagName==='STYLE') continue;
-      if(el.classList&&el.classList.contains('print-bar')) continue;
-      master.appendChild(el);
-    }
-    body.style.padding='0'; body.style.margin='0';
-    body.appendChild(master);
-
-    var docEl=master.querySelector('.doc-header');
-    var footEl=master.querySelector('.doc-footer');
-    var blocks=[].slice.call(master.querySelectorAll('.proj-block'));
-    /* continuation label sample - measured once, reused */
-    var contSample=document.createElement('div');
-    contSample.style.cssText='font:600 9px Arial,sans-serif;color:#4f46e5;letter-spacing:.04em;padding:0 0 4px';
-    contSample.textContent='X - continued';
-    master.appendChild(contSample);
-    var contH=outerH(contSample);
-    master.removeChild(contSample);
-
-    var projs=[];
-    for(var b=0;b<blocks.length;b++){
-      var blk=blocks[b];
-      var nameEl=blk.querySelector('.proj-name');
-      var sv=blk.querySelector('.split-view');
-      var tableEl=sv?sv.querySelector('table'):blk.querySelector('table');
-      var theadEl=tableEl?tableEl.querySelector('thead'):null;
-      var rowEls=tableEl?[].slice.call(tableEl.querySelectorAll('tbody tr')):[];
-      var svgEl=sv?sv.querySelector('svg'):null;
-      var tHalf=sv?sv.querySelector('.split-table'):null;
-      projs.push({
-        nameEl:nameEl, nameH:outerH(nameEl),
-        nameTxt:nameEl?nameEl.textContent:'',
-        split:!!sv,
-        tableW:tHalf?tHalf.getBoundingClientRect().width:0,
-        ganttW:svgEl?svgEl.getBoundingClientRect().width:0,
-        theadEl:theadEl, rowEls:rowEls, svgEl:svgEl,
-        contH:contH,
-        headOv:2+(theadEl?theadEl.getBoundingClientRect().height:0),
-        rows:rowEls.map(function(r){return r.getBoundingClientRect().height;})
-      });
-    }
-    var model={docH:outerH(docEl), footH:outerH(footEl), projs:projs};
-    var pages=packPages(model, CH);
-
-    /* 2. Assemble each page as a real, self-contained DOM unit. */
-    function svgWindow(svgEl,y0,h,w){
-      var win=document.createElement('div');
-      win.style.cssText='width:'+w+'px;height:'+h+'px;overflow:hidden;position:relative;flex-shrink:0';
-      var c=svgEl.cloneNode(true);
-      c.style.position='absolute'; c.style.left='0'; c.style.top=(-y0)+'px'; c.style.width=w+'px';
-      win.appendChild(c);
-      return win;
-    }
-    function buildPage(pg){
-      var page=document.createElement('div');
-      page.style.cssText='width:'+CW+'px;background:#fff';
-      if(pg.doc&&docEl) page.appendChild(docEl);
-      if(pg.proj>=0){
-        var pr=projs[pg.proj];
-        if(pg.name&&pr.nameEl) page.appendChild(pr.nameEl);
-        if(pg.cont){
-          var cl=document.createElement('div');
-          cl.style.cssText='font:600 9px Arial,sans-serif;color:#4f46e5;letter-spacing:.04em;padding:0 0 4px';
-          cl.textContent=pr.nameTxt+' - continued';
-          page.appendChild(cl);
-        }
-        var framed=document.createElement('div');
-        framed.style.cssText='border:1px solid '+FRAME+';background:#fff'+(pr.split?';display:flex;align-items:flex-start':'');
-        var tbl=document.createElement('table');
-        tbl.className='aligned';
-        if(pr.theadEl) tbl.appendChild(pr.theadEl.cloneNode(true));
-        var tb=document.createElement('tbody');
-        for(var r=pg.r0;r<pg.r1;r++) tb.appendChild(pr.rowEls[r]);   /* move real rows */
-        tbl.appendChild(tb);
-        if(pr.split){
-          var left=document.createElement('div');
-          left.className='split-table';
-          left.style.cssText='width:'+pr.tableW+'px;flex-shrink:0';
-          left.appendChild(tbl);
-          framed.appendChild(left);
-          var right=document.createElement('div');
-          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B392) */
-          right.style.cssText='width:'+pr.ganttW+'px;flex-shrink:0';
-          if(pr.svgEl){                                                                                   /* a project filtered to zero rows yields an empty Gantt (no <svg>) → svgEl null; guard so svgWindow's cloneNode can't throw and blank the whole PDF */
-            right.appendChild(svgWindow(pr.svgEl,0,GANTT_HEAD,pr.ganttW));                                /* date band: repeats every page */
-            if(pg.r1>pg.r0) right.appendChild(svgWindow(pr.svgEl,GANTT_HEAD+pg.r0*GANTT_ROW,(pg.r1-pg.r0)*GANTT_ROW,pr.ganttW));
-          }
-          framed.appendChild(right);
-        } else {
-          framed.appendChild(tbl);
-        }
-        page.appendChild(framed);
-      }
-      if(pg.foot&&footEl) page.appendChild(footEl);
-      return page;
-    }
-
-    var pageEls=pages.map(buildPage);
-    master.parentNode.removeChild(master);
-
-    /* 3. Render: preview = sheets on gray; print = one block per page. */
-    if(MODE==='preview'){
-      var wrap=document.createElement('div');
-      wrap.style.cssText='width:'+PW+'px;padding:14px 0 6px;box-sizing:border-box';
-      for(var p=0;p<pageEls.length;p++){
-        var sheet=document.createElement('div');
-        sheet.style.cssText='width:'+PW+'px;height:'+PH+'px;background:#fff;box-sizing:border-box;padding:'+MT+'px '+MR+'px '+MB+'px '+ML+'px;overflow:hidden;box-shadow:0 1px 5px rgba(0,0,0,.35)';
-        sheet.appendChild(pageEls[p]);
-        wrap.appendChild(sheet);
-        var lbl=document.createElement('div');
-        lbl.textContent='Page '+(p+1)+' of '+pageEls.length;
-        lbl.style.cssText='text-align:center;font:600 8px Arial,sans-serif;color:#56616b;letter-spacing:.9px;text-transform:uppercase;padding:7px 0 11px';
-        wrap.appendChild(lbl);
-      }
-      body.style.background='#a9b2bb';
-      body.appendChild(wrap);
-      window.parent.postMessage({type:'planarPreviewHeight', h: body.scrollHeight}, '*');
-    } else {
-      var st=document.createElement('style');
-      st.textContent='.pg{page-break-after:always;break-after:page;page-break-inside:avoid;break-inside:avoid}'
-        +'.pg:last-child{page-break-after:auto;break-after:auto}'
-        +'@media screen{body{background:#eef0f2;padding:18px 0}.pg{margin:0 auto 16px;outline:1px solid #d8d8d8;background:#fff;padding:'+MT+'px '+MR+'px '+MB+'px '+ML+'px;width:'+PW+'px;box-sizing:border-box}}'
-        +'@media print{.pg{width:'+CW+'px}}';
-      document.head.appendChild(st);
-      for(var q=0;q<pageEls.length;q++){ pageEls[q].className='pg'; body.appendChild(pageEls[q]); }
-    }
-  }
-  function go(){
-    if(document.fonts && document.fonts.ready){ document.fonts.ready.then(function(){ setTimeout(paginate,30); }); }
-    else setTimeout(paginate,80);
-  }
-  window.addEventListener('load',go);
-})();
-/*__PAGINATE_END__*/
-<\/script>
-<div class="doc-header">
-  <div class="dh-left">
-    ${cfg.exhibitLabel ? `<div class="exhibit">${escapeHtml(cfg.exhibitLabel)}</div>` : ""}
-    <div class="title">${escapeHtml(cfg.projectTitle)}</div>
-    ${cfg.preparedFor ? `<div class="subline">Prepared for: <strong>${escapeHtml(cfg.preparedFor)}</strong></div>` : ""}
-  </div>
-  <div class="dh-right">
-    <div>Date:&nbsp;<strong>${escapeHtml(cfg.docDate)}</strong></div>
-    ${cfg.preparedBy ? `<div>Prepared by:&nbsp;<strong>${escapeHtml(cfg.preparedBy)}</strong></div>` : ""}
-    ${cfg.confidential ? `<div class="conf">${escapeHtml(cfg.confidential)}</div>` : ""}
-  </div>
-</div>
-${bodyHtml}
-<div class="doc-footer">
-  <span>Generated ${(/* @__PURE__ */ new Date()).toLocaleString()}</span>
-  <span>${escapeHtml(cfg.confidential || "")}</span>
-  <span>planar</span>
-</div>
-${forPreview ? `<script>(function(){document.addEventListener("click",function(e){var el=e.target.closest&&e.target.closest("[data-collapse]");if(!el)return;e.preventDefault();e.stopPropagation();try{window.parent.postMessage({type:"planarToggleCollapse",key:el.getAttribute("data-collapse")},"*");}catch(_){}}, true);})();<\/script>` : ""}
-${resizeScript}
-</body></html>`;
-  }
   var Toggle = ({ on, onChange }) => /* @__PURE__ */ React.createElement("span", { onClick: () => onChange(!on), style: {
     width: 28,
     height: 15,
@@ -20604,15 +20660,15 @@ ${resizeScript}
   function PDFExportModal({ data, activePid, onClose, setData }) {
     const projs = Object.values(data.projects);
     const now = /* @__PURE__ */ new Date();
-    const seedCollapsed = useMemo2(() => {
+    const seedCollapsed = useMemo3(() => {
       const out = [];
       Object.values(data.projects).forEach((p) => p.tasks.forEach((t) => {
         if (p.tasks.some((x) => x.parentId === t.id) && t.isExpanded === false) out.push(p.id + ":" + t.id);
       }));
       return out;
     }, []);
-    const initPrefs = useMemo2(() => loadExportPrefs(), []);
-    const [cfg, setCfg] = useState3(() => {
+    const initPrefs = useMemo3(() => loadExportPrefs(), []);
+    const [cfg, setCfg] = useState4(() => {
       const base = {
         exhibitLabel: "",
         projectTitle: "",
@@ -20652,14 +20708,14 @@ ${resizeScript}
       return base;
     });
     const upd = (patch) => setCfg((c) => ({ ...c, ...patch }));
-    const cfgRef = useRef3(cfg);
-    useEffect2(() => {
+    const cfgRef = useRef4(cfg);
+    useEffect3(() => {
       cfgRef.current = cfg;
     }, [cfg]);
-    const [headerOpen, setHeaderOpen] = useState3(() => !!initPrefs.headerOpen);
-    const [secOpen, setSecOpen] = useState3(() => initPrefs.secOpen || {});
+    const [headerOpen, setHeaderOpen] = useState4(() => !!initPrefs.headerOpen);
+    const [secOpen, setSecOpen] = useState4(() => initPrefs.secOpen || {});
     const secIsOpen = (k) => secOpen[k] !== false;
-    useEffect2(() => {
+    useEffect3(() => {
       const out = {};
       EXPORT_PERSIST_KEYS.forEach((k) => {
         out[k] = cfg[k];
@@ -20668,8 +20724,8 @@ ${resizeScript}
       out.headerOpen = headerOpen;
       saveExportPrefs(out);
     }, [cfg, secOpen, headerOpen]);
-    const [previewCfg, setPreviewCfg] = useState3(cfg);
-    useEffect2(() => {
+    const [previewCfg, setPreviewCfg] = useState4(cfg);
+    useEffect3(() => {
       const t = setTimeout(() => setPreviewCfg(cfg), 280);
       return () => clearTimeout(t);
     }, [cfg]);
@@ -20701,7 +20757,7 @@ ${resizeScript}
     };
     const expandAll = () => setDetailLevel("all");
     const collapseAll = () => setDetailLevel("1");
-    useEffect2(() => {
+    useEffect3(() => {
       const onToggle = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarToggleCollapse") return;
@@ -20715,7 +20771,7 @@ ${resizeScript}
       window.addEventListener("message", onToggle);
       return () => window.removeEventListener("message", onToggle);
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const onResize = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarColResize") return;
@@ -20740,18 +20796,18 @@ ${resizeScript}
         return n;
       });
     };
-    const [previewUrl, setPreviewUrl] = useState3(null);
-    useEffect2(() => {
+    const [previewUrl, setPreviewUrl] = useState4(null);
+    useEffect3(() => {
       const html = buildPDFHtml(previewCfg, data, true);
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }, [previewCfg]);
-    const previewPaneRef = useRef3(null);
-    const [paneW, setPaneW] = useState3(760);
-    const [_paneH, setPaneH] = useState3(520);
-    useEffect2(() => {
+    const previewPaneRef = useRef4(null);
+    const [paneW, setPaneW] = useState4(760);
+    const [_paneH, setPaneH] = useState4(520);
+    useEffect3(() => {
       const el = previewPaneRef.current;
       if (!el) return;
       const obs = new ResizeObserver(([e]) => {
@@ -20764,12 +20820,12 @@ ${resizeScript}
     const _ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
     const pageW = Math.round((cfg.orientation === "landscape" ? _ps.h : _ps.w) * 96);
     const pageH = Math.round((cfg.orientation === "landscape" ? _ps.w : _ps.h) * 96);
-    const iframeRef = useRef3(null);
-    const [iframeH, setIframeH] = useState3(pageH);
-    useEffect2(() => {
+    const iframeRef = useRef4(null);
+    const [iframeH, setIframeH] = useState4(pageH);
+    useEffect3(() => {
       setIframeH(pageH);
     }, [pageH]);
-    useEffect2(() => {
+    useEffect3(() => {
       const handler = (e) => {
         if (e.origin !== window.location.origin) return;
         if (e.data?.type === "planarPreviewHeight") setIframeH(Math.max(pageH, e.data.h));
@@ -20778,7 +20834,7 @@ ${resizeScript}
       return () => window.removeEventListener("message", handler);
     }, [pageH]);
     const fitScale = Math.min(1, (paneW - 48) / pageW);
-    const [previewZoom, setPreviewZoom] = useState3(1);
+    const [previewZoom, setPreviewZoom] = useState4(1);
     const scale = fitScale * previewZoom;
     const zoomTo = (z) => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
     const fitWidth = () => {
@@ -20787,11 +20843,11 @@ ${resizeScript}
     };
     const setTimeUnit = (u) => upd({ timeUnit: u, zoomMul: 1, panFrac: 0 });
     const bumpScale = (f) => upd({ zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul || 1) * f)) });
-    const [panMode, setPanMode] = useState3(false);
-    const panRef = useRef3(null);
-    const overlayRef = useRef3(null);
-    const flushRef = useRef3(0);
-    useEffect2(() => {
+    const [panMode, setPanMode] = useState4(false);
+    const panRef = useRef4(null);
+    const overlayRef = useRef4(null);
+    const flushRef = useRef4(0);
+    useEffect3(() => {
       const el = overlayRef.current;
       if (!el || !panMode) return;
       const pane = previewPaneRef.current;
@@ -21199,7 +21255,7 @@ ${resizeScript}
     onCancel,
     onDelete
   }) {
-    const [hover, setHover] = useState3(false);
+    const [hover, setHover] = useState4(false);
     return /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -21316,7 +21372,7 @@ ${resizeScript}
     );
   }
   function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
-    const [dateEdit, setDateEdit] = useState3(false);
+    const [dateEdit, setDateEdit] = useState4(false);
     return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 } }, dateEdit ? /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -21393,13 +21449,13 @@ ${resizeScript}
     ))));
   }
   function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
-    const [draftText, setDraftText] = useState3(() => initChar || "");
-    const [draftDate, setDraftDate] = useState3(() => NOW);
-    const [edit, setEdit] = useState3(null);
-    const [editText, setEditText] = useState3("");
-    const [editDate, setEditDate] = useState3("");
-    const [menuOpen, setMenuOpen] = useState3(false);
-    const [confirmClear, setConfirmClear] = useState3(false);
+    const [draftText, setDraftText] = useState4(() => initChar || "");
+    const [draftDate, setDraftDate] = useState4(() => NOW);
+    const [edit, setEdit] = useState4(null);
+    const [editText, setEditText] = useState4("");
+    const [editDate, setEditDate] = useState4("");
+    const [menuOpen, setMenuOpen] = useState4(false);
+    const [confirmClear, setConfirmClear] = useState4(false);
     const defSize = (() => {
       try {
         return localStorage.getItem("planar_noteSize") || "sm";
@@ -21408,14 +21464,14 @@ ${resizeScript}
       }
     })();
     const noteFs = (n) => NOTE_SIZES.find((s) => s.k === (n.size || defSize))?.px ?? 13;
-    const taRef = useRef3(null);
-    const backdropRef = useRef3(null);
-    const downOnBackdropRef = useRef3(false);
-    const editRef = useRef3(null);
-    useEffect2(() => {
+    const taRef = useRef4(null);
+    const backdropRef = useRef4(null);
+    const downOnBackdropRef = useRef4(false);
+    const editRef = useRef4(null);
+    useEffect3(() => {
       editRef.current = edit;
     }, [edit]);
-    useEffect2(() => {
+    useEffect3(() => {
       const ta = taRef.current;
       if (ta) {
         const len = ta.value.length;
@@ -21423,7 +21479,7 @@ ${resizeScript}
         ta.selectionStart = ta.selectionEnd = len;
       }
     }, []);
-    useEffect2(() => {
+    useEffect3(() => {
       const handler = (e) => {
         if (e.key !== "Escape") return;
         if (editRef.current) {
@@ -22571,22 +22627,9 @@ ${resizeScript}
   exposeToHarness({
     removeScheduleFromDoc: [() => removeScheduleFromDoc],
     logMergeToastEvent: [() => logMergeToastEvent],
-    ROW_H: [() => ROW_H, (v) => {
-      ROW_H = v;
-    }],
     GRID_LINE: [() => GRID_LINE],
     GRID_LINE_RANGE: [() => GRID_LINE_RANGE],
-    PPD: [() => PPD],
-    TL_H: [() => TL_H],
-    BUF: [() => BUF],
-    WIN_CHUNK: [() => WIN_CHUNK],
-    WIN_OVER: [() => WIN_OVER],
-    rowWindowTop: [() => rowWindowTop],
-    rowWindow: [() => rowWindow],
-    GRID_SCROLL_MEMO: [() => GRID_SCROLL_MEMO],
-    GANTT_SCROLL_MEMO: [() => GANTT_SCROLL_MEMO],
     ROW_COLORS: [() => ROW_COLORS],
-    escapeHtml: [() => escapeHtml],
     pinnedFillLayers: [() => pinnedFillLayers],
     SAFE_COLOR_RE: [() => SAFE_COLOR_RE],
     isValidColor: [() => isValidColor],
@@ -22595,8 +22638,6 @@ ${resizeScript}
     FONT_SIZE_MAX: [() => FONT_SIZE_MAX],
     isValidFontSize: [() => isValidFontSize],
     stepFontSize: [() => stepFontSize],
-    fmtBarDate: [() => fmtBarDate],
-    barLabelText: [() => barLabelText],
     askConfirm: [() => askConfirm],
     mkt: [() => mkt],
     postLoadState: [() => postLoadState],
@@ -22729,24 +22770,6 @@ ${resizeScript}
     TaskIconPickerHost: [() => TaskIconPickerHost],
     PhaseIconSummary: [() => PhaseIconSummary],
     Cell: [() => Cell],
-    GANTT_INK: [() => GANTT_INK],
-    resolveLabelAlign: [() => resolveLabelAlign],
-    writeLabelAlign: [() => writeLabelAlign],
-    ganttNameWeight: [() => ganttNameWeight],
-    estLabelWidth: [() => estLabelWidth],
-    placeGanttLabel: [() => placeGanttLabel],
-    GANTT_CAPTION_LH: [() => GANTT_CAPTION_LH],
-    ganttCaptionNeed: [() => ganttCaptionNeed],
-    ganttCaptionHalf: [() => ganttCaptionHalf],
-    fitCaptionFs: [() => fitCaptionFs],
-    GANTT_PROFILES: [() => GANTT_PROFILES],
-    ganttNameSize: [() => ganttNameSize],
-    ganttLeafGeom: [() => ganttLeafGeom],
-    ganttSummaryGeom: [() => ganttSummaryGeom],
-    ganttMilestoneGeom: [() => ganttMilestoneGeom],
-    ARROW_REACH: [() => ARROW_REACH],
-    depAnchors: [() => depAnchors],
-    GanttView: [() => GanttView],
     MB_WD: [() => MB_WD],
     MB_POSITIONS: [() => MB_POSITIONS],
     MB_MONTHS: [() => MB_MONTHS],
@@ -22768,12 +22791,6 @@ ${resizeScript}
     SplitView: [() => SplitView],
     PhoneSplitView: [() => PhoneSplitView],
     DesktopSplitView: [() => DesktopSplitView],
-    PAGE_SIZES: [() => PAGE_SIZES],
-    buildGanttSVG: [() => buildGanttSVG],
-    EXHIBIT_MIN_GANTT: [() => EXHIBIT_MIN_GANTT],
-    approxTextPx: [() => approxTextPx],
-    layoutExhibitCols: [() => layoutExhibitCols],
-    buildPDFHtml: [() => buildPDFHtml],
     Toggle: [() => Toggle],
     SegBtn: [() => SegBtn],
     Field: [() => Field],

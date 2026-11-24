@@ -40,8 +40,8 @@ export const sequencePageModulePaths = () => {
 
 /** index.html only: the markup, CSS tokens and boot scripts (no application code). */
 export const sequenceHtmlSource = () => readFileSync(SEQUENCE_PAGE_PATH, "utf8");
-/** The page's own application modules (src/workspaces/scheduler/page/**), concatenated. */
-export const sequenceModulesSource = () => sequencePageModulePaths().map((p) => readFileSync(p, "utf8")).join("\n");
+/** The page's own application modules (src/workspaces/scheduler/page/**), concatenated, with the `export ` keyword stripped so a test sees the declarations as they read in one script. */
+export const sequenceModulesSource = () => sequencePageModulePaths().map((p) => readFileSync(p, "utf8").replace(/^export (?=(?:async )?(?:const|let|function|class) )/gm, "")).join("\n");
 /** The page: index.html plus its application modules (what "index.html" used to mean to a source-text test). */
 export const sequencePageSource = () => sequenceHtmlSource() + "\n" + sequenceModulesSource();
 /** The engine modules the page's bundle is built from, concatenated. */
