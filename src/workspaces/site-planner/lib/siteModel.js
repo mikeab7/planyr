@@ -30,7 +30,7 @@
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun, sideParkStack,
-  SIDE_PARK_PIN_TOL_FT } from "./dogEar.js";
+  SIDE_PARK_PIN_TOL_FT, isFlushPackLayer, repackAllFlushLayers } from "./dogEar.js";
 import { isBuilding } from "../../../shared/projects/projectModel.js";
 import { createIdMinter, randomIdSalt } from "../../../shared/ids.js";
 import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
@@ -527,7 +527,24 @@ function normalizeWallKids(list, onHeal) {
     if (onHeal) onHeal({ id: e.id, host: host.id, kind: WALL_STRIP_TYPES.has(e.type) ? "wall-strip" : "side-parking", type: e.type, side, from: { cx: e.cx, cy: e.cy }, to: { cx: g.cx, cy: g.cy } });
     return { ...e, ...g };
   });
-  return changed ? out : els;
+  /* B2671304 (×2) — re-pack every building's flush wall layers (buffer / road / wall trailer row) against the layers
+   * inboard of them, BOTH ways: a buffer a past shrink left stranded out in space snaps back flush on open. The same
+   * shared pack the canvas refit runs (lib/dogEar `repackFlushLayers`). */
+  let packed = changed ? out : els;
+  const hosts = new Set();
+  for (const e of packed) if (isFlushPackLayer(e) && e.attachedTo != null) hosts.add(e.attachedTo);
+  for (const hid of hosts) {
+    const host = packed.find((x) => x && x.id === hid);
+    if (!host || host.type !== "building" || host.dogEar || host.points || !finiteBox(host)) continue;
+    const before = packed;
+    packed = repackAllFlushLayers(packed, host);
+    if (packed !== before) {
+      changed = true;
+      if (onHeal) packed.forEach((x, i) => { if (x !== before[i]) onHeal({ id: x.id, host: host.id, kind: "flush-layer", type: x.type, from: { cx: before[i].cx, cy: before[i].cy }, to: { cx: x.cx, cy: x.cy } }); });
+    }
+  }
+  return changed ? packed : els;
+
 }
 
 /* ---- NEW-3: re-tag orphaned wall pads, and restore the strip one of them cost ------------------
