@@ -1,3 +1,4 @@
+// source-scan: guards that a JSX attribute spread is present on every panel input; there is no runtime surface to test without a browser extension
 // Every free-text <input> in the Site Planner panels opts out of password-manager icons (LastPass "•••" in the
 // encumbrance Name field). Real sign-in / contact fields carry their own autoComplete token or data-contact-field.
 import { describe, it, expect } from "vitest";
