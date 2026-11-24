@@ -345,7 +345,7 @@ import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf, driveTargetKindOf } from "./lib/roadJunctions.js";
 import { seamElements } from "./lib/elsSeam.js";
 import { useLatestRender, useLatestEffect } from "./lib/useLatest.js";
-import { RAMP_DEFAULTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, refitRamps, wallFrame, dockHeightInOf, rampGeometry, reseatRamps, pickRampSpot } from "./lib/driveInRamp.js";
+import { RAMP_DEFAULTS, DOOR_SIZES, newRampRecord, rampBox, rampSpan, refitRamps, wallFrame, dockHeightInOf, rampGeometry, reseatRamps, pickRampSpot, bumpSpansOnWall } from "./lib/driveInRamp.js";
 import { snapToAisle, aisleSnapFor } from "./lib/parkingApproach.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import { TAPER_MAX_FT } from "./lib/roadTaper.js";
@@ -618,12 +618,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // rise) is read through this ref so the seam below never closes over `settings`, which is declared further down.
   const rampDockInRef = useRef(48);
   /* NEW-1 (2026-11-06) — a ramp stays ON its wall: `reseatRamps` (lib/driveInRamp.js) runs at this same seam, before the box refit, so a building shortened or
-   * lengthened at either end carries its end ramps with it (and the on-open heal below re-seats one already stranded). It needs the plan settings (the door grid
-   * its end spot is picked from) through a ref, like the dock height; a ramp it drops is queued here and tombstoned by the effect below (TOMBSTONE-DELETES). */
-  const rampSettingsRef = useRef(null);
+   * lengthened at either end carries its end ramps with it (and the on-open heal below re-seats one already stranded). A stranded ramp lands flush against the bump-out /
+   * wall end (owner 2026-11-24), the same spot the corner "+" picks; a ramp it drops is queued here and tombstoned by the effect below (TOMBSTONE-DELETES). */
   const rampDropQueue = useRef(new Set());
-  const rampSeatCtx = () => ({ dockSidesOf: (h) => dockSidesFor(h).dockSides, dockHeightIn: rampDockInRef.current, onDrop: (id) => rampDropQueue.current.add(id),
-    runOf: (h, side, arr) => rampDoorRunOf(h, side, arr, rampSettingsRef.current) });
+  const rampSeatCtx = () => ({ dockSidesOf: (h) => dockSidesFor(h).dockSides, dockHeightIn: rampDockInRef.current, onDrop: (id) => rampDropQueue.current.add(id) });
   const setEls = (u) => {
     const d = drag.current;                                  // read NOW, not when React runs the updater: the gesture may have ended by then
     const gestureBase = d && d.followBase ? d.followBase : null;
@@ -10914,12 +10912,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const isDock = dockSidesOf(b).dockSides.includes(side);
     const W = isDock ? RAMP_DEFAULTS.widthFt : DOOR_SIZES[RAMP_DEFAULTS.door].w;
     const taken = rampsOnHost(els, b).filter((r) => r.ramp.side === side).map((r) => rampSpan(r.ramp, { marker: !isDock, dockHeightIn: rampDockIn }));
-    return pickRampSpot({ run: isDock ? rampDoorRun(b, side) : null, L: wallFrame(b, side).L, W, where, taken });
+    // owner 2026-11-24: flush against the bump-out at that corner, or the end of the building when there is none (lib/driveInRamp.js pickRampSpot)
+    return pickRampSpot({ L: wallFrame(b, side).L, W, where, taken, bumps: bumpSpansOnWall(els, b, side) });
   };
   const addRamp = (b, side, where) => {
     if (!b || b.type !== "building" || b.points || b.footEdit || !SIDE_N[side]) return;
     const at = planRampAt(b, side, where);
-    if (at == null) { flashWarn("There is no free door module on that wall for a drive-in ramp.", 4000); return; }
+    if (at == null) { flashWarn("There is no free room on that wall for a drive-in ramp.", 4000); return; }
     const isDock = dockSidesOf(b).dockSides.includes(side);
     const ramp = newRampRecord(side, at);
     const ne = { id: uid(), type: "driveInRamp", attachedTo: b.id, noLabel: true, ramp, ...rampBox(b, ramp, { marker: !isDock, dockHeightIn: rampDockIn }) };
@@ -12357,7 +12356,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // it changes (a derived cache, not an edit: no undo frame; identity-stable when nothing moved).
   const rampDockIn = dockHeightInOf(settings);
   rampDockInRef.current = rampDockIn;
-  rampSettingsRef.current = settings;
   useEffect(() => { setElsRaw((prev) => refitRamps(prev, (h) => dockSidesFor(h).dockSides, rampDockIn)); }, [rampDockIn]);
   /* NEW-1 (2026-11-06) — the on-open heal: a ramp whose door centre is past its wall's end (stranded when its building was shortened before ramps followed)
    * is re-seated by the SAME rule, and one that lands on another ramp is dropped. Runs after every settled write (never mid-gesture; the seam above handles
