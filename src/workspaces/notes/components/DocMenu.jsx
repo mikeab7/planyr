@@ -1,4 +1,5 @@
 /* DocMenu — the document right-click menu (rows, table section, placement), moved verbatim out of NoteEditor.jsx (audit batch L1; module scope, MODULE-SCOPE-COMPONENTS). */
+import { MiniBar } from "./MiniBar.jsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { PASTE_MODE_META } from "../lib/notesPasteModes.js";
