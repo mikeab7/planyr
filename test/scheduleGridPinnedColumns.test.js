@@ -61,6 +61,6 @@ describe("Schedule grid — the Help button's corner (NEW-3)", () => {
     // grid, Gantt and Task Report scrollers carry the clearance as scroll-end padding
     expect((seq.match(/paddingBottom:`?"?calc\(var\(--fab-dock|paddingBottom:"var\(--fab-dock/g) || []).length).toBeGreaterThanOrEqual(3);
     // and the shell is told not to lift the "?" for this page
-    expect(seq).toContain('setAttribute("data-corner-free","1")');
+    expect(readFileSync("public/sequence/boot.js", "utf8")).toContain('setAttribute("data-corner-free","1")');
   });
 });

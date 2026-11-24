@@ -438,10 +438,7 @@ html.in-iframe .app-header { display: none !important; }
 html.in-iframe { --fab-dock: 48px; }
 @media (pointer: coarse) { html.in-iframe { --fab-dock: 64px; } }
 </style>
-<script>/* J2 — first paint already in the shell's theme (same origin), so a dark app never flashes a white Schedule. */try{var _t=window.parent&&window.parent!==window?window.parent.document.documentElement.dataset.theme:"";if(_t==="dark"||_t==="light")document.documentElement.setAttribute("data-theme",_t);}catch(_){}
-(function(){window.addEventListener("message",function(e){var m=e.data;if(e.origin!==window.location.origin||!m||m.source!=="planar-shell"||m.type!=="planar:theme")return;if(m.theme==="dark"||m.theme==="light")document.documentElement.setAttribute("data-theme",m.theme);});})();</script>
-<script>if(window.self!==window.top){document.documentElement.classList.add("in-iframe");document.documentElement.setAttribute("data-corner-free","1");}</script>
-<script>/* NEW-1 — a press (or Escape) in this embedded app never reaches the shell's document, so a shell dropdown (schedule / project switcher) stayed open over the grid. Tell the parent; it is a notice only — nothing is stopped or consumed, the cell still gets its click. */(function(){if(window.self===window.top)return;var tell=function(t){try{window.parent.postMessage({source:"planar-seq",type:t},window.location.origin);}catch(_){}};window.addEventListener("pointerdown",function(){tell("planar:press");},true);window.addEventListener("keydown",function(e){if(e.key==="Escape")tell("planar:escape");},true);})();</script>
+<script src="/sequence/boot.js"></script>
 </head>
 <body>
 <script id="planar-data">window.__PLANAR_DATA__={"nPid":4,"nTid":{"1":10,"2":10,"3":10},"aPid":1,"view":"split","section":"projects","editProjId":null,"healthColStyle":"stoplight","settings":{"defaultSplit":60,"snapDefault":true,"holidays":{"newYearsDay":true,"mlkDay":false,"presidentsDay":false,"memorialDay":true,"juneteenth":false,"independence":true,"laborDay":true,"columbusDay":false,"veteransDay":false,"thanksgiving":true,"dayAfterThanksgiving":false,"christmasEve":true,"christmas":true,"newYearsEve":false},"customHealth":[],"healthLabelOverrides":{}},"projects":{"1":{"id":1,"name":"Sample Project A","tasks":[{"id":1,"name":"Project Kick Off","start":"2026-01-05","end":"2026-01-05","duration":0,"predecessors":[],"health":"green","percentComplete":100,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":2,"name":"Due Diligence","start":"2026-01-05","end":"2026-02-16","duration":30,"predecessors":[],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":3,"name":"Order Reports","start":"2026-01-05","end":"2026-01-12","duration":5,"predecessors":[],"health":"green","percentComplete":100,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":4,"name":"Review Reports","start":"2026-01-12","end":"2026-02-02","duration":15,"predecessors":[{"id":3,"type":"FS","lag":0}],"health":"yellow","percentComplete":40,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":5,"name":"Entitlements","start":"2026-02-16","end":"2026-05-11","duration":60,"predecessors":[{"id":2,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":6,"name":"Submit Application","start":"2026-01-05","end":"2026-01-12","duration":5,"predecessors":[],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":7,"name":"Agency Review","start":"2026-01-12","end":"2026-03-09","duration":40,"predecessors":[{"id":6,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":8,"name":"Approval","start":"2026-03-09","end":"2026-03-09","duration":0,"predecessors":[{"id":7,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":9,"name":"Construction","start":"2026-05-11","end":"2026-10-26","duration":120,"predecessors":[{"id":5,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true}]},"2":{"id":2,"name":"Sample Project B","tasks":[{"id":1,"name":"Project Kick Off","start":"2026-02-02","end":"2026-02-02","duration":0,"predecessors":[],"health":"green","percentComplete":100,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":2,"name":"Due Diligence","start":"2026-02-02","end":"2026-03-16","duration":30,"predecessors":[],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":3,"name":"Order Reports","start":"2026-02-02","end":"2026-02-09","duration":5,"predecessors":[],"health":"green","percentComplete":100,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":4,"name":"Review Reports","start":"2026-02-09","end":"2026-03-02","duration":15,"predecessors":[{"id":3,"type":"FS","lag":0}],"health":"yellow","percentComplete":40,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":5,"name":"Entitlements","start":"2026-03-16","end":"2026-06-08","duration":60,"predecessors":[{"id":2,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":6,"name":"Submit Application","start":"2026-02-02","end":"2026-02-09","duration":5,"predecessors":[],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":7,"name":"Agency Review","start":"2026-02-09","end":"2026-04-06","duration":40,"predecessors":[{"id":6,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":8,"name":"Approval","start":"2026-04-06","end":"2026-04-06","duration":0,"predecessors":[{"id":7,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":9,"name":"Construction","start":"2026-06-08","end":"2026-11-23","duration":120,"predecessors":[{"id":5,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true}]},"3":{"id":3,"name":"Sample Project C","tasks":[{"id":1,"name":"Project Kick Off","start":"2026-03-02","end":"2026-03-02","duration":0,"predecessors":[],"health":"green","percentComplete":100,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":2,"name":"Due Diligence","start":"2026-03-02","end":"2026-04-13","duration":30,"predecessors":[],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":3,"name":"Order Reports","start":"2026-03-02","end":"2026-03-09","duration":5,"predecessors":[],"health":"green","percentComplete":100,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":4,"name":"Review Reports","start":"2026-03-09","end":"2026-03-30","duration":15,"predecessors":[{"id":3,"type":"FS","lag":0}],"health":"yellow","percentComplete":40,"parentId":2,"responsibleParty":"","notes":[],"isExpanded":true},{"id":5,"name":"Entitlements","start":"2026-04-13","end":"2026-07-06","duration":60,"predecessors":[{"id":2,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true},{"id":6,"name":"Submit Application","start":"2026-03-02","end":"2026-03-09","duration":5,"predecessors":[],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":7,"name":"Agency Review","start":"2026-03-09","end":"2026-05-04","duration":40,"predecessors":[{"id":6,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":8,"name":"Approval","start":"2026-05-04","end":"2026-05-04","duration":0,"predecessors":[{"id":7,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":5,"responsibleParty":"","notes":[],"isExpanded":true},{"id":9,"name":"Construction","start":"2026-07-06","end":"2026-12-21","duration":120,"predecessors":[{"id":5,"type":"FS","lag":0}],"health":"gray","percentComplete":0,"parentId":null,"responsibleParty":"","notes":[],"isExpanded":true}]}},"_v6":true,"masterCols":["project","name","start","end","duration","health","responsibleParty","notes","successors","parent"],"masterLevelFilter":{"leafOnly":true,"depths":[3,2,1,0]},"masterSort":{"col":"health","dir":"asc"},"masterColWidths":{"project":92,"id":36,"parent":140,"name":220,"start":72,"end":71,"duration":46,"health":110,"percentComplete":60,"responsibleParty":100,"predecessors":180,"successors":122,"notes":233}};</script>
@@ -449,49 +446,6 @@ html.in-iframe { --fab-dock: 48px; }
 <script src="/sequence/vendor/react.production.min.js"></script>
 <script src="/sequence/vendor/react-dom.production.min.js"></script>
 <script src="/sequence/taskIcons.js"></script>
-<script id="sched-pin-cursor">
-// pinSchedCursor(cursor, { onExit }) — the scheduler iframe's own copy of src/shared/ui/controls.jsx `pinDragCursor` (this
-// standalone page cannot import from src/). Pins ONE cursor over the whole page for the LIFE of a drag, so it does not flip
-// back to whatever the pointer happens to be over (every grid cell / header / Gantt row sets its own inline cursor, and the
-// pointer routinely leaves the grip: Snap mode moves the divider away from it). `!important` on the root + every descendant
-// beats those inline cursors. Released by the returned function (idempotent), by pointerup / mouseup, and — as an ABORT, which
-// also calls `onExit` so the caller can end its own gesture — by pointercancel, Escape and window blur. One pin at a time: a
-// second call replaces the first.
-(function () {
-  var live = null;
-  window.pinSchedCursor = function (cursor, opts) {
-    if (live) live.release(false);
-    var el = document.createElement("style");
-    el.setAttribute("data-pinned-cursor", cursor);
-    el.textContent = "html, html * { cursor: " + cursor + " !important; }";
-    document.head.appendChild(el);
-    var onExit = opts && opts.onExit;
-    var me = { release: release };
-    function onEvent(e) {
-      if (e.type === "keydown" && e.key !== "Escape") return;
-      release(e.type === "keydown" || e.type === "blur" || e.type === "pointercancel");
-    }
-    function release(abort) {
-      if (live !== me) return;
-      live = null;
-      el.remove();
-      window.removeEventListener("pointerup", onEvent, true);
-      window.removeEventListener("mouseup", onEvent, true);
-      window.removeEventListener("pointercancel", onEvent, true);
-      window.removeEventListener("keydown", onEvent, true);
-      window.removeEventListener("blur", onEvent);
-      if (abort === true && onExit) onExit();
-    }
-    live = me;
-    window.addEventListener("pointerup", onEvent, true);
-    window.addEventListener("mouseup", onEvent, true);
-    window.addEventListener("pointercancel", onEvent, true);
-    window.addEventListener("keydown", onEvent, true);
-    window.addEventListener("blur", onEvent);
-    return function () { release(false); };
-  };
-})();
-</script>
 <script src="/sequence/page.js"></script>
 </body>
 </html>

@@ -5602,6 +5602,44 @@
     FUNCTION_HELP: F.FUNCTION_HELP
   };
 
+  // src/workspaces/scheduler/page/pinCursor.js
+  function installPinSchedCursor() {
+    var live = null;
+    window.pinSchedCursor = function(cursor, opts) {
+      if (live) live.release(false);
+      var el = document.createElement("style");
+      el.setAttribute("data-pinned-cursor", cursor);
+      el.textContent = "html, html * { cursor: " + cursor + " !important; }";
+      document.head.appendChild(el);
+      var onExit = opts && opts.onExit;
+      var me = { release };
+      function onEvent(e) {
+        if (e.type === "keydown" && e.key !== "Escape") return;
+        release(e.type === "keydown" || e.type === "blur" || e.type === "pointercancel");
+      }
+      function release(abort) {
+        if (live !== me) return;
+        live = null;
+        el.remove();
+        window.removeEventListener("pointerup", onEvent, true);
+        window.removeEventListener("mouseup", onEvent, true);
+        window.removeEventListener("pointercancel", onEvent, true);
+        window.removeEventListener("keydown", onEvent, true);
+        window.removeEventListener("blur", onEvent);
+        if (abort === true && onExit) onExit();
+      }
+      live = me;
+      window.addEventListener("pointerup", onEvent, true);
+      window.addEventListener("mouseup", onEvent, true);
+      window.addEventListener("pointercancel", onEvent, true);
+      window.addEventListener("keydown", onEvent, true);
+      window.addEventListener("blur", onEvent);
+      return function() {
+        release(false);
+      };
+    };
+  }
+
   // src/workspaces/scheduler/page/harnessGlobals.js
   function exposeToHarness(table) {
     for (const [name, [get, set]] of Object.entries(table)) {
@@ -18607,6 +18645,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
   });
 
   // src/workspaces/scheduler/page/main.jsx
+  installPinSchedCursor();
   var { useState: useState15, useEffect: useEffect14, useRef: useRef14, useMemo: useMemo5, useCallback: useCallback2 } = React;
   function removeScheduleFromDoc(d, id) {
     if (!d || !d.projects || !d.projects[id]) return d;

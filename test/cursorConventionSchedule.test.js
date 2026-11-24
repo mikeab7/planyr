@@ -43,10 +43,12 @@ describe("the iframe page owns the disabled / busy / native-input cursors in its
 });
 
 describe("the pin helper (the iframe's own pinDragCursor — it cannot import src/shared)", () => {
-  const m = html.match(/<script id="sched-pin-cursor">([\s\S]*?)<\/script>/);
-  it("exists as a plain script ahead of the page bundle", () => {
-    expect(m).not.toBeNull();
-    expect(html.indexOf('id="sched-pin-cursor"')).toBeLessThan(html.indexOf('<script src="/sequence/page.js"></script>'));
+  const pinSrc = read("src/workspaces/scheduler/page/pinCursor.js");
+  const m = [null, pinSrc.replace("export function installPinSchedCursor", "function installPinSchedCursor") + "\ninstallPinSchedCursor();"];
+  it("is a page module installed by the bundle, and index.html carries no copy of it", () => {
+    expect(pinSrc).toContain("window.pinSchedCursor");
+    expect(read("src/workspaces/scheduler/page/main.jsx")).toContain("installPinSchedCursor();");
+    expect(read("public/sequence/index.html")).not.toContain("sched-pin-cursor");
   });
   it("is released on pointerup, mouseup, pointercancel, Escape and window blur", () => {
     const src = m ? m[1] : "";

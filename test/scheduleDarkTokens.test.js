@@ -45,7 +45,7 @@ describe("Schedule theme tokens", () => {
   it("the shell sends planar:theme and the page listens for it", () => {
     const shell = readFileSync(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url), "utf8");
     expect(shell).toContain('type: "planar:theme"');
-    expect(page).toContain('m.type!=="planar:theme"');
+    expect(readFileSync(new URL("../public/sequence/boot.js", import.meta.url), "utf8")).toContain('m.type!=="planar:theme"');
   });
 });
 
