@@ -776,6 +776,8 @@ function emptyGeneric() {
     capRate: null, noi: null, opex: null, hadRecognizedNote: false,
     clearHeightFt: null, yearBuilt: null, anchor: null, powerAmps: null, powerVolts: null, powerPhase: null, dockDoors: null,
     commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
+    // Under-construction facts (db/comps_under_construction.sql) — only a pasted sheet that names them fills these.
+    ucStatus: null, ucDeliveryKind: null, ucStartDate: null, ucDeliveryDate: null, ucPreleasedPct: null,
   };
 }
 
@@ -788,7 +790,7 @@ function genericHasAnything(g) {
   return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
     g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
     g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null ||
-    g.commencementDate || g.hadRecognizedNote || g.clearHeightFt != null || g.yearBuilt != null || !!g.anchor || g.powerAmps != null || g.powerVolts != null || g.powerPhase != null || g.dockDoors != null);
+    g.commencementDate || g.ucStatus || g.ucDeliveryKind || g.ucStartDate || g.ucDeliveryDate || g.ucPreleasedPct != null || g.hadRecognizedNote || g.clearHeightFt != null || g.yearBuilt != null || !!g.anchor || g.powerAmps != null || g.powerVolts != null || g.powerPhase != null || g.dockDoors != null);
 }
 
 function addNote(g, text) {
@@ -1170,7 +1172,7 @@ function leftoverSegments(line, working) {
 
 function remapFlagKey(key, compType) {
   if (key === "price") return compType === "building_sale" ? "bldgPrice" : "landPrice";
-  if (key === "sizeValue") return compType === "land" ? "landSizeValue" : compType === "building_sale" ? "bldgSizeSf" : "leaseSizeSf";
+  if (key === "sizeValue") return compType === "land" ? "landSizeValue" : compType === "building_sale" || compType === "under_construction" ? "bldgSizeSf" : "leaseSizeSf";
   if (key === "rate") return "leaseRate";
   if (key === "noi") return "bldgNoi";
   if (key === "opex") return "leaseOpex";
@@ -1185,7 +1187,7 @@ function finalizeGenericRow(generic, rawFlags, raw) {
   const flags = {};
   for (const [k, v] of Object.entries(rawFlags)) flags[remapFlagKey(k, generic.compType)] = v;
 
-  if (generic.compType === "lease") {
+  if (generic.compType === "lease" || generic.compType === "under_construction") {
     if (generic.rate != null) {
       if (!generic.ratePeriod) {
         mergeFlag(flags, "leaseRatePeriod", "blocking",
@@ -1251,6 +1253,7 @@ function genericToDraft(generic) {
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
     clearHeightFt: "", yearBuilt: "",
+    ucStatus: "", ucDeliveryKind: "", ucStartDate: "", ucDeliveryDate: "", ucPreleasedPct: "",
   };
   d.compType = generic.compType || d.compType;
   if (generic.anchor) d.anchor = generic.anchor;
@@ -1282,6 +1285,21 @@ function genericToDraft(generic) {
     if (generic.powerVolts != null) d.powerVolts = String(generic.powerVolts);
     if (generic.powerPhase != null) d.powerPhase = String(generic.powerPhase);
     if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
+  } else if (d.compType === "under_construction") {
+    if (generic.sizeValue != null) d.bldgSizeSf = String(generic.sizeValue);
+    if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
+    if (generic.powerAmps != null) d.powerAmps = String(generic.powerAmps);
+    if (generic.powerVolts != null) d.powerVolts = String(generic.powerVolts);
+    if (generic.powerPhase != null) d.powerPhase = String(generic.powerPhase);
+    if (generic.dockDoors != null) d.dockDoors = String(generic.dockDoors);
+    if (generic.rate != null) d.leaseRate = String(generic.rate);
+    if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
+    d.leaseRateExpense = generic.rateBasis || "nnn";
+    if (generic.ucStatus) d.ucStatus = generic.ucStatus;
+    if (generic.ucDeliveryKind) d.ucDeliveryKind = generic.ucDeliveryKind;
+    if (generic.ucStartDate) d.ucStartDate = generic.ucStartDate;
+    if (generic.ucDeliveryDate) d.ucDeliveryDate = generic.ucDeliveryDate;
+    if (generic.ucPreleasedPct != null) d.ucPreleasedPct = String(generic.ucPreleasedPct);
   } else if (d.compType === "lease") {
     if (generic.clearHeightFt != null) d.clearHeightFt = String(generic.clearHeightFt);
     if (generic.yearBuilt != null) d.yearBuilt = String(generic.yearBuilt);
@@ -1664,6 +1682,12 @@ const HEADER_RULES = [
   ["dockDoors", ({ n }) => /^(docks?|dock doors?|dock high doors?|dock high|dh doors?|dock positions?)$/.test(n)],
   ["clearHeightFt", ({ n }) => /(clear|clearance|ceiling height|eave height)/.test(n)],
   ["yearBuilt", ({ n }) => /(year built|yr built|^built$|^yob$|year blt|yr blt|construction year|^year$)/.test(n)],
+  // Under-construction columns (the sheet's own headers must paste back into the same fields).
+  ["ucStatus", ({ n }) => /^(status|construction status|project status|stage)$/.test(n)],
+  ["ucDeliveryKind", ({ n }) => /^(spec bts|spec or bts|spec bts|spec or build to suit|spec build to suit|delivery type|delivery kind|spec)$/.test(n)],
+  ["ucPreleasedPct", ({ n }) => /(pre ?leas|pre lsd|prelsd|percent leased|leased)$/.test(n) && !/(^|\s)sf\b/.test(n)],
+  ["ucStartDate", ({ n }) => /(construction start|groundbreaking|ground breaking|^start$|start of construction|construction commenc)/.test(n)],
+  ["ucDeliveryDate", ({ n }) => /(delivery|delivers|completion|completes|expected comp|ready date)/.test(n)],
   ["commencementDate", ({ n }) => /(commenc|^lcd$|^rcd$|start date|lease start|occupancy|move in)/.test(n)],
   ["expiration", ({ n }) => /(expir|end date|lease end|^lxd$)/.test(n)],
   // "Lease Transaction Type", "Load Type", "Property Type" … — any OTHER "type" column is a fact
@@ -1803,6 +1827,7 @@ function normalizeCompTypeToken(v) {
   const s = String(v).trim().toLowerCase();
   if (/^land/.test(s)) return "land";
   if (/^lease/.test(s)) return "lease";
+  if (/under.?constr|^constr|pipeline|under.?dev/.test(s)) return "under_construction";
   if (/build|sale/.test(s)) return "building_sale";
   return null;
 }
@@ -1906,6 +1931,28 @@ function assignHeaderCell(generic, flags, ctx, col, val) {
       const x = cellNumber(val);
       if (x != null && x > 0) { generic.clearHeightFt = x; if ((val.match(/\d+(?:\.\d+)?/g) || []).length > 1 && !/^\s*\d+\s*'\s*-?\s*0+\s*"?\s*$/.test(val)) ctx.extras.push(`${col.label}: ${val}`); }
       else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "ucStatus": {
+      const t = String(val).toLowerCase();
+      const st = /deliver|complete|finish/.test(t) ? "delivered" : /under|constr|build|progress|ongoing/.test(t) ? "under_construction" : /plan|propos|entitle|future/.test(t) ? "planned" : null;
+      if (st) generic.ucStatus = st; else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "ucDeliveryKind": {
+      const t = String(val).toLowerCase();
+      const kind = /\bbts\b|build.?to.?suit/.test(t) ? "bts" : /\bspec/.test(t) ? "spec" : null;
+      if (kind) generic.ucDeliveryKind = kind; else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "ucPreleasedPct": {
+      const x = cellNumber(String(val).replace(/%/g, ""));
+      if (x != null && x >= 0 && x <= 100) generic.ucPreleasedPct = x; else ctx.extras.push(`${col.label}: ${val}`);
+      break;
+    }
+    case "ucStartDate": case "ucDeliveryDate": {
+      const dt = findDateToken(val);
+      if (dt) generic[col.key === "ucStartDate" ? "ucStartDate" : "ucDeliveryDate"] = dt.iso; else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "powerAmps": { const x = cellNumber(String(val).replace(/\s*a(mps?)?$/i, "")); if (x != null && x > 0) generic.powerAmps = x; else ctx.extras.push(`${col.label}: ${val}`); break; }

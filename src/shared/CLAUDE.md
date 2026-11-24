@@ -755,6 +755,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   Location resolver (panel + export; the APN is never a Location). `compParse.js` reads the unclaimed leftover
   per comma-segment: consumed type/connector words ("lease", "at", "executed") never reach Notes, a leading
   name becomes the Title.
+  **Under construction (owner ask 2026-11-24) is a FOURTH `comp_type`, not a new table or module** (`db/comps_under_construction.sql`: the type + `uc_status`/`uc_delivery_kind`/`uc_start_date`/`uc_delivery_date`/`uc_preleased_pct`; same RLS, nothing restated). It reuses developer = `partyProvider`, tenant = `partyAcquirer`, size = `bldgSizeSf`, asking rate = the lease-rate fields (period still required). It has no executed date and never enters an average or the Dashboard Comps card (`dashboardCompsFetch`); orange dashed map marker; filterable by its own Type chip; a DELIVERED one converts in place to a lease or sale record from the record's ⋯ menu (`convertDeliveredComp`, executed date left blank). Pasted sheets use the grid's own headers (`compParse.js` HEADER_RULES). Guard: repo-root `test/` **compsUnderConstruction**. **The migration must be applied BEFORE the app deploys** (`SELECT_COLS` reads the new columns).
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

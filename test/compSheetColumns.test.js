@@ -46,7 +46,7 @@ describe("compSheetColumns: column list sanity", () => {
   // B1519296 (owner mockup pick, 2026-09-11) — PROPERTY split into LOCATION (where the comp IS)
   // and BUILDING (physical facts about the improvement) — banding only, no column's meaning moved.
   it("B1519296 — GROUPS reflects the LOCATION/BUILDING split; NOTES is gone (Notes left the sheet)", () => {
-    expect(GROUPS).toEqual(["TYPE", "LOCATION", "BUILDING", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"]);
+    expect(GROUPS).toEqual(["TYPE", "LOCATION", "BUILDING", "CONSTRUCTION", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"]);
   });
   it("B1519296 — location/title are LOCATION; size/unit/clear height/year built are BUILDING", () => {
     expect(SHEET_COLUMNS[columnIndex("location")].group).toBe("LOCATION");

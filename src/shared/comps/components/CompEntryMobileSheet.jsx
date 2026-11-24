@@ -24,7 +24,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
-import { cellState, TYPE_OPTIONS } from "../lib/compSheetColumns.js";
+import { cellState, TYPE_OPTIONS, UC_STATUS_OPTIONS, UC_KIND_OPTIONS } from "../lib/compSheetColumns.js";
 import { rowStatusText } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
 import {
@@ -41,7 +41,9 @@ const VALUE_FS = 15; // design-exempt: deliberate 15px value size — the one th
 const NAME_FS = 18; // design-exempt: deliberate 18px deal name — the one headline on the sheet, typed in place
 
 // Segmented type order on the phone: the owner's order, Lease first.
-const TYPE_SEG = ["lease", "land", "building_sale"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg Sale" }[v] }));
+const TYPE_SEG = ["lease", "land", "building_sale", "under_construction"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg Sale", under_construction: "Constr." }[v] }));
+const UC_STATUS_SEG = UC_STATUS_OPTIONS;
+const UC_KIND_SEG = UC_KIND_OPTIONS;
 const TYPE_LABEL = Object.fromEntries(TYPE_OPTIONS.map((o) => [o.value, o.label]));
 // Term entry unit is remembered for the session (storage is always months).
 let sessionTermUnit = "months";
@@ -349,7 +351,7 @@ export default function CompEntryMobileSheet({
   // same pass would overwrite the first); the effect re-runs on the rows it just changed.
   useEffect(() => {
     for (const r of rows) {
-      if (r.draft.compType !== "lease") continue;
+      if (r.draft.compType !== "lease" && r.draft.compType !== "under_construction") continue;
       const step = periodGuessStep({ rate: r.draft.leaseRate, period: r.draft.leaseRatePeriod, guessed: !!guessed[r._id], locked: !!locked[r._id] });
       if (!step) continue;
       if (step.period && r.cellFlags?.leaseRatePeriod?.level === "blocking") onResolvePeriod(r._id, step.period);
@@ -425,11 +427,13 @@ export default function CompEntryMobileSheet({
   const locationText = locationCellText(currentRow, overlaysById);
   const placed = !!draft.anchor; // a pending reverse-geocode still counts as placed — never "Place on map"
   const isLease = compType === "lease";
+  const isUC = compType === "under_construction"; // competing supply: asking rate + construction facts, never a price
+  const hasRateCard = isLease || isUC;
   const isLand = compType === "land";
   const parties = mobilePartyLabels(compType);
   const flag = currentRow.cellFlags?.leaseRatePeriod;
-  const periodBlocking = isLease && flag?.level === "blocking";
-  const hasRate = isLease && draft.leaseRate !== "" && draft.leaseRate != null;
+  const periodBlocking = hasRateCard && flag?.level === "blocking";
+  const hasRate = hasRateCard && draft.leaseRate !== "" && draft.leaseRate != null;
   const periodMissing = hasRate && !draft.leaseRatePeriod;
   const periodGuessed = hasRate && !!draft.leaseRatePeriod && !!guessed[currentRow._id] && !locked[currentRow._id];
   const periodTone = periodMissing ? "warn" : periodGuessed ? "guess" : "solid";
@@ -531,12 +535,28 @@ export default function CompEntryMobileSheet({
                 onChange={(v) => commit(cl("landSizeUnit"), v)} />
             ) : null}
           />
-          {!isLease && <InputRow {...common} col={cl("price")} label="Price" prefix="$" />}
-          {!isLease && price && <div data-readback="price" style={noteStyle}>{price}</div>}
+          {!hasRateCard && <InputRow {...common} col={cl("price")} label="Price" prefix="$" />}
+          {!hasRateCard && price && <div data-readback="price" style={noteStyle}>{price}</div>}
         </Group>
 
-        {isLease && (
-          <Group title="Rent">
+        {isUC && (
+          <Group title="Construction">
+            <div style={{ padding: "10px 16px 0" }}>
+              <Segmented fill label="Status" value={draft.ucStatus || ""} options={UC_STATUS_SEG}
+                onChange={(v) => commit(cl("ucStatus"), v)} />
+            </div>
+            <div style={{ padding: "8px 16px 4px" }}>
+              <Segmented fill label="Spec or build-to-suit" value={draft.ucDeliveryKind || ""} options={UC_KIND_SEG}
+                onChange={(v) => commit(cl("ucDeliveryKind"), v)} />
+            </div>
+            <InputRow {...common} col={cl("ucStartDate")} label="Start" />
+            <InputRow {...common} col={cl("ucDeliveryDate")} label="Delivery" />
+            <InputRow {...common} col={cl("ucPreleasedPct")} label="Pre-leased" suffix="%" />
+          </Group>
+        )}
+
+        {hasRateCard && (
+          <Group title={isUC ? "Asking rate" : "Rent"}>
             <InputRow
               {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" nudge={nudgeOn("period")}
               trailingIfValue
@@ -556,14 +576,16 @@ export default function CompEntryMobileSheet({
                 Guessed {draft.leaseRatePeriod === "monthly" ? "monthly" : "yearly"} from the rate. Tap {periodLabel} to change.
               </div>
             )}
-            <InputRow
-              {...common} col={termCol} label="Term"
-              display={(m) => termForDisplay(m, termUnit)}
-              toCommit={(v) => termToMonths(v, termUnit)}
-              trailingIfValue
-              trailing={<Pill dataPill="term-unit" ariaLabel="Term unit" label={TERM_UNIT_SHORT[termUnit]} onClick={() => setTermUnit(flipTermUnit(termUnit))} />}
-            />
-            {termReading && <div data-readback="term" style={noteStyle}>{termReading}</div>}
+            {isLease && (
+              <InputRow
+                {...common} col={termCol} label="Term"
+                display={(m) => termForDisplay(m, termUnit)}
+                toCommit={(v) => termToMonths(v, termUnit)}
+                trailingIfValue
+                trailing={<Pill dataPill="term-unit" ariaLabel="Term unit" label={TERM_UNIT_SHORT[termUnit]} onClick={() => setTermUnit(flipTermUnit(termUnit))} />}
+              />
+            )}
+            {isLease && termReading && <div data-readback="term" style={noteStyle}>{termReading}</div>}
           </Group>
         )}
 
