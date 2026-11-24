@@ -47,7 +47,7 @@ import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
-import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
+import { measuresUnderPoint, nextMeasureSelection, measureGrabsInterior } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { CLOUD_ARC_DEFAULT_FT, cloudScallopPath, simplifyPath, cloudMetaDefaults, cloudArcPx, cloudDefaultArcFt } from "./lib/cloudGeometry.js";
@@ -21851,7 +21851,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={hitLive ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={hitLive ? (measureGrabsInterior(m) ? "all" : "stroke") : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={hitLive ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" }} onPointerDown={canGrab ? (e) => startMoveMeasure(e, i) : undefined} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
@@ -21910,7 +21910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ? { fill: `url(#pat-markup-${m.id})` }
                   : closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
                 const visibleStroke = { strokeOpacity: m.strokeOpacity ?? 1 };
-                const closedHitPE = (closedFill || !m.locked) ? "all" : "stroke"; // whole-body vs stroke-only grab (B920/NEW-1)
+                const closedHitPE = closedFill ? "all" : "stroke"; // 2026-11-24: whole-body ONLY when visibly filled/hatched; else outline-only (lock no longer matters)
                 // Top-centre screen anchor for the selected-locked 🔒 cue (B922/NEW-3), per markup kind.
                 const mkLockAnchor = () => {
                   const pts = m.kind === "line" ? [m.a, m.b]

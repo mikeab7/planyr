@@ -5,6 +5,9 @@
 // deliberately does NOT own for this surface — see its header note. Two things still need the
 // stack in PURE JS, independent of the DOM, and this sibling of measureHit.js (B910) provides them:
 //
+//   • 2026-11-24 AMENDMENT — lock no longer matters: a closed markup grabs its INTERIOR only when
+//     visibly filled or hatched (see `grabsWholeBody`); otherwise its outline only. The paragraph
+//     below is the history of the rule it replaces.
 //   • B920 / NEW-1 — the ONE fill-and-lock-aware rule the DOM render also follows: a CLOSED markup
 //     grabs by its whole INTERIOR when it is FILLED (fillOpacity > 0 or a hatch is visible), OR
 //     simply UNLOCKED — the ordinary case (draw a shape, click inside it to select it, exactly like
@@ -26,8 +29,11 @@ import { pointInRing, ringArea } from "./ringMath.js";
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const DEG = Math.PI / 180;
-// NEW-1 (2026-09-07) — see the header note above: filled, OR unlocked, grabs by the whole body.
-const grabsWholeBody = (m) => (m.fillOpacity || 0) > 0 || (!!m.hatch && m.hatch !== "none") || !m.locked;
+// 2026-11-24 (owner: "if something has no fill or hatch I shouldn't be able to click on it where fill / hatch
+// would be, only on its visible part") — SUPERSEDES the 2026-09-07 "or unlocked" clause: a closed shape grabs
+// by its whole body ONLY when it is visibly filled (any fillOpacity > 0, however faint) or hatched. No fill and
+// no hatch → the outline within tolerance, locked or not, and the click passes through to whatever is beneath.
+export const grabsWholeBody = (m) => (m.fillOpacity || 0) > 0 || (!!m.hatch && m.hatch !== "none");
 
 // Ring area magnitude (feet²) — used only to RANK overlapping hits, so the sign is dropped.
 // One implementation, in ringMath.js; re-exported because callers and tests import it here.
