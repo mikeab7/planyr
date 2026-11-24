@@ -50,9 +50,10 @@ describe("length math", () => {
     expect(Number.isFinite(rampLengthFt({ gradePct: 0.01 }, DOCK_IN))).toBe(true);
     expect(rampLengthFt({ gradePct: -5 }, DOCK_IN)).toBe(50); // a bad value falls back to the default 8 %
   });
-  it("defaults: 16 ft wide, 8 %, straight-in, 12×14 door, wing walls and bollards on", () => {
+  it("defaults: 16 ft wide, 8 %, straight-in, 12×14 door, wing walls on (no bollards: retired 2026-11-24)", () => {
     const r = newRampRecord("bottom", 120);
-    expect(r).toMatchObject({ side: "bottom", at: 120, width: 16, gradePct: 8, layout: "straight", door: "12x14", wings: true, bollards: true });
+    expect(r).toMatchObject({ side: "bottom", at: 120, width: 16, gradePct: 8, layout: "straight", door: "12x14", wings: true });
+    expect(r).not.toHaveProperty("bollards");
     expect(r.riseIn).toBeUndefined(); // absent = follow the plan's dock height
     expect(RAMP_DEFAULTS.widthFt).toBe(16);
   });
@@ -84,17 +85,16 @@ describe("geometry — straight-in", () => {
     });
     expect(rampBox(host, newRampRecord("bottom", 200), { dockHeightIn: DOCK_IN }).rot).toBe(30);
   });
-  it("the door is a DOUBLED line on the wall, bollards two dots, wing walls two heavy lines on the long sides, the arrow points toward the door", () => {
+  it("the door is a DOUBLED line on the wall, NO bollard dots, wing walls two heavy lines on the long sides, the arrow points toward the door", () => {
     const rec = newRampRecord("bottom", 200), parts = rampParts(HOST, rec, { dockHeightIn: DOCK_IN });
     expect(parts.door).toHaveLength(2);
     parts.door.forEach(([a, b]) => { expect(Math.abs(b.x - a.x)).toBeCloseTo(12, 6); });
-    expect(parts.bollards).toHaveLength(2);
+    expect(parts).not.toHaveProperty("bollards");
     expect(parts.wings).toHaveLength(2);
     parts.wings.forEach(([a, b]) => { expect(Math.abs(along(HOST, "bottom", a) - along(HOST, "bottom", b))).toBeLessThan(1e-6); expect(Math.abs(outward(HOST, "bottom", a) - outward(HOST, "bottom", b))).toBeCloseTo(50, 6); });
     expect(outward(HOST, "bottom", parts.arrow.to)).toBeLessThan(outward(HOST, "bottom", parts.arrow.from)); // toward the wall = UP the ramp
-    const off = rampParts(HOST, { ...rec, wings: false, bollards: false }, { dockHeightIn: DOCK_IN });
+    const off = rampParts(HOST, { ...rec, wings: false }, { dockHeightIn: DOCK_IN });
     expect(off.wings).toHaveLength(0);
-    expect(off.bollards).toHaveLength(0);
     expect(off.door).toHaveLength(2); // the door is not optional
   });
 });
@@ -154,7 +154,7 @@ describe("a non-dock wall is a door marker only", () => {
   it("rampBox is the short stub, no wings/bollards/arrow, the label says door, and the flag says why", () => {
     const rec = newRampRecord("left", 100);
     const parts = rampParts(HOST, rec, { marker: true });
-    expect(parts.wings).toHaveLength(0); expect(parts.bollards).toHaveLength(0); expect(parts.arrow).toBeNull();
+    expect(parts.wings).toHaveLength(0); expect(parts).not.toHaveProperty("bollards"); expect(parts.arrow).toBeNull();
     expect(rampLabel(rec, { marker: true })).toBe("DRIVE-IN DOOR");
     const b = rampBox(HOST, rec, { marker: true });
     expect(b.w).toBeLessThan(3);
@@ -372,12 +372,12 @@ describe("the real renderer → the real editable-PDF walker", () => {
   const H = { startMoveEl() {}, onElDouble() {}, startDimMove() {}, onDimNumberDown() {}, onElContext() {} };
   const svg = (el, over = {}) => renderToStaticMarkup(createElement("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 1200 800" },
     createElement(ElNode, { el, f2p: over.f2p || f2p, isSel: false, tool: "select", settings, H, nb: nb.get(el.id), dimHidden: false, roadNet: null, lf: null, editingCorners: false, ...over })));
-  it("draws ONE el: group — footprint first, then wings, a doubled door line, two bollards, the arrow and the label", () => {
+  it("draws ONE el: group — footprint first, then wings, a doubled door line, the arrow and the label, and NO dots", () => {
     const x = svg(rampEl, { f2p: (p) => ({ x: p.x * 5 + 600, y: p.y * 5 - 400 }) });
     expect(x).toContain('data-feature="el:r1"');
     expect((x.match(/data-feature=/g) || []).length).toBe(1);
     expect(x.indexOf("<polygon")).toBeLessThan(x.indexOf("<line"));
-    expect((x.match(/<circle/g) || []).length).toBe(2);
+    expect((x.match(/<circle/g) || []).length).toBe(0);
     expect(x).toContain("DRIVE-IN RAMP · 8% · 16&#x27; W");
   });
   it("the label drops to the short form on a short footprint and to nothing when neither fits", () => {

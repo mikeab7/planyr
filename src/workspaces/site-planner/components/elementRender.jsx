@@ -258,13 +258,12 @@ function resolveDockPlan(el, settings, dogEars, ramps = null) {
 }
 /* ---- Drive-in ramp (NEW-1/NEW-3, 2026-10-30) -------------------------------------------------------------------------------------------
  * ONE `el:` group, so the editable PDF lifts it as ONE Bluebeam annotation (footprint first — the walker takes the first filled path as the body
- * and the largest closed filled path as the outline — then the wing walls, the doubled door line, the bollards, the slope arrow and the label).
+ * and the largest closed filled path as the outline — then the wing walls, the doubled door line, the slope arrow and the label; NO bollard dots, owner 2026-11-24).
  * Every number comes from `rampParts(host, ramp)` (lib/driveInRamp.js), the same call the tests and the grading plane make. A ramp whose host is
  * gone (a lone paste) draws its stored box as a plain footprint. Drawn in pixel space off world feet, so there is no group rotation to undo. */
 function renderRampPx(el, st, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, onElContext, lfK, editingCorners) {
   const host = nb ? nb.rampHost : null;
   const marker = !!host && !!el.ramp && !(nb.rampHostDockSides || []).includes(el.ramp.side);
-  const ppf = Math.hypot(f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, f2p({ x: 1, y: 0 }).y - f2p({ x: 0, y: 0 }).y);
   const P = (q) => f2p(q);
   const pts = (ring) => ring.map((q) => { const z = P(q); return `${z.x},${z.y}`; }).join(" ");
   const line = (k, a, b, stroke, sw, extra = {}) => { const A = P(a), B = P(b); return <line key={k} x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={stroke} strokeWidth={sw} strokeLinecap="butt" {...extra} />; };
@@ -280,7 +279,6 @@ function renderRampPx(el, st, f2p, isSel, tool, settings, startMoveEl, onElDoubl
   if (parts) {
     parts.wings.forEach((w, i) => out.push(line(`wg${i}`, w[0], w[1], wallInk, 2.4 * lfK, { pointerEvents: "none" })));
     parts.door.forEach((d, i) => out.push(line(`dr${i}`, d[0], d[1], wallInk, 1.4 * lfK, { pointerEvents: "none" })));
-    parts.bollards.forEach((b, i) => { const z = P(b); out.push(<circle key={`bl${i}`} cx={z.x} cy={z.y} r={Math.min(4 * lfK, Math.max(1.6 * lfK, 0.9 * ppf))} fill={wallInk} stroke="#fff" strokeWidth={0.6 * lfK} pointerEvents="none" />); });
     if (parts.arrow) {
       const A = P(parts.arrow.from), B = P(parts.arrow.to), dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, hl = Math.min(8 * lfK, L * 0.35);
       out.push(<g key="ar" pointerEvents="none" stroke={wallInk} strokeWidth={1.2 * lfK} fill="none" strokeLinecap="round" strokeLinejoin="round">
