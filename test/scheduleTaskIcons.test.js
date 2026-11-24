@@ -412,7 +412,7 @@ describe("wiring in public/sequence/index.html", () => {
     expect(page).not.toMatch(/aria-hidden="true" style=\{\{width:ICON/);
   });
   it("the row's right-click menu carries Set icon… / Change icon… / Remove icon, wired to the app-level picker host", () => {
-    const m = page.slice(page.indexOf("function TaskContextMenu("), page.indexOf("// ── HealthColHeader"));
+    const m = page.slice(page.indexOf("function TaskContextMenu("), page.indexOf("\nexposeToHarness({", page.indexOf("function TaskContextMenu(")));
     expect(m).toContain('label={hasIcons ? "Change icon…" : "Set icon…"}');
     expect(m).toMatch(/\{hasIcons && <Item icon="ti-icons-off" label="Remove icon" onClick=\{onRemoveIcon\} \/>\}/);
     expect(page).toContain("hasIcons={window.PlanyrTaskIcons.normalizeTaskIcons(taskCtx.task.icons).length > 0}");

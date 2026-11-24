@@ -48,7 +48,7 @@ function sliceBetween(startMarker, endMarker) {
 // reused verbatim from test/schedulerViewState.test.js's own extraction slice.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 function makeViewStateModule() {
-  const viewStateSrc = sliceBetween("const VIEW_TAB_KEYS", "function App() {");
+  const viewStateSrc = sliceBetween("const VIEW_TAB_KEYS", "\nexposeToHarness({");
   const fn = new Function(
     "sessionStorage", "localStorage",
     `${viewStateSrc}\nreturn { stripViewState };`

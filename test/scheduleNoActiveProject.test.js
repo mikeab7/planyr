@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { sequenceSource } from "./helpers/sequenceSource.js";
 
 const SRC = sequenceSource();
-const block = SRC.slice(SRC.indexOf("const VIEW_TAB_KEYS"), SRC.indexOf("function App() {"));
+const block = SRC.slice(SRC.indexOf("const VIEW_TAB_KEYS"), SRC.indexOf("\nexposeToHarness({", SRC.indexOf("const VIEW_TAB_KEYS")));
 // activeProjectOf moved with the grid column helpers (page/grid/columns.js); slice it by its own bounds.
 const apStart = SRC.indexOf("function activeProjectOf(");
 const activeProjectOfSrc = SRC.slice(apStart, SRC.indexOf("\n}\n", apStart) + 3);
