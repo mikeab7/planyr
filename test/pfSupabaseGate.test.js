@@ -1,4 +1,5 @@
 /* Audit M2 — window.pfSupabase answers only when armed (?planyrDiag=1, planyr:diag session key, __PLANYR_E2E) or under automation. */
+// source-scan: the guard is "nothing in production reads window.pfSupabase" — a property of every src file that cannot run in node.
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
