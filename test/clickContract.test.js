@@ -193,7 +193,7 @@ describe("per-type click wiring (the pond regression, and the types the owner as
     // …and the delegate makes one decision per family.
     expect(act).toMatch(/if \(el\.groupId\) \{ setMulti\(\[\]\); setDrillId\(t\.id\); setSel\(\{ kind: "el", id: t\.id \}\); return true; \}/); // B261 drill-in
     expect(act, "the locked carve-out must be a decision, not an accident").toMatch(/if \(el\.locked\) return true;/);
-    expect(act).toMatch(/if \(m\.locked\) return true;/);
+    expect(act).toMatch(/if \(m\.locked && m\.kind !== "encumbrance"\) return true;/);   // a locked DEED still opens its panel (Unlock lives there); every other locked markup stays select-only
     expect(act).toMatch(/calloutDblAction\(e, t\.id\)/);
     expect(act).toMatch(/setSel\(\{ kind: "measure", i: t\.i \}\)[\s\S]{0,80}openInspector\(\);/);
 

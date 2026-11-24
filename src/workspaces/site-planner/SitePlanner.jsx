@@ -289,6 +289,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { deedOverlayPlan, drawDeedOverlay, deedOverlayRecord, restoredDeedMarkups } from "./lib/deedOverlay.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { hatchPatternTransform, hatchAnchorFor } from "./lib/hatchAnchor.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
@@ -5880,7 +5881,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const m = markups.find((x) => x.id === t.id);
       if (!m) return false;
       setSel({ kind: "markup", id: t.id });
-      if (m.locked) return true;
+      if (m.locked && m.kind !== "encumbrance") return true;   // a locked DEED still opens its panel: Unlock lives there (like a locked measurement)
       openInspector();
       return true;
     }
@@ -7769,7 +7770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // editor — the inline label is edited only in the Properties panel's "Inline label" field, per the
     // owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the double-tap here. Locked
     // features stay select-only.
-    if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
+    if (m && (!m.locked || m.kind === "encumbrance") && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
       featureDoubleAction({ kind: "markup", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
@@ -9700,7 +9701,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B784 — `reuseId` re-imports a file for an EXISTING overlay (the "click to re-add" flow for one whose
   // Storage object went missing): it replaces that overlay's raster in place and preserves its transform
   // (position / scale / rotation / opacity), rather than dropping a brand-new overlay at view center.
-  const addOverlayFile = async (rawFile, reuseId = null, nameOverride = null) => {
+  // `placed` (optional) = { id, x, y, widthFt, name, extra }: the picture is ALREADY where it belongs (a deed converted to an
+  // overlay, lib/deedOverlay.js), so skip the view-centre placement and the size guess. Returns the overlay id on success.
+  const addOverlayFile = async (rawFile, reuseId = null, nameOverride = null, placed = null) => {
     if (!rawFile) return;
     setOverlayBusy(true);
     try {
@@ -9718,7 +9721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet} or the DXF shape (kind:"dxf",ftPerPx,unitsAssumed,unsupported)
       const prev = reuseId ? stateRef.current.sheetOverlays.find((x) => x.id === reuseId) : null; // B784 — the overlay we're re-adding into
-      const id = prev ? prev.id : uid();
+      const id = prev ? prev.id : (placed?.id || uid());
       if (r.pdf) { overlayDocs.current.set(id, r.pdf); touchOverlayDoc(id); } // keep the doc for the in-session page picker (NEW-5: on an LRU clock)
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
 
@@ -9746,6 +9749,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // written when true; a trusted scale note (or a DXF, which has true units) leaves the field absent, and
       // every overlay that already exists has no field → reads as scaled.
       if (pick && !pick.trusted) ov.unscaled = true;
+      if (placed) {   // a converted deed: exact spot, exact scale (so never "not scaled"), crisp lines
+        ov.x = placed.x; ov.y = placed.y; ov.ftPerPx = placed.widthFt / r.imgW; ov.opacity = 1;
+        delete ov.unscaled; Object.assign(ov, placed.extra || {});
+      }
       // B784 — re-add: keep WHERE and HOW BIG the user had placed it (position / scale / rotation / opacity /
       // lock / visibility). The user may have calibrated ftPerPx via "Trace a length" — that's their work to keep.
       if (prev) {
@@ -9773,7 +9780,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         flashWarn(`Imported “${ov.name}” — ${r.unsupportedSummary || `${r.unsupported.count} entities of unsupported types skipped`}.`, 9000);
       if (r.kind === "dxf" && r.unitsAssumed)
         flashWarn(`Imported “${ov.name}” at assumed feet (the DXF declares no units) — verify the size, or set the exact scale / “Trace a length” in the Site-plan overlay panel.`, 10000);
-      if (pick && (pick.reason === "too-big" || pick.reason === "too-small")) // honest, actionable note — never a silent mis-place
+      if (!placed && pick && (pick.reason === "too-big" || pick.reason === "too-small")) // honest, actionable note — never a silent mis-place
         flashWarn(`Added “${ov.name}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
       if (isCloudActive()) { // back the source up to Storage for cross-device reload (B72/B747)
         // B747 — oversize must fail VISIBLY, never a silent skip of the cloud backup (LOUD-FAILURE).
@@ -9792,6 +9799,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, sourceDwgKey: res.key } : x)));
           }).catch(() => {});
       }
+      return id;
     } catch (err) {
       alert(humanizeError(err));
     } finally {
@@ -9969,6 +9977,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
         siteId, overlayId: o.id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
       });
+  };
+  /* Convert a plotted deed (boundary + its exceptions) into an ordinary overlay: a picture of the outline at the deed's exact
+   * spot and scale, hideable from the Overlays list. The deed's own record rides on the overlay (`fromDeed`), so
+   * "Convert back to deed" can rebuild the real, editable tract. The deed is removed only after the overlay exists. */
+  const convertDeedToOverlay = async (markupId) => {
+    const m = markups.find((x) => x.id === markupId && x.kind === "encumbrance");
+    if (!m) { flashWarn("⚠ That deed is already gone.", 5000); return; }
+    const members = deedGroupMembers(m);
+    const plan = deedOverlayPlan(members, (x) => deedTrace(x).ring);
+    if (!plan) { flashWarn("⚠ This deed has no shape to convert.", 6000); return; }
+    const canvas = document.createElement("canvas"); canvas.width = plan.imgW; canvas.height = plan.imgH;
+    drawDeedOverlay(canvas.getContext("2d"), plan);
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+    if (!blob) { flashWarn("⚠ Couldn't draw the deed as a picture — nothing was changed.", 8000); return; }
+    const name = `${plan.name} (deed)`;
+    const file = new File([blob], `${name}.png`, { type: "image/png" });
+    const ovId = await addOverlayFile(file, null, name, { id: uid(), x: plan.x, y: plan.y, widthFt: plan.imgW * plan.ftPerPx, extra: { fromDeed: deedOverlayRecord(members) } });
+    if (!ovId) return;   // the add said why (LOUD-FAILURE); the deed stays exactly as it was
+    const ids = members.map((x) => x.id), idset = new Set(ids);
+    setMarkups((a) => a.filter((x) => !idset.has(x.id)));
+    setSel(null); setMulti([]); setDrillId(null); setMapMenu(null);
+    tombstone(ids);
+    setSelOverlay(ovId);
+    flashWarn(`Converted “${plan.name}” to an overlay. Hide or show it in Overlays; “Convert back to deed” restores the editable tract.`, 8000);
+  };
+  const convertOverlayToDeed = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o?.fromDeed?.markups?.length) return;
+    const group = uid();
+    const fresh = withStackZ(markups, restoredDeedMarkups(o.fromDeed, uid, group));
+    removeOverlay(id);                       // takes the ONE undo snapshot (before either change), then drops the picture
+    setMarkups((a) => [...a, ...fresh]);
+    setSel({ kind: "markup", id: (fresh.find((x) => !x.except) || fresh[0]).id });
+    setOvMenu(null);
   };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
@@ -20133,6 +20175,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onToggleHide: (o) => { if (o.fromMap) setShowAerial((v) => !v); else patchOverlay(o.id, { visible: o.visible === false }); },
     onPatch: patchOverlay,
     onRemove: (o) => { removeOverlay(o.id); if (o.fromMap) setShowAerial(true); },
+    onConvertToDeed: (o) => convertOverlayToDeed(o.id),
     onStep: (id, dir) => { const next = moveOverlayStep(sheetOverlays, id, dir); if (next === sheetOverlays) return; pushHistory(); setSheetOverlays(next); },
     onDropRow: (dragId, overId, side) => { const next = dropOverlay(sheetOverlays, dragId, overId, side); if (next === sheetOverlays) return; pushHistory(); setSheetOverlays(next); },
     onSetBand: toggleOverlayBand,
@@ -24089,6 +24132,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   deedAlreadyPromoted={deedAlreadyPromoted}
                   deedGroupMembers={deedGroupMembers}
                   deedMainOf={deedMainOf}
+                  convertDeedToOverlay={convertDeedToOverlay}
                   deleteSel={deleteSel}
                   flashWarn={flashWarn}
                   labelSessionRef={labelSessionRef}
@@ -25326,6 +25370,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   copyRef={copyRef}
                   deedAlreadyPromoted={deedAlreadyPromoted}
                   deedGroupMembers={deedGroupMembers}
+                  convertDeedToOverlay={convertDeedToOverlay}
                   deedMainOf={deedMainOf}
                   deleteMarkupById={deleteMarkupById}
                   deleteSel={deleteSel}
@@ -25592,6 +25637,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   flashWarn={flashWarn}
                   menuItem={menuItem}
                   menuPanel={menuPanel}
+                  convertOverlayToDeed={convertOverlayToDeed}
                   ovMenu={ovMenu}
                   parcels={parcels}
                   pasteOverlay={pasteOverlay}

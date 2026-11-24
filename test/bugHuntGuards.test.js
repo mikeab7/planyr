@@ -597,7 +597,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);/);
     expect(src).toMatch(/else openInspector\(\);/);
     // B935 — a markup (line/polyline/easement) double-tap ALWAYS opens Properties, never an inline editor
-    expect(src).toMatch(/if \(m && !m\.locked && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,160}featureDoubleAction\(\{ kind: "markup", id \}, e\)/);
+    expect(src).toMatch(/if \(m && \(!m\.locked \|\| m\.kind === "encumbrance"\) && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,160}featureDoubleAction\(\{ kind: "markup", id \}, e\)/);
     // B935 — an element (centerline road) double-tap ALWAYS opens Properties, never an inline editor.
     // NEW-1 — a POND routes through revealPondInspector so the double-click keeps B875's scroll+flash.
     expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{[\s\S]{0,200}featureDoubleAction\(\{ kind: "el", id \}, e\)/);

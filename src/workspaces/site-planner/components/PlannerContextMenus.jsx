@@ -58,6 +58,7 @@ export const MapContextMenu = memo(function MapContextMenu({
   copyRef,
   deedAlreadyPromoted,
   deedGroupMembers,
+  convertDeedToOverlay,
   deedMainOf,
   deleteMarkupById,
   deleteSel,
@@ -191,6 +192,7 @@ export const MapContextMenu = memo(function MapContextMenu({
               title: deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it",
               on: () => { promoteDeedToParcel(dm.id); close(); },
             })}
+            {isDeed && row({ text: "Convert to overlay", title: "Turn this deed into a picture in the Overlays list, so you can hide it like any overlay. Convert back to deed restores it.", on: () => { close(); convertDeedToOverlay(m.id); } })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
             {row({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
@@ -291,6 +293,7 @@ export const OverlayContextMenu = memo(function OverlayContextMenu({
   menuItem,
   menuPanel,
   ovMenu,
+  convertOverlayToDeed,
   parcels,
   pasteOverlay,
   patchOverlay,
@@ -326,6 +329,7 @@ export const OverlayContextMenu = memo(function OverlayContextMenu({
             {item({ text: "Copy", hint: `${MOD_LABEL}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
             {item({ text: "Duplicate", hint: `${MOD_LABEL}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
             {item({ text: "Paste", hint: `${MOD_LABEL}V`, dis: !hasOverlayClip(), title: hasOverlayClip() ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
+            {o.fromDeed && item({ text: "Convert back to deed", title: "Rebuild the editable deed (courses, exceptions) and remove this picture", on: () => { convertOverlayToDeed(ovMenu.id); setOvMenu(null); } })}
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}

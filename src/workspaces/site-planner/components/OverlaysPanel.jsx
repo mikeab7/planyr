@@ -591,6 +591,7 @@ function RowMenu({ open, anchorRef, o, flags, hidden, hasParcel, isMap, onClose,
         {it("Copy", () => h.onCopy(o.id), { disabled: isMap, title: isMap ? "The map capture can't be copied — it is pinned to this plan" : undefined })}
         {it("Duplicate", () => h.onDuplicate(o.id), { disabled: isMap, title: isMap ? "The map capture can't be duplicated — it is pinned to this plan" : undefined })}
         {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
+        {o.fromDeed && it("Convert back to deed", () => h.onConvertToDeed(o))}
         {it("Move up", () => h.onStep(o.id, 1), { disabled: flags.atFront })}
         {it("Move down", () => h.onStep(o.id, -1), { disabled: flags.atBack })}
         <div style={{ borderTop: LINE, margin: `${SPACE.xs}px 0` }} />

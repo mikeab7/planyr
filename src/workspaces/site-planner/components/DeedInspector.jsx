@@ -74,6 +74,7 @@ export const DeedInspector = memo(function DeedInspector({
   deedAlreadyPromoted,
   deedGroupMembers,
   deedMainOf,
+  convertDeedToOverlay,
   deleteSel,
   flashWarn,
   labelSessionRef,
@@ -248,6 +249,7 @@ export const DeedInspector = memo(function DeedInspector({
         {locked && <div style={{ fontSize: FONT_SIZE.control, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <button style={chip} onClick={() => toggleMarkupLock(m.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={locked} size={13} />{locked ? "Unlock" : "Lock"}</span></button>
+          <button style={chip} data-testid="deed-to-overlay" title="Turn this deed into a picture in the Overlays list, so you can hide it like any overlay. Convert back to deed restores it." onClick={() => convertDeedToOverlay(m.id)}>Convert to overlay</button>
           <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
         </div>
       </div>
