@@ -21057,6 +21057,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           (fill/stroke/fillOpacity/hatch, editable in Properties); see
                           easements.js's encumbranceStyle/ENCUMBRANCE_DEFAULT header. */}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={gapSeg ? "none" : stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* 2026-11-24 — the deed's outline gets the SAME fat invisible grab band every other closed markup has (MK_HIT_PX): a
+                          deed is drawn as a thin line, and a press a few pixels OUTSIDE it hit nothing, so a double-click "on the outline" opened nothing. */}
+                      <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents="stroke" data-export="skip" />
                       {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
                       {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
                       {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.danger} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
