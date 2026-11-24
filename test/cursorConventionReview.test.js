@@ -4,13 +4,14 @@
  * the rail divider had no capture, and dragover accepted a tab drag with no dropEffect.
  * The runtime half (computed cursor at named points, signed in on the deployed build) is ui-audit/verify-cursors-review.mjs. */
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { gripCursorFor, vertexGripAt, gripHoverCursor, viewportCursor, fileDropEffect, GRIP_TOL_PX } from "../src/workspaces/doc-review/lib/reviewCursor.js";
 
 const DIR = "src/workspaces/doc-review";
 const read = (p) => readFileSync(join(DIR, p), "utf8");
-const doc = read("DocReview.jsx");
+const doc = docReviewSource();
 const stitcher = read("Stitcher.jsx");
 const compare = read("CompareView.jsx");
 function walk(dir, out = []) {

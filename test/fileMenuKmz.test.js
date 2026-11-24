@@ -6,6 +6,7 @@
  * and never pull `kmzExport` onto the boot path (B1042).
  */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { plannerSource } from "./helpers/plannerSource.js";
 
@@ -56,7 +57,7 @@ describe("NEW-1 — File ▾ Google Earth export", () => {
   });
 
   it("owner decision 2026-10-22: the Map view has NO empty-map right-click menu and NO all-sites KMZ export (MapFinder)", () => {
-    const MF = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const MF = mapFinderSource();
     expect(MF).not.toMatch(/exportSitesKmz/);
     expect(MF).not.toMatch(/\bmapMenu\b|setMapMenu/);
     expect(MF).not.toMatch(/onMapCtx/);

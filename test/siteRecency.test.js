@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 /* B845089 (NEW-2) — "when was this project actually last worked on," replacing `sites.updated_at`
  * (which only advances on a header-level change — a rename, opening the plan — not a drawing
  * edit; see lib/siteRecency.js's own header for the measured production drift, 20.7–64.6 hours).
@@ -161,7 +162,7 @@ describe("cloudElementRecency", () => {
 describe("MapFinder.jsx no longer sorts 'recent' by the raw sites.updated_at mirror", () => {
   it("does not read b.updatedAt / a.updatedAt in the sort comparator", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).toMatch(/lastEditedOf\(b\)/);
     expect(src).not.toMatch(/toMsAt\(b\.updatedAt\)/);
   });

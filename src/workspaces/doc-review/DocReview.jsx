@@ -5,7 +5,7 @@
  * overlay (an editable layer over it) and are stored in PAGE UNITS so they survive
  * zoom. Lazy-loaded by the shell.
  */
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFileDragActive } from "../../shared/files/fileDrag.js";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
@@ -13,11 +13,10 @@ import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
 import { useBelowHeader } from "./lib/useBelowHeader.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
-import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { refineSheetTitles, projectStopTexts } from "../../shared/files/sheetTitleSet.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import CompareView from "./CompareView.jsx";
@@ -56,13 +55,14 @@ import { sheetOpenState, OPEN_CHIP_TIMEOUT_MS } from "./lib/sheetOpenState.js";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
-import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { screenToWorld, zoomAround, fitView, shouldPan, distance } from "../../shared/viewport/viewportTransform.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
 import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
 import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.matrix.js";
 import { writeProp, readProp } from "../../shared/markup/propertySchema.js";
+import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { kindDefaults } from "../../shared/markup/markupStyle.js";
 import { bboxOfMarkup, calloutParts, addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
@@ -70,7 +70,9 @@ import { pickMarkup, hitCalloutLeaderIndex, calloutBoxWH, calloutDblZone } from 
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { RADIUS } from "../../shared/ui/radius.js";
-import { pinDragCursor } from "../../shared/ui/controls.jsx";
+import { useReviewRail } from "./lib/useReviewRail.js";
+import { useReviewHistory } from "./lib/useReviewHistory.js";
+import { useReviewPinch } from "./lib/useReviewPinch.js";
 import { viewportCursor, vertexGripAt, gripCursorFor, gripHoverCursor, fileDropEffect } from "./lib/reviewCursor.js";
 import { commaInt as f0, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -491,43 +493,7 @@ export default function DocReview({
   const [signedIn, setSignedIn] = useState(false);
   // Takeoff is a TOOL-RAIL TOGGLE, hidden by default (owner, B664 — "why is takeoff a separate
   // section, it should be one of the tools"); the choice persists per device.
-  const [takeoffOpen, setTakeoffOpen] = useState(() => { try { return localStorage.getItem("planarfit:takeoffOpen") === "1"; } catch (_) { return false; } });
-  useEffect(() => { try { localStorage.setItem("planarfit:takeoffOpen", takeoffOpen ? "1" : "0"); } catch (_) { /* private mode */ } }, [takeoffOpen]);
-  // Sheet rail: user-resizable (drag the right edge) + collapsible to a slim strip (owner, B664
-  // — "I should be able to expand and slim the left menu"); both persist per device.
-  const [railW, setRailW] = useState(() => { try { const v = +localStorage.getItem("planarfit:reviewRailW"); return v >= 160 && v <= 460 ? v : 224; } catch (_) { return 224; } });
-  const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem("planarfit:reviewRailHidden") === "1"; } catch (_) { return false; } });
-  useEffect(() => { try { localStorage.setItem("planarfit:reviewRailW", String(railW)); localStorage.setItem("planarfit:reviewRailHidden", railHidden ? "1" : "0"); } catch (_) { /* private mode */ } }, [railW, railHidden]);
-  // B838 / VIEWPORT-STABLE (compensate half): collapsing/expanding or drag-resizing the left sheet
-  // rail moves the canvas viewport's left edge; without compensation the drawing skips sideways by
-  // the full rail delta (in one frame on collapse, continuously on drag). Mirror the shipped B837
-  // discipline: read the MEASURED left edge (`wrapRef.offsetLeft`, relative to the position:relative
-  // review row) in a LAYOUT effect (before paint) and fold the exact delta into `view.tx` in the SAME
-  // frame — no assumed width, no passive-effect skip. Measuring the real edge self-gates the right-side
-  // takeoff panel, the portaled Layers popover, and the in-rail Properties panel (they leave offsetLeft
-  // unchanged → zero delta). Deps are the measure triggers: rail width/visibility, doc-open (numPages),
-  // and stitch→review remount (mode). (Guards a hidden keep-alive: offsetParent is null under display:none.)
-  const railShiftRef = useRef(null); // last-compensated canvas left-edge (px); null until seeded / while the wrap is absent or hidden
-  useLayoutEffect(() => {
-    const el = wrapRef.current;
-    if (!el || el.offsetParent == null) return; // wrap not mounted (empty state / stitch) or hidden (keep-alive) — don't measure
-    const left = Math.round(el.offsetLeft);
-    if (railShiftRef.current == null) { railShiftRef.current = left; return; } // seed baseline — no shift
-    const delta = left - railShiftRef.current;
-    if (delta !== 0) {
-      railShiftRef.current = left;
-      setView((v) => (v ? { ...v, tx: v.tx - delta } : v));
-    }
-  }, [railHidden, railW, numPages, mode]);
-  const startRailResize = (e) => {
-    e.preventDefault();
-    const startX = e.clientX, startW = railW;
-    const unpin = pinDragCursor("col-resize"); // NEW-4: the divider cursor holds for the whole drag, past the 160/460 clamp and off the grip
-    const move = (ev) => setRailW(Math.max(160, Math.min(460, startW + ev.clientX - startX)));
-    const up = () => { unpin(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
-    window.addEventListener("pointercancel", up);
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
-  };
+  const { takeoffOpen, setTakeoffOpen, railW, railHidden, setRailHidden, startRailResize } = useReviewRail({ wrapRef, setView, numPages, mode });
   // The project the header breadcrumb points at in Markup now comes from the URL route
   // (Work Item A) — so it survives a module switch instead of resetting to "Select a
   // project". Picking another project navigates the hash; opening a review navigates to
@@ -564,56 +530,7 @@ export default function DocReview({
    * the section is open. There is deliberately no replacement effect: the open state is `propsOpen`,
    * and only an explicit affordance writes it. */
 
-  /* ---- undo / redo (B303) ----
-   * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
-   * mirroring the Site Planner's pushHistory pattern. pushHistory() is called BEFORE a real
-   * mutation (add/delete/move a markup, edit a text note, apply a hand calibration); undo()
-   * skips frames identical to the current state via histKey so a stray push can't make Ctrl-Z
-   * look like a no-op (B32/B105). The background auto-scale scan (B267) never pushes. */
-  const docStateRef = useRef({ markups: [], calByPage: {}, calInfo: {} });
-  // Assign during render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE current
-  // state. A passive-effect mirror lagged a paint behind, so an undo fired right after an edit compared
-  // its baseline against a STALE snapshot: undo()'s no-op dedup saw the top frame as equal to "current"
-  // and dropped it, so Ctrl-Z / the ↶ button did nothing (and corrupted the redo baseline). This is the
-  // exact B315 class the Site Planner fixed the same way (see SitePlanner.jsx stateRef).
-  docStateRef.current = { markups, calByPage, calInfo };
-  const pastRef = useRef([]);
-  const futureRef = useRef([]);
-  const colorSessionRef = useRef(null); // active live color-pick key, so the burst is one undo frame (B567)
-  const [, bumpHist] = useState(0);
-  const touchHist = () => bumpHist((n) => n + 1);
-  const histKey = (s) => JSON.stringify({ m: s.markups, c: s.calByPage, i: s.calInfo });
-  const pushHistory = () => {
-    pastRef.current.push(docStateRef.current);
-    if (pastRef.current.length > 80) pastRef.current.shift();
-    futureRef.current = [];
-    touchHist();
-  };
-  const clearHistory = () => { pastRef.current = []; futureRef.current = []; touchHist(); };
-  const applySnapshot = (s) => {
-    setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
-    setDraft(null); clearSelection(); setCalInput(null); setDragPreview(null); setEditing(null);
-  };
-  const undo = () => {
-    let prev = null;
-    while (pastRef.current.length) {
-      const cand = pastRef.current.pop();
-      if (histKey(cand) !== histKey(docStateRef.current)) { prev = cand; break; }
-    }
-    if (!prev) return;
-    futureRef.current.push(docStateRef.current);
-    applySnapshot(prev);
-    touchHist();
-  };
-  const redo = () => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(docStateRef.current);
-    applySnapshot(next);
-    touchHist();
-  };
-  const canUndo = pastRef.current.length > 0;
-  const canRedo = futureRef.current.length > 0;
+  const { pushHistory, clearHistory, undo, redo, canUndo, canRedo, colorSessionRef } = useReviewHistory({ markups, calByPage, calInfo, setMarkups, setCalByPage, setCalInfo, resetTransient: () => { setDraft(null); clearSelection(); setCalInput(null); setDragPreview(null); setEditing(null); } });
   // Mid-draw: step back the last placed vertex of a poly/count draft (B303 "poly-vertex
   // placement"). Returns true if it consumed something so Ctrl-Z / Backspace fall through to
   // full undo / delete-selection only when there's no draft to trim.
@@ -1664,71 +1581,7 @@ export default function DocReview({
     const r = wrap.getBoundingClientRect();
     return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
   };
-  // Viewport-relative screen point (for two-finger pinch midpoint math; also works on a Touch object,
-  // which carries the same clientX/clientY shape as a pointer event). (B331)
-  const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const pinchRafRef = useRef(0);     // pending rAF id for the throttled pinch update (0 = none)
-  const pinchNextRef = useRef(null); // latest { mid, dist } awaiting the next frame
-  const pinchTelemetryRef = useRef(null); // { t, fingers } captured at pinch start — feeds the event:pinch row on end/cancel/anomaly
-  // Flush one throttled frame of the pinch: zoom by the finger-distance ratio about the baseline
-  // midpoint, then re-baseline to the new pair so the next frame is incremental.
-  const flushPinch = () => {
-    pinchRafRef.current = 0;
-    const nx = pinchNextRef.current, base = pinchRef.current;
-    if (!nx || !base) return;
-    const factor = nx.dist / base.dist;
-    setView((v) => (v ? pinchZoom(v, base.mid, nx.mid, factor, VIEW_MIN, VIEW_MAX) : v));
-    pinchRef.current = nx;
-  };
-  const onTouchStartPinch = (e) => {
-    touchCountRef.current = e.touches.length;
-    if (e.touches.length < 2) return; // a 3rd+ finger is absorbed (never draws/pans) — only ≥2 starts/rebaselines a pinch below
-    const isNewPinch = !pinchRef.current;
-    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
-    pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
-    pinchNextRef.current = null;
-    if (isNewPinch) pinchTelemetryRef.current = { t: performance.now(), fingers: e.touches.length };
-    else if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
-    touchPinchedRef.current = true;
-    // Tear down any single-finger gesture the 1st finger had already started, so the pinch begins clean.
-    panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
-  };
-  const onTouchMovePinch = (e) => {
-    if (!pinchRef.current || e.touches.length < 2) return;
-    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
-    pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
-    if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
-  };
-  // Shared by onTouchEnd and onTouchCancel: re-baseline to whatever fingers remain (≥2 → the current
-  // pair, so a 3rd finger or a partial lift re-anchors instead of zoom-jumping off a stale pair; <2 →
-  // the pinch ends). touchPinchedRef is deliberately left set here — onUp consumes + clears it once
-  // touchCountRef reaches 0, so a stray tap on the final lift is suppressed even across a multi-lift.
-  // `cancelled` distinguishes a native touchcancel (an interruption) from an ordinary touchend.
-  const onTouchEndPinch = (e, cancelled = false) => {
-    touchCountRef.current = e.touches.length;
-    if (e.touches.length >= 2) {
-      if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
-      const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
-      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
-      return;
-    }
-    if (pinchRef.current) {
-      const started = pinchTelemetryRef.current;
-      recordPinchGesture({
-        surface: "doc-review", eventSource: "touch",
-        fingerCount: started ? started.fingers : touchCountRef.current,
-        outcome: cancelled ? "cancelled" : "completed",
-        cancelReason: cancelled ? "touchcancel" : undefined,
-        durationMs: started ? performance.now() - started.t : undefined,
-      });
-    }
-    pinchTelemetryRef.current = null;
-    pinchRef.current = null; pinchNextRef.current = null;
-    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
-  };
-  // A pinch mid-gesture at unmount (e.g. switching sheets) must not leave a pending rAF whose
-  // callback fires against a torn-down instance's refs after the fact.
-  useEffect(() => () => { if (pinchRafRef.current) cancelAnimationFrame(pinchRafRef.current); }, []);
+  const { onTouchStartPinch, onTouchMovePinch, onTouchEndPinch, pinchTelemetryRef } = useReviewPinch({ wrapRef, setView, touchCountRef, pinchRef, touchPinchedRef, panRef, dragRef, setDraft, setDragPreview, setPanning, VIEW_MIN, VIEW_MAX });
 
   // Per-tool style defaults that override the kind + column defaults but yield to the user's
   // last-set sticky style (propStyle). Highlight is yellow + wide + translucent by default.

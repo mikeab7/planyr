@@ -108,7 +108,8 @@ import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { loadEasementRules, patchEasementRule, subscribeEasementRules, resolveEasementJur } from "./lib/easementRules.js";
-import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
+import { wasRequested } from "./lib/criteriaRequests.js";
+import { useCriteriaRequest } from "./lib/useCriteriaRequest.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
  * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
  * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
@@ -1831,14 +1832,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (temporal dead zone), since both blocks run as plain IIFEs during the same render pass.
   // Keyed on county:family so unrelated rows never share state; `wasRequested` (checked at each
   // read site) seeds the "Requested ✓" read-back from localStorage after a reload.
-  const [critReqStatus, setCritReqStatus] = useState({});
-  const onRequestCriteria = async (info) => {
-    if (!info || !info.countyKey || !info.family) return;
-    const k = `${info.countyKey}:${info.family}`;
-    setCritReqStatus((s) => ({ ...s, [k]: { busy: true } }));
-    const r = await requestCriteria(supabase, { countyKey: info.countyKey, countyLabel: info.countyLabel, state: siteStateId || null, family: info.family, siteId: siteId || null });
-    setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
-  };
   const [rulesOpen, setRulesOpen] = useState(false);
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
@@ -11922,6 +11915,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * when a site is most likely to fall through to a default. A plan with no origin resolves to
    * null, which behaves exactly as it did before Colorado existed. */
   const siteStateId = origin ? resolveSiteState({ lat: origin.lat, lng: origin.lon }) : null;
+  // Declared right after siteStateId (the hook reads it); every read of critReqStatus is further down.
+  const { critReqStatus, onRequestCriteria } = useCriteriaRequest(siteId, siteStateId);
   // The lazily-loaded Colorado tier. `null` until the chunk arrives (and forever on a Texas site,
   // where it is never requested at all), which the render already handles: the guard's own line
   // has a regime-less variant, and the statute simply does not render until it can.

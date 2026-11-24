@@ -18,6 +18,7 @@
  * drives real keys in every context; neither half is sufficient alone.
  */
 import { describe, expect, it } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -141,6 +142,9 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
     // while typing is meant to close it — that IS the caret's expectation, not a theft.
     ["components/NoteToolbar.jsx", "mounted only while a popover is open; answers Escape only"],
     ["components/NotesTree.jsx", "the row menu is mounted only while open; answers Escape only"],
+    // Split out of NoteEditor.jsx (audit batch L1): these popovers were covered by that file's own use of the predicate.
+    ["components/DocMenu.jsx", "the document menu is mounted only while open; answers Escape only"],
+    ["components/NoteEditorBars.jsx", "the zoom and page-setup popovers are mounted only while open; answer Escape only"],
     // The quick-open palette IS a text field of its own while open, and it re-implements nothing:
     // it explicitly lets Enter and the arrows through to whatever has focus.
     ["Notes.jsx", "the Ctrl+K palette is itself the thing being typed into while it is open"],
@@ -197,7 +201,7 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
       // `formFieldOwnsTheKey` answers the one part of the old question this binding still needs
       // (a real field elsewhere outranks a selected box) without needing blur() to have worked —
       // see its own header in lib/notesKeyScope.js.
-      const src = readFileSync(join(NOTES, "components/NoteEditor.jsx"), "utf8");
+      const src = noteEditorSource();
       expect(src).toMatch(/if \(formFieldOwnsTheKey\(\)\) return;/);
     });
 

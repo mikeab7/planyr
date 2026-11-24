@@ -828,13 +828,13 @@ CITY_SOURCES.push({
   coverage: "Fort Bend County — full-purpose city limits",
   note: "Fort Bend County GIS's City Limits table. Full-purpose limits only (limited-purpose annexation is a separate county layer, not wired). Screening only — verify with the city.",
 });
-/* ⛔ Waller County (sweep 2026-11-22) — the county's own city-limits table, FIRST inside Waller County with TxGIO the backup (#39). The name column was not
- * recorded when the layer was measured, so the row reads the first present of `nameFallbackFields` (see normalizeFeature). */
+/* ⛔ Waller County (sweep 2026-11-22) — the county's own city-limits table, FIRST inside Waller County with TxGIO the backup (#39). The name column is `CITY`
+ * (measured live 2026-11-24); the other spellings stay as `nameFallbackFields` (see normalizeFeature) in case the county renames it. */
 CITY_SOURCES.push({
   id: "city_waller", role: "city", label: "City limits — Waller County", kind: "polygon",
   region: "Waller County", bbox: [29.775, -96.3, 30.3, -95.7],
   url: GIS_SOURCES.city_waller.serviceUrl,
-  fields: { name: "CityName" }, nameFallbackFields: ["CITY", "City", "NAME", "Name", "CITY_NAME", "City_Name", "CITYNAME"], titleCaseName: true,
+  fields: { name: "CITY" }, nameFallbackFields: ["CityName", "City", "NAME", "Name", "CITY_NAME", "City_Name", "CITYNAME"], titleCaseName: true,
   fullPurposeOnly: GIS_SOURCES.city_waller.fullPurposeOnly,
   needGeometry: true,
   supersedes: ["city"], supersedeCounty: "Waller",

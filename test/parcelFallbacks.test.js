@@ -6,6 +6,7 @@
  * own URL — and (4) the click orchestration with a county FORCED to fail (injected `identify`, no network): it falls through to the state's row at
  * a point inside both, never second-guesses a county that answered "no lot", and never lets a fallback's answer clear the county's silence. */
 import { describe, it, expect, beforeAll } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { COUNTIES_MAP, statewideFallbackFor, candidateCountiesForPoint } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
@@ -235,7 +236,7 @@ describe("wiring: every lot-click flow hands the identify its fallbacks", () => 
     }
   });
   it("the planner and the Map both show the fallback's words rather than a hardcoded layer name", () => {
-    const map = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const map = mapFinderSource();
     const planner = plannerSource();
     expect(map).toMatch(/fallbackNoticeText\(/);
     expect(planner).toMatch(/fromFallback: fallbackNoticeText\(/);

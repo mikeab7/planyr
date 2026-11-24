@@ -2,6 +2,7 @@
  * src/workspaces/site-planner/lib/parcelIngest.js. The browser half (red on main, green here) is
  * ui-audit/verify-parcel-arrival-cost.mjs; this suite is the CI-runnable proof of the queue's contract. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "../src/workspaces/site-planner/lib/parcelIngest.js";
 
@@ -159,7 +160,7 @@ describe("lot-number relayout pre-filter (B2092656 ×2: a ~300 ms setTimeout tas
 });
 describe("turning Select parcels on does not run the display sync inside React's commit", () => {
   it("syncDisplaysToView is its own timer task on entering select mode", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     // NEW-1 (wide view): the timer now starts once the lazily loaded size-column chunk has arrived (`wideViewReady().then(…)`); it is still a timer of its own, and the sync is never called bare.
     expect(src).toMatch(/t = setTimeout\(\(\) => syncDisplaysToView\(true\), 0\);/);
     expect(src).not.toMatch(/[^=(] syncDisplaysToView\(true\);/);

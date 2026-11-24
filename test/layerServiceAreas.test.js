@@ -6,6 +6,7 @@
  * 65-mile circle that holds Chambers, Galveston and Brazoria, whose rows never answer. The rule is now location-only: each row declares
  * the real boundary it serves (lib/serviceAreas.js) and both hosts + the map's draw filter ask the SAME function with the SAME point. */
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
 // layers.js pulls in Leaflet-facing modules that need a DOM — stub them (ALL_LAYERS is a pure config object). Same block as layerStateCoverage.
@@ -141,7 +142,7 @@ describe("one answer for the panel, the map and both surfaces", () => {
   });
   it("both hosts hand the panel + draw filter the same two facts — state and location — and nothing county-shaped", () => {
     const planner = plannerSource();
-    const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const finder = mapFinderSource();
     expect(planner).toMatch(/useDrawnOverlays\(overlaysEff, layerScopeState, origin \? \{ lat: origin\.lat, lng: origin\.lon \} : null\)/);
     expect(finder).toMatch(/useDrawnOverlays\(overlays, viewState, viewLoc\)/);
     expect(planner).toMatch(/siteLocation=\{origin \? \{ lat: origin\.lat, lng: origin\.lon \} : null\}/);

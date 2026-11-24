@@ -2,6 +2,7 @@
 // findable in the Library under "Unfiled". Red on the commit before: no Close control, no unfiled module, no Unfiled
 // section, and the save banner said "Saved to the Library." wherever the file went.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -96,7 +97,7 @@ describe("fileReviewIntoProject — the shared filing step", () => {
 });
 
 describe("Close (NEW-1, tabs 2026-10-04) — wiring", () => {
-  const src = read("src/workspaces/doc-review/DocReview.jsx");
+  const src = docReviewSource();
   it("the #1926 Close control and the #1920 empty-state screen are gone; closing is the tab's ×", () => {
     expect(src).not.toContain('data-testid="review-close-file"');
     expect(src).not.toContain("ReviewEmptyState");

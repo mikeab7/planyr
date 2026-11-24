@@ -4,7 +4,9 @@
  * (2) every row reads a registry source at the county's own ArcGIS Online org and nothing rides the relay; (3) the click cards are CLEAN — plain labels, no raw field names,
  * no sentinel placeholders, no contact columns; (4) the floodway buffer is a map layer only and says it is not the screening buffer; (5) the registry fixtures exist per row and no fixture
  * invents a count (the host is unreachable from the build sandbox — the live endpoint truth is the V# pass). */
+// source-scan: the guard must read the pack FILE production loads (a wrong service URL there shipped once, #3041); the file cannot be inspected any other way than its text.
 import { describe, it, expect, vi, beforeAll } from "vitest";
+import { srcRead } from "./helpers/srcRead.js";
 
 vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), tiledMapLayer: vi.fn(), featureLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
@@ -21,7 +23,7 @@ import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { LAYER_TIER } from "../src/workspaces/site-planner/lib/layerWeight.js";
 import {
-  WALLER_LAYERS, BUFFER_STATUS, soft, pick, thoroughfareCard, cpcEasementCard, cpcOwnedCard, ccnCard, mudCard, floodwayBufferCard,
+  WALLER_LAYERS, BUFFER_STATUS, soft, acresText, thoroughfareCard, cpcEasementCard, cpcOwnedCard, ccnCard, mudCard, floodwayBufferCard,
 } from "../src/workspaces/site-planner/lib/wallerLayers.js";
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
@@ -68,19 +70,56 @@ describe("the six Waller rows are registered, Texas-only and region-scoped", () 
   });
 });
 
+/* ⛔ THE GUARD THAT WOULD HAVE CAUGHT PR 3031: every layer is its OWN FeatureServer service in the county's org. The first cut pointed all six at the single
+ * `Brookshire_Katy_Drainage_District1` service (which only has layer 54) and every row answered "Invalid URL" live. These are the service paths MEASURED LIVE on 2026-11-24. */
+const ORG = "https://services1.arcgis.com/BqVKz0o32DERqyE4/arcgis/rest/services";
+const URLS = {
+  wallerThoroughfare: `${ORG}/Proposed_Thoroughfare/FeatureServer/10`,
+  wallerCpcEasements: `${ORG}/CPC_Protected_Properties_2024/FeatureServer/0`,
+  wallerCpcOwned: `${ORG}/CPC_owned_2024/FeatureServer/0`,
+  wallerCcn: `${ORG}/CCN_Boundaries/FeatureServer/0`,
+  wallerMud: `${ORG}/MUDs/FeatureServer/103`,
+  wallerFloodwayBuffer: `${ORG}/Floodway_Buffer_100ft/FeatureServer/51`,
+};
 describe("every row reads a registry source at the county's own ArcGIS Online org", () => {
   it.each(Object.entries(KEYS))("%s → GIS_SOURCES.%s", (id, key) => {
     const src = GIS_SOURCES[key];
     expect(src, key).toBeTruthy();
     expect(ALL_LAYERS[id].url).toBe(src.serviceUrl);
-    expect(src.serviceUrl).toMatch(/^https:\/\/services1\.arcgis\.com\/BqVKz0o32DERqyE4\/arcgis\/rest\/services\/Brookshire_Katy_Drainage_District1\/FeatureServer\/\d+$/);
     expect(src.serviceUrl).not.toMatch(/\/gis-proxy\//);
     expect(src.states).toEqual(["TX"]);
     expect(src.tier).toBe("production");
   });
-  it("the layer ids are the sweep's: 10 thoroughfares, 21 / 27 Conservancy, 0 CCN, 103 MUDs, 51 floodway buffer", () => {
-    const idOf = (k) => Number(GIS_SOURCES[k].serviceUrl.split("/").pop());
-    expect([idOf("wallerThoroughfare"), idOf("wallerCpcEasements"), idOf("wallerCpcOwned"), idOf("wallerCcn"), idOf("wallerMud"), idOf("wallerFloodwayBuffer")]).toEqual([10, 21, 27, 0, 103, 51]);
+  it("each row's service URL is exactly the measured one — its own service, never the BKDD boundary service", () => {
+    for (const [key, url] of Object.entries(URLS)) {
+      expect(GIS_SOURCES[key].serviceUrl, key).toBe(url);
+      expect(GIS_SOURCES[key].serviceUrl, key).not.toMatch(/Brookshire_Katy_Drainage_District/);
+    }
+    expect(Object.keys(URLS).sort()).toEqual(Object.values(KEYS).sort());
+  });
+  it("the one service that DOES hold the BKDD boundary (layer 54) is the only thing that may point at it; no Waller county row shares a service", () => {
+    const services = Object.values(URLS).map((u) => u.split("/").slice(-3, -2)[0]);
+    expect(new Set(services).size).toBe(services.length);
+    expect(GIS_SOURCES.bkdd.serviceUrl).toMatch(/Brookshire_Katy_Drainage_District1\/FeatureServer$/);
+    expect(GIS_SOURCES.bkdd.layerId).toBe(54);
+  });
+  it("the file production actually loads says the same: the lazy pack loader, the all-packs tooling copy and the file text on disk all carry the measured URLs", async () => {
+    const { SOURCE_PACKS } = await import("../src/shared/gis/sourcePacks.js");
+    const { PACKS_ALL } = await import("../src/shared/gis/sourcePacksAll.js");
+    const loaded = await SOURCE_PACKS.find((p) => p.id === "waller").load(); // the exact path lazyLayerFiles.js takes in production
+    for (const [key, url] of Object.entries(URLS)) {
+      expect(loaded.sources[key].serviceUrl, `lazy pack ${key}`).toBe(url);
+      expect(PACKS_ALL.waller.sources[key].serviceUrl, `all-packs ${key}`).toBe(url);
+    }
+    const text = srcRead("src/shared/gis/sourcesWaller.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(text).not.toMatch(/Brookshire_Katy_Drainage_District/);
+    for (const svc of ["Proposed_Thoroughfare", "CPC_Protected_Properties_2024", "CPC_owned_2024", "CCN_Boundaries", "MUDs", "Floodway_Buffer_100ft"]) expect(text, svc).toContain(svc);
+  });
+  it("every service URL is shaped <org>/<Service>/FeatureServer/<layer>", () => {
+    for (const [key, url] of Object.entries(URLS)) expect(url, key).toMatch(/^https:\/\/services1\.arcgis\.com\/BqVKz0o32DERqyE4\/arcgis\/rest\/services\/[A-Za-z0-9_]+\/FeatureServer\/\d+$/);
+  });
+  it("the Waller city-limits name column is CITY (measured live), in the registry row and the jurisdiction source", () => {
+    expect(GIS_SOURCES.city_waller.fields.name).toBe("CITY");
   });
   it("the registry audit is clean for the Waller rows (a fixture each, two places ≥ 2 km apart, a tier, a state scope)", () => {
     const mine = Object.fromEntries(Object.entries(GIS_SOURCES).filter(([k]) => Object.values(KEYS).includes(k)));
@@ -113,35 +152,47 @@ describe("the click cards are clean (owner constraint #45) and honest", () => {
     expect(thoroughfareCard({ StreetName: "X", Status: "Under study" }).rows[0].text).toBe("Proposed — Under study");
     expect(thoroughfareCard().title).toBe("Proposed roadway");
   });
-  it("Conservancy easement and fee land: name, holder, a plain 'what this is'", () => {
+  it("Conservancy easement and fee land: name, holder, acreage, a plain 'what this is'", () => {
     const c = cpcEasementCard({ Name: "WARREN RANCH TRACT", CE_holder: "Katy Prairie Conservancy" });
     expect(c.title).toBe("Warren Ranch Tract");
     expect(c.rows.map((r) => r.label)).toEqual(["What this is", "Easement holder"]);
     expect(text(c)).not.toMatch(RAW);
     expect(cpcEasementCard({}).title).toBe("Conservation easement");
     expect(cpcEasementCard({ Name: "N", CE_holder: "NP" }).rows.length).toBe(1);
+    const o = cpcOwnedCard({ Property: "Cypress Creek Tract", Acres: 412.6 });
+    expect(o.title).toBe("Cypress Creek Tract");
+    expect(o.rows).toEqual([{ label: "What this is", text: "Land the Katy Prairie Conservancy owns outright — not developable" }, { label: "Size", text: "413 acres" }]);
     expect(cpcOwnedCard({}).title).toBe("Katy Prairie Conservancy land");
-    expect(cpcOwnedCard({ NAME: "Cypress Creek Tract" }).title).toBe("Cypress Creek Tract");
+    expect(cpcOwnedCard({ Property: "P", Acres: 0 }).rows.length).toBe(1);
+    expect(acresText(12.34)).toBe("12.3 acres");
+    expect(acresText("junk")).toBe("");
   });
-  it("CCN and MUD cards read the first plausible column and print nothing they cannot read", () => {
-    expect(ccnCard({ UTILITY: "CITY OF HEMPSTEAD", CCN_No: "12345", OBJECTID: 4 })).toEqual({ title: "City of Hempstead", rows: [{ label: "Certificate number", text: "12345" }] });
+  it("CCN card: utility, service, certificate number, status — nothing it cannot read", () => {
+    expect(ccnCard({ UTILITY: "CITY OF HEMPSTEAD", CCN_TYPE: "Water", TYPE: "WATER", CCN_NO: "12345", STATUS: "A", COUNTY: "Waller", OBJECTID: 4 })).toEqual({
+      title: "City of Hempstead", rows: [{ label: "Service", text: "Water" }, { label: "Certificate number", text: "12345" }, { label: "Status", text: "Active" }],
+    });
+    expect(ccnCard({ UTILITY: "X", CCN_TYPE: "Sewer", TYPE: "Wastewater" }).rows.map((r) => r.label)).toEqual(["Service", "Type"]);
     expect(ccnCard({ OBJECTID: 1 })).toEqual({ title: "Water / sewer service area", rows: [] });
-    expect(mudCard({ Name: "Waller County MUD 19", TCEQ_ID: "7570000" })).toEqual({ title: "Waller County MUD 19", rows: [{ label: "TCEQ district ID", text: "7570000" }] });
+    expect(text(ccnCard({ UTILITY: "X", COUNTY: "Waller", CONTACT_PHONE: "555-0100" }))).not.toMatch(/555|COUNTY/);
+  });
+  it("MUD card: name, district id, type, status", () => {
+    expect(mudCard({ NAME: "Waller County MUD 19", DISTRICT_ID: "WC19", TYPE: "MUD", STATUS: "A", COUNTY: "Waller" })).toEqual({
+      title: "Waller County MUD 19", rows: [{ label: "District ID", text: "WC19" }, { label: "Type", text: "MUD" }, { label: "Status", text: "Active" }],
+    });
     expect(mudCard({}).title).toBe("Municipal utility district");
-    expect(text(ccnCard({ UTILITY: "X", CONTACT_PHONE: "555-0100" }))).not.toMatch(/555/);
-    expect(text(mudCard({ Name: "M", POC: "A Person", PHONE: "555" }))).not.toMatch(/Person|555/);
+    expect(text(mudCard({ NAME: "M", POC: "A Person", PHONE: "555" }))).not.toMatch(/Person|555/);
   });
   it("floodway buffer: says it is the county's own drawing, not FEMA and not the screening buffer", () => {
     expect(BUFFER_STATUS).toMatch(/not the effective FEMA map/);
     expect(BUFFER_STATUS).toMatch(/not Planyr's screening buffer/);
     expect(floodwayBufferCard().rows).toEqual([{ label: "What this is", text: BUFFER_STATUS }]);
+    const c = floodwayBufferCard({ FLD_ZONE: "AE", ZONE_SUBTY: "FLOODWAY", BUFF_DIST: 100 });
+    expect(c.rows.map((r) => r.text)).toEqual(["Zone AE", "Floodway", BUFFER_STATUS]);
+    expect(text(c)).not.toMatch(/BUFF_DIST|\b100\b/); // the buffer distance is never printed
   });
-  it("soft() and pick() read shouted text and case-insensitive columns", () => {
+  it("soft() reads shouted text", () => {
     expect(soft("FM 359 RD")).toBe("FM 359 Rd");
     expect(soft("Already Mixed")).toBe("Already Mixed");
-    expect(pick({ name: "A" }, ["NAME"])).toBe("A");
-    expect(pick({ Name: "-9999" }, ["Name"])).toBe("");
-    expect(pick(null, ["x"])).toBe("");
   });
   it("every row's click card is wired (no hover popup — the card only opens on a click, owner constraint #43)", () => {
     for (const id of IDS) {

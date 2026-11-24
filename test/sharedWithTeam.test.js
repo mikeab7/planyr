@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { sharedWithDisplay, entityInitials } from "../src/workspaces/site-planner/lib/sharedWithTeam.js";
 
 /* B845088 (NEW-1) — owner override (live review, 2026-08-30): show the TEAM a site is shared
@@ -78,7 +79,7 @@ describe("entityInitials (pure)", () => {
 describe("MapFinder.jsx wires the team-chip display through sharedWithDisplay, not a roster read", () => {
   it("imports sharedWithDisplay from lib/sharedWithTeam.js and no longer imports lib/sharedWithMonogram.js or teams.listMembers", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).toMatch(/sharedWithDisplay\(s\.teamId,\s*myTeams\)/);
     expect(src).not.toMatch(/sharedWithMonogram\.js/);
     expect(src).not.toMatch(/\blistMembers\b/);
@@ -90,7 +91,7 @@ describe("MapFinder.jsx wires the team-chip display through sharedWithDisplay, n
   // tooltip/aria-label must keep the FULL name so it's never lost, only shortened on the badge.
   it("renders disp.initials as the chip's visible text and disp.name in its tooltip/aria-label", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).toMatch(/\{disp\.initials\}/);
     expect(src).not.toMatch(/(?<!\$)\{disp\.name\}/);
     expect(src).toMatch(/title=\{`Shared with \$\{disp\.name\}`\}/);

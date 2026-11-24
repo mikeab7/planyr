@@ -6,11 +6,12 @@
  * column-resize class had no rule. The runtime half (computed cursor at named points, signed in on the deployed
  * build) is ui-audit/verify-cursors-notes.mjs. */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const read = (p) => readFileSync(p, "utf8");
-const editor = read("src/workspaces/notes/components/NoteEditor.jsx");
+const editor = noteEditorSource();
 const anchor = read("src/workspaces/notes/lib/notesAnchorNode.js");
 const redline = read("src/workspaces/notes/components/NoteRedline.jsx");
 const tree = read("src/workspaces/notes/components/NotesTree.jsx");

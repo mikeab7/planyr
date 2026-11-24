@@ -11,9 +11,10 @@
  *  3. DELETE IS SOFT. A hard delete of a note would be unrecoverable and silent.
  */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
-const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+const finder = mapFinderSource();
 const store = readFileSync(new URL("../src/shared/mapNotes/lib/mapNotesStore.js", import.meta.url), "utf8");
 
 describe("the note is a VERB on the decide bar — never a second placement mechanism", () => {

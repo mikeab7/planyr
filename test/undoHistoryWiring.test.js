@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { plannerSource } from "./helpers/plannerSource.js";
@@ -42,7 +43,7 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     // A passive-effect mirror lags one paint behind, so an undo fired right after an edit compares its
     // baseline against a stale snapshot and no-ops (the button looks live but does nothing). Both fixed
     // by assigning the ref during render, exactly like SitePlanner's stateRef.
-    const dr = read("../src/workspaces/doc-review/DocReview.jsx");
+    const dr = docReviewSource();
     expect(dr).toMatch(/\n  docStateRef\.current = \{ markups, calByPage, calInfo \};/);
     expect(dr).not.toMatch(/useEffect\(\(\) => \{ docStateRef\.current = /);
 

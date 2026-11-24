@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,7 +21,7 @@ import path from "node:path";
  * project id, and the old unguarded shape must not reappear. See test/docProjectLiveness.test.js
  * for the behavioral proof of openableProjectId itself.
  */
-const SRC = fs.readFileSync(path.join(process.cwd(), "src/workspaces/doc-review/DocReview.jsx"), "utf8");
+const SRC = docReviewSource();
 
 describe("DocReview.jsx loadSingleReview — re-checks project liveness before navigating", () => {
   it("imports openableProjectId (and liveProjectIds) from the shared liveness module", () => {

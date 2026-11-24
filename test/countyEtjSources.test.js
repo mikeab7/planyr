@@ -311,7 +311,7 @@ describe("Waller County (sweep 2026-11-22) · the county's own ETJ + city limits
     expect(j.etj).toEqual(["Houston"]);
   });
   it("inside Brookshire's limits the city reads, and no ETJ (limits outrank ETJ, #38)", async () => {
-    const j = await run(...BROOKSHIRE, r({ [WCITY]: () => attr({ CityName: "Brookshire" }) }));
+    const j = await run(...BROOKSHIRE, r({ [WCITY]: () => attr({ CITY: "Brookshire" }) }));
     expect(j.city).toEqual(["Brookshire"]);
     expect(j.etj).toEqual([]);
   });

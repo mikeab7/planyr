@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { installPerfRecorder, __resetPerfRecorder, RENDER_WAIT_BLOCK_MS } from "../src/shared/telemetry/perfRecorder.js";
 import { perfRecent, __resetPerfHandle } from "../src/shared/telemetry/perfRecorderHandle.js";
@@ -99,7 +100,7 @@ describe("(2) the raster road-names fallback gets coalesced tile pruning", () =>
 
   it("RED ON MAIN: both planner hosts pass decorateFallback with the coalescing; the planner also caps the layer", () => {
     const planner = plannerSource();
-    const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const finder = mapFinderSource();
     const call = (src) => { const i = src.indexOf("addVectorLabels(L, map"); return i < 0 ? "" : src.slice(i, i + 1200); };
     expect(call(planner)).toMatch(/decorateFallback:[\s\S]*throttleTilePruning\(layer\)[\s\S]*boundTileCache\(layer/);
     expect(call(finder)).toMatch(/decorateFallback:[\s\S]*throttleTilePruning\(layer\)/);

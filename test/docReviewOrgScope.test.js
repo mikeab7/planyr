@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -16,7 +17,7 @@ import path from "node:path";
  * a silent no-op (the hash never changed, nothing happened). ModelApp.jsx had the identical gap.
  * RED-PROOF: reverting either fix below reproduces that no-op.
  */
-const SRC = fs.readFileSync(path.join(process.cwd(), "src/workspaces/doc-review/DocReview.jsx"), "utf8");
+const SRC = docReviewSource();
 const REVIEWS_BAR_SRC = fs.readFileSync(path.join(process.cwd(), "src/workspaces/doc-review/components/ReviewsBar.jsx"), "utf8");
 const MODEL_APP_SRC = fs.readFileSync(path.join(process.cwd(), "src/workspaces/model/ModelApp.jsx"), "utf8");
 

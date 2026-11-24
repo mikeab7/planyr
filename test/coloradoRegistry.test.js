@@ -6,6 +6,7 @@
  * in — and never a plausible-looking URL nobody could reach.
  */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import {
   COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, statewideFallbackFor,
@@ -184,14 +185,14 @@ describe("NEW-6 · the map can be zoomed out far enough to reach both states", (
     // bounds clamp (none is set), not tile coverage (Esri and USGS both serve from z0), and not
     // the projection (one Web Mercator worldwide). At z8 the view spans a few counties, so there
     // was no way to pull back and see another state. This guards the regression.
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     const m = src.match(/L\.map\([^)]*minZoom:\s*(\d+)/);
     expect(m, "MapFinder no longer sets minZoom on the Leaflet map — check this guard still applies").toBeTruthy();
     expect(Number(m[1]), "minZoom is too high to see two states at once").toBeLessThanOrEqual(4);
   });
 
   it("sets no maxBounds that could re-introduce a regional clamp", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).not.toMatch(/setMaxBounds|maxBounds\s*:/);
   });
 });

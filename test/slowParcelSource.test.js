@@ -8,6 +8,7 @@
  * the slow answer is deterministic. RED-PROOF: run against origin/main (8e0e3ed…8584b49) the "slow server answers at 12 s" case ends `unavailable`; on this branch it is `found`.
  * Not covered here, covered elsewhere: the live server (ui-audit verify-slow-parcel-source-live, V1857328) and the Try again controls (e2e slow-parcel-source). */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { resolveParcelId, parcelIdMessage } from "../src/workspaces/site-planner/lib/parcelIdSearch.js";
 import { identifyWithLineFallback } from "../src/workspaces/site-planner/lib/identifyWithFallback.js";
@@ -175,7 +176,7 @@ describe("NEW-2 — the lot click: a slow or silent source is never 'no parcel h
 });
 
 describe("the wiring (source guards — the UI lives in 6,000-line files nothing else unit-tests)", () => {
-  const mf = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+  const mf = mapFinderSource();
   const card = readFileSync(new URL("../src/workspaces/site-planner/components/ParcelInfoCard.jsx", import.meta.url), "utf8");
   it("both lot paths decide 'unavailable' from `errors`, not only from `responded === 0`", () => {
     expect(mf).toMatch(/res\.responded === 0 \|\| res\.errors > 0 \? "unavailable" : "none"/);
