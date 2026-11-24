@@ -520,6 +520,8 @@ import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components
 import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
 import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
+import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
+import { BuildingNumberConflict, BuildingFootprintSection, BuildingLoadingSection, BuildingStructureSection, BuildingAppearanceSection } from "./components/BuildingInspectorSections.jsx";
 import { EasementInspector, MarkupStyleInspector, NeutralMarkupInspector } from "./components/MarkupInspector.jsx";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
@@ -25261,156 +25263,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <Collapse sectionId="road-size" title="Road" defaultOpen>
-                        <Field gutter={ROAD_GUTTER_W} oneLine label="Length">
-                          {cl ? (
-                            <span data-testid="road-length" title="Follows the line you drew. Drag its ends or corners on the plan to change it." style={readout}><span style={{ flex: "none" }}>{f0(roadLengthOf(selEl))} ft</span><span style={mutedEll}>follows the line</span></span>
-                          ) : stepBox({ ariaLabel: "Road length", testid: "road-length-input", value: Math.round(roadLengthOf(selEl)), min: 1, step: 1, coarse: 10, onCommit: (n) => setRoadLength(selEl, n) })}
-                        </Field>
-                        {/* NEW-2/NEW-4 — "Road width", never "travel width": the pavement between the curb faces (B180).
-                            NEW-1 — once a road carries a REAL designed cross-section, one number can no longer describe
-                            it (which of the bands would a typed width resize?), so the row becomes a read-only summary
-                            and the cross-section button is the only way to change it. A plain road keeps the editable box. */}
-                        <Field gutter={ROAD_GUTTER_W} oneLine label="Width" title={designed ? "Set by this road's cross-section — a designed section can't be resized by one number." : "Curb face to curb face — the pavement between the curbs. The curb is added outside this width."}>
-                          {designed ? (
-                            <span data-testid="road-width-readonly" style={readout}><span style={{ flex: "none" }}>{travelFt} ft</span><span style={mutedEll}>set by cross-section</span></span>
-                          ) : stepBox({ ariaLabel: "Road width", testid: "road-width", value: travelFt, min: 1, step: 2, coarse: 10, onCommit: (n) => setRoadTravel(selEl, n) })}
-                        </Field>
-                        {/* Right-of-way — blank = not designated (the key is removed, the boundary stops drawing). An
-                            undesignated field steps from the section's own width (`seed`), never from 0. */}
-                        {showRow && (
-                          <Field gutter={ROAD_GUTTER_W} oneLine label="Right-of-way" title="A designated legal ROW, drawn as a boundary line on the plan — wider than the modeled section, with the remainder an undesignated margin each side. Blank = not designated.">
-                            {stepBox({ ariaLabel: "Right-of-way width", testid: "road-row", placeholder: "—", value: rowFt, seed: selEl.xsection ? Math.round(rowWidth(selEl.xsection)) : travelFt, min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadRowFt(selEl, n) })}
-                          </Field>
-                        )}
-                        {cl && (
-                          <Field gutter={ROAD_GUTTER_W} oneLine label="Class">
-                            <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
-                              <select style={ROAD_SELECT_STYLE} data-testid="road-class" aria-label="Road class" value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
-                                {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                              </select>
-                              <button type="button" title="Class defaults — edit in Standards" aria-label="Edit road class defaults in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: FONT_SIZE.control, flex: "none" }}>↗</button>
-                            </span>
-                          </Field>
-                        )}
-                      </Collapse>
-                      {cl && (
-                        <Collapse sectionId="road-xsection" title="Cross-section" defaultOpen summary={xsSummary(selEl)}>
-                          <RoadXSectionStrip bands={xsStripBands(selEl, { travelFt: roadTravel(selEl), curbFt: roadCurbOf(selEl) })} />
-                          <RoadStripCaption>{xsCaption(selEl, { travelFt })}</RoadStripCaption>
-                          <UiButton type="button" variant="ghost" data-testid="edit-road-xsection" style={{ width: "100%" }}
-                            onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>{xsButtonLabel(selEl)}</UiButton>
-                        </Collapse>
-                      )}
+                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
+                      {cl && <RoadXSectionSection roadCurbOf={roadCurbOf} roadTravel={roadTravel} selEl={selEl} setXsDialog={setXsDialog} travelFt={travelFt} />}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
-                      {cl && (
-                        <Collapse sectionId="road-label" title="Label" defaultOpen summary={roadLabelSummary(selEl)}>
-                          <Field gutter={ROAD_GUTTER_W} oneLine label="Name"><input data-testid="road-name" aria-label="Road name" value={selEl.inlineLabel || ""} maxLength={120}
-                            onFocus={() => pushHistory()}
-                            onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
-                            placeholder="e.g. MAIN STREET" style={ROAD_SELECT_STYLE} /></Field>
-                          {/* B678 — text size / repeat spacing / background halo / position (only once a name is typed) */}
-                          {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
-                        </Collapse>
-                      )}
+                      {cl && <RoadLabelSection coalesceLabelWrite={coalesceLabelWrite} inlineLabelControls={inlineLabelControls} pushHistory={pushHistory} selEl={selEl} setSelEl={setSelEl} />}
                       {/* B953/NEW-1 + B955/NEW-1 — clean-tee and road→drive params (curb return radius + throat flare),
                           shown ONLY when this road has a junction, collapsed by default. Seeded from the road class /
                           junction kind; the render re-solves live. */}
-                      {cl && (myTees.length > 0 || myDrives.length > 0) && (
-                        <Collapse sectionId="road-intersection" title="Intersection">
-                          {myTees.length > 0 && (() => {
-                            const tj = myTees[0];
-                            const seedR = classReturnRadius(roadClassOf(settings, selEl.roadClass));
-                            const curR = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.returnR > 0 ? selEl.tee.returnR : seedR;
-                            const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
-                            return (
-                              <div data-testid="road-tee-params" style={{ marginBottom: SPACE.md }}>
-                                <div style={{ ...subHead, marginTop: 0 }}>Tee intersection</div>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadTee(selEl, tj.throughId, { returnR: n }) })}</Field>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadTee(selEl, tj.throughId, { flare: n }) })}</Field>
-                                <div style={{ ...muted, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
-                              </div>
-                            );
-                          })()}
-                          {myDrives.map((dj) => {
-                            const kindLbl = dj.kind === "truckcourt" ? "truck court" : "parking drive";
-                            const seedR = DRIVE_RETURN[dj.kind] ?? 20;
-                            const rec = selEl.driveTee && selEl.driveTee.targetId === dj.targetId ? selEl.driveTee : (selEl.driveTee2 && selEl.driveTee2.targetId === dj.targetId ? selEl.driveTee2 : null);
-                            const curR = rec && rec.returnR > 0 ? rec.returnR : seedR;
-                            const curFlare = rec && rec.flare > 0 ? rec.flare : 0;
-                            const tgt = { targetId: dj.targetId, kind: dj.kind };
-                            return (
-                              <div key={`${dj.targetId}:${dj.endIdx}`} data-testid="road-drive-params">
-                                <div style={{ ...subHead, marginTop: 0 }}>Drive intersection · {kindLbl}</div>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Curb return">{stepBox({ ariaLabel: "Curb return", value: Math.round(curR), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { returnR: n }, tgt) })}</Field>
-                                <Field gutter={ROAD_GUTTER_W} oneLine label="Throat flare">{stepBox({ ariaLabel: "Throat flare", value: Math.round(curFlare), min: 0, step: 1, coarse: 5, onCommit: (n) => setRoadDrive(selEl, { flare: n }, tgt) })}</Field>
-                                <div style={{ ...muted, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
-                              </div>
-                            );
-                          })}
-                        </Collapse>
-                      )}
+                      {cl && (myTees.length > 0 || myDrives.length > 0) && <RoadIntersectionSection DRIVE_RETURN={DRIVE_RETURN} muted={muted} myDrives={myDrives} myTees={myTees} selEl={selEl} setRoadDrive={setRoadDrive} setRoadTee={setRoadTee} settings={settings} stepBox={stepBox} subHead={subHead} />}
                       {/* NEW-1 (2026-11-10) — TAPER: only on a road that actually has a tapered joint (it meets a road of a different width end to
                           end). One line per tapered end; blank = the automatic length (10 ft per foot each edge steps in); the value drawn is
                           shortened to the road's last straight stretch. Its own section, so nothing crowds the cross-section button above. */}
-                      {cl && (() => {
-                        const tp = roundTrim(selEl) && roundTrim(selEl).taper;
-                        const ends = tp ? ["s", "e"].filter((k) => tp[k]) : [];
-                        if (!ends.length) return null;
-                        return (
-                          <Collapse sectionId="road-taper" title="Taper" defaultOpen summary={ends.map((k) => `${Math.round(tp[k].lenFt)} ft`).join(" · ")}>
-                            {ends.map((k) => (
-                              <Field key={k} gutter={ROAD_GUTTER_W} oneLine label={ends.length > 1 ? (k === "s" ? "Start length" : "End length") : "Length"} title="How far back from the joint this road narrows (or widens) to meet the road it joins. Blank = automatic.">
-                                {stepBox({ ariaLabel: ends.length > 1 ? (k === "s" ? "Taper length at the start" : "Taper length at the end") : "Taper length", testid: `road-taper-${k}`, placeholder: String(Math.round(tp[k].lenFt)), value: tp[k].auto ? null : Math.round(tp[k].reqFt), seed: Math.round(tp[k].lenFt), min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadTaper(selEl, k, n) })}
-                              </Field>
-                            ))}
-                          </Collapse>
-                        );
-                      })()}
+                      {cl && <RoadTaperSection roundTrim={roundTrim} selEl={selEl} setRoadTaper={setRoadTaper} stepBox={stepBox} />}
                       {/* NEW-3 (road-panel redesign) — HIDDEN, NOT DELETED: the min-radius review (the warning + Fix radius,
                           and "Curve at vertex") renders only behind `roadRadiusReviewOn()`, default OFF. Owner: "it should
                           just let me be wrong; it's not good enough yet, keep it in the background". */}
-                      {radiusReviewOn && warn && (
-                        <div data-testid="road-radius-warning" style={{ fontSize: 11.5, color: PAL.danger, fontWeight: 600, marginTop: 2, lineHeight: 1.4 }}>
-                          ⚠ {f0(warn.minR)}′ radius — below {f0(warn.threshold)}′ min for {warn.label}
-                          {/* B946/NEW-2 — the passive warning becomes an ACTION: round the tight corners up to spec. */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5 }}>
-                            <button style={{ ...chip, color: PAL.accent, borderColor: PAL.accent, fontWeight: 600 }} onClick={() => fixRoadRadiusFor(selEl)}>Fix radius</button>
-                            <span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 400 }}>Rounds each tight corner to {f0(warn.threshold)}′.</span>
-                          </div>
-                          {fixPrev && fixPrev.residual.length > 0 && (
-                            <div style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 400, marginTop: 4, lineHeight: 1.4 }}>
-                              {fixPrev.residual.length} corner{fixPrev.residual.length === 1 ? "" : "s"} (
-                              {fixPrev.residual.map((r) => `#${r.index + 1}`).join(", ")}
-                              ) can’t reach {f0(warn.threshold)}′ without moving the road’s endpoints — the segments are too short to fit the arc.{" "}
-                              <button style={{ ...linkBtn, fontSize: 10.5 }} onClick={() => { setSel({ kind: "el", id: selEl.id }); setRoadVtxSel({ id: selEl.id, idx: fixPrev.residual[0].index }); }}>Show</button>
-                            </div>
-                          )}
-                          <div style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 400, marginTop: 3 }}>Screening only — verify against the adopted code.</div>
-                        </div>
-                      )}
-                      {radiusReviewOn && cl && (
-                        <div data-testid="road-curve-at-vertex" style={{ marginTop: 8 }}>
-                          <div style={subHead}>Curve at vertex</div>
-                          {vsel == null ? (
-                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>Click a road vertex on the canvas to set it sharp · arc · smooth.{selEl.pts.length <= 2 ? " A straight 2-point road has no interior vertex." : ""}</div>
-                          ) : (
-                            <>
-                              <div style={{ display: "flex", gap: 6 }}>
-                                {[["sharp", "Sharp"], ["arc", "Arc"], ["smooth", "Smooth"]].map(([k, lbl]) => (
-                                  <button key={k} style={{ ...chip, flex: 1, ...(vtreat === k ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }}
-                                    onClick={() => setRoadVtx(selEl, vsel, k === "arc" ? { treatment: "arc", radius: (selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].radius) || roadDefaultRadius(selEl, settings) } : { treatment: k })}>{lbl}</button>
-                                ))}
-                              </div>
-                              {vtreat === "arc" && (
-                                <Field label="Arc radius (ft)"><NumInput style={numInput} value={Math.round((selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].radius) || roadDefaultRadius(selEl, settings))} min={1} onCommit={(n) => setRoadVtx(selEl, vsel, { treatment: "arc", radius: n })} /></Field>
-                              )}
-                              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Vertex {vsel + 1} of {selEl.pts.length}. Arc fillets are feasibility-clamped to the adjacent segments.</div>
-                            </>
-                          )}
-                        </div>
-                      )}
+                      {radiusReviewOn && warn && <RoadRadiusWarning PAL={PAL} chip={chip} fixPrev={fixPrev} fixRoadRadiusFor={fixRoadRadiusFor} linkBtn={linkBtn} selEl={selEl} setRoadVtxSel={setRoadVtxSel} setSel={setSel} warn={warn} />}
+                      {radiusReviewOn && cl && <RoadCurveAtVertex PAL={PAL} chip={chip} numInput={numInput} selEl={selEl} setRoadVtx={setRoadVtx} settings={settings} subHead={subHead} vsel={vsel} vtreat={vtreat} />}
                     </>
                     );
                   })() : isDockLayerEl(selEl) ? (() => {
@@ -25511,166 +25381,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const resetBtn = { ...chip, padding: "2px 6px", fontSize: FONT_SIZE.micro, color: "var(--accent-text, var(--accent))", marginLeft: 2 };
                     // ---- NEW-2 — building-number conflict: plain-English options WITH their outcomes ----
                     const conflict = bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) ? bldgNumConflict : null;
-                    const conflictDialog = conflict && (() => {
-                      const nums = buildingNumbers(els);
-                      const holderNo = nums.get(conflict.holderId) ?? conflict.n;
-                      const cur = nums.get(b.id);
-                      const n = conflict.n;
-                      const optBtn = (extra) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 9px", marginBottom: SPACE.sm, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, cursor: "pointer", fontFamily: "inherit", ...extra });
-                      return (
-                        <div data-testid="bldg-num-conflict" style={{ margin: `0 0 ${SPACE.xl}px`, padding: "8px 9px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED }}>
-                          <div style={{ fontSize: FONT_SIZE.label, lineHeight: 1.5, color: txtPrimary, marginBottom: SPACE.md }}>That number belongs to Building {holderNo} — what should happen?</div>
-                          <button type="button" data-testid="bldg-num-swap" style={optBtn()} onClick={() => resolveBuildingNumberConflict("swap")}>
-                            <span style={{ display: "block", fontSize: FONT_SIZE.control, fontWeight: 600 }}>Swap with Building {holderNo}</span>
-                            <span style={{ display: "block", fontSize: FONT_SIZE.label, color: txtTertiary, lineHeight: 1.4 }}>This becomes {n} · Building {holderNo} becomes {cur}</span>
-                          </button>
-                          <button type="button" data-testid="bldg-num-shift" style={optBtn({ borderColor: "var(--accent)" })} onClick={() => resolveBuildingNumberConflict("shift")}>
-                            <span style={{ display: "block", fontSize: FONT_SIZE.control, fontWeight: 600 }}>Insert at {n}, shift the rest up</span>
-                            <span style={{ display: "block", fontSize: FONT_SIZE.label, color: txtTertiary, lineHeight: 1.4 }}>{n}→{n + 1}, {n + 1}→{n + 2} … · this building becomes {n}</span>
-                          </button>
-                          <div style={{ textAlign: "right" }}>
-                            <button type="button" data-testid="bldg-num-cancel" style={{ ...linkBtn, fontSize: FONT_SIZE.control, textDecoration: "none", color: txtSecondary }}
-                              onClick={() => { setBldgNumConflict(null); setBldgNumResetSeq((q) => q + 1); }}>Cancel</button>
-                          </div>
-                        </div>
-                      );
-                    })();
-                    // ---- NEW-3 — Footprint ----
-                    const footprint = (
-                      <Collapse sectionId="building-footprint" title="Footprint" defaultOpen summary={`${Math.round(footprintLength(b))} × ${Math.round(footprintDepth(b))} ft`}
-                        headerRight={b.points ? null : (
-                          <button type="button" style={linkBtn} data-testid="edit-outline" title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit outline</button>
-                        )}>
-                        {b.points ? (
-                          // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
-                          // (true area is polygon-exact). A reshaped-from-rect building (footEdit) can reset;
-                          // a hand-click-drawn one just reads out (no rectangle to go back to).
-                          <>
-                            <Field label="Length"><span style={ROW6}><span style={{ fontSize: FONT_SIZE.control, color: txtPrimary }}>{Math.round(footprintLength(b))}</span>{unit("ft bounding")}</span></Field>
-                            <Field label="Depth"><span style={ROW6}><span style={{ fontSize: FONT_SIZE.control, color: txtPrimary }}>{Math.round(footprintDepth(b))}</span>{unit("ft bounding")}</span></Field>
-                            <div style={{ ...muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Irregular footprint · <b style={{ color: txtPrimary }}>{f0(buildingSqft(b))} SF</b>. Length/Depth show the bounding box.{b.footEdit ? " Drag corners on the canvas to reshape — loaded walls stay straight (their corners slide along the wall); Shift-click an end/rear wall to add a control point." : ""}</div>
-                            {b.footEdit && <button style={{ ...chip, width: "100%", marginBottom: SPACE.md }} title="Discard the reshape — back to the bounding rectangle" onClick={() => resetBuildingFootprint(b.id)}>↺ Reset to rectangle</button>}
-                          </>
-                        ) : (
-                          // Building panel v3 (NEW-2) — one bordered box per number: value · unit · stacked ▲▼ (the shared NumberBox).
-                          <>
-                            <Field label="Length">
-                              <NumInput boxed unit="ft" boxWidth={96} ariaLabel="Length" testid="footprint-length" value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} />
-                            </Field>
-                            <Field label="Depth">
-                              <NumInput boxed unit="ft" boxWidth={96} ariaLabel="Depth" testid="footprint-depth" value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} />
-                            </Field>
-                          </>
-                        )}
-                        <Field label="Rotation">
-                          <RotationStepper boxed boxWidth={108} data-testid="footprint-rotation" value={b.rot || 0} disabled={!!b.locked || !!b.points}
-                            disabledReason={b.points ? "Reset the footprint to a rectangle to rotate it" : "Unlock this element to rotate it"}
-                            onCommit={(deg) => rotateSelTo(deg)}
-                            onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
-                        </Field>
-                      </Collapse>
-                    );
-                    // ---- Building panel v3 — Docks & walls: the wall picker (to scale, bump-outs drawn) beside the dock type
-                    // and door count, the Bump-outs line, then ONE strip per wall (a bar of pieces, a dashed +) and a legend. ----
-                    const bumpSpecs = bumpSpecsOf(b);
-                    const plan = wallRowPlan(b);
-                    const wallRowsData = plan.map((r) => {
-                      const isDock = r.role === "dock";
-                      const mine = isDock ? bumpSpecs.filter((x) => r.sides.includes(x.side)) : [];
-                      return {
-                        ...r, isDock,
-                        layers: wallLayersOn(b, r.sides[0]),
-                        bump: isDock ? {
-                          n: mine.length,
-                          ends: bumpEnds(r.sides[0], b.rot || 0).map((e) => ({ ...e, on: r.sides.every((s) => bumpSpecs.some((x) => x.side === s && x.sign === e.sign)) })),
-                          along: Math.round(mine[0] ? mine[0].along : DOGEAR_W), proj: Math.round(mine[0] ? mine[0].proj : DOGEAR_D),
-                        } : null,
-                      };
-                    });
-                    const wallOps = {
-                      footEdit: !!b.footEdit,
-                      depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
-                      trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
-                      trailerRowDepth: (row, layer, i, n) => setTrailerRowDepth(b, row.sides, layer, i, n),
-                      trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
-                      parkingRows: (row, n) => setEmployeeParkingRows(b, n, row.sides),
-                      remove: (row, layer) => removeWallLayer(b, row.sides, layer),
-                      add: (row, key) => addWallLayer(b, row.sides, key),
-                      bumpEnd: (row, sign) => toggleBumpEnd(b, row.sides, sign),
-                      bumpSize: (row, along, proj) => setBumpSize(b, row.sides, along, proj),
-                      bumpRemoveAll: (row) => removeBumpsOn(b, row.sides),
-                    };
-                    const loading = (
-                      <Collapse sectionId="building-loading" title="Docks & walls" defaultOpen summary={`${loadingTypeLabel(b)} · ${hm.doors} ${hm.doors === 1 ? "door" : "doors"}`}>
-                        <div style={{ display: "flex", alignItems: "center", gap: SPACE.xl }}>
-                          <LoadingWallPicker b={b} bumps={bumpSpecs} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} onCorner={(side, sign) => toggleBumpCorner(b, side, sign)} />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div data-testid="loading-type" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 600, color: txtPrimary }}>{loadingTypeLabel(b)}</div>
-                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}{hm.rampN ? ` · ${hm.rampN} drive-in` : ""}</div>
-                            <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
-                          </div>
-                        </div>
-                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} kindFills={Object.fromEntries(Object.keys(KIND_LABEL).map((k) => [k, elStyle({ type: (ZONE_CATALOG[k] || {}).elType }, settings).fill]))} />
-                      </Collapse>
-                    );
-                    // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
-                    const autoBoth = !props.clearHeight.overridden && !props.slab.overridden;
-                    const autoLink = (title) => <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro, marginLeft: 2 }} title={title} onClick={() => jumpToStandards("building")}>auto</button>;
-                    // NEW-4 — Pad elevation lives here now (it fed the floodplain-fill screen from a bare row under the readout).
-                    const fmS = settings.floodMitigation || {};
-                    const padAuto = effectivePadElev({ ...b, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4 });
-                    const gsum = hm.gg.summary;
-                    const structure = (
-                      <Collapse sectionId="building-structure" title="Structure" defaultOpen={false}
-                        summary={`${props.clearHeight.value}′ clear · ${props.slab.value}″ slab${autoBoth ? " · auto" : ""} · pad ${b.padElevFt != null ? `${f1(b.padElevFt)}′` : "auto"}`}>
-                        <Field label="Clear height">
-                          <span style={ROW4}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
-                            {unit("ft")}
-                            {props.clearHeight.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : autoLink("Automatic by size — change the rule in Standards → Buildings")}
-                          </span>
-                        </Field>
-                        <Field label="Slab">
-                          <span style={ROW4}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
-                            {unit("in")}
-                            {props.slab.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : autoLink("Automatic by size — change the rule in Standards → Buildings")}
-                          </span>
-                        </Field>
-                        <PadElevRow value={b.padElevFt} auto={padAuto} numInput={numInput} resetBtn={resetBtn} muted={muted}
-                          info="Feeds the floodplain-mitigation fill screen (ft NAVD88); blank = the plan's pad FFE."
-                          onCommit={(v) => { pushHistory(); setSelEl({ padElevFt: v }); }} />
-                        {hasGridOverrides(b) && (
-                          <div data-testid="grid-overrides-note" style={{ ...muted, fontSize: FONT_SIZE.micro, margin: `${SPACE.xs}px 0` }}>
-                            Grid overrides set on this building · <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={resetBuildingGridOverrides}>reset</button>
-                          </div>
-                        )}
-                        <div data-testid="grid-line" style={{ ...muted, fontSize: FONT_SIZE.micro, marginTop: SPACE.sm, fontVariantNumeric: TABULAR_NUMS }}>
-                          {gsum ? <>Grid {gsum.lengthTyp}′ × {gsum.depthTyp}′ typ{gsum.speedBay ? <> · speed bay {gsum.speedBay}′</> : ""} · {gsum.lengthCount} × {gsum.depthCount} bays · </> : "Grid · "}
-                          <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={() => jumpToStandards("building")}>Standards ↗</button>
-                        </div>
-                      </Collapse>
-                    );
-                    // ---- NEW-8 — Appearance (replaces the standalone Properties section for a real building) ----
-                    const appearance = curStyle && (
-                      <Collapse sectionId="building-appearance" title="Appearance" defaultOpen summary="outline · fill">
-                        <PairedFieldHead left="Outline" right="Fill" />
-                        <PairedField label="Colour"
-                          left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
-                          right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
-                        />
-                        <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
-                        {strokeWidthRow}
-                        <div style={{ display: "flex", gap: SPACE.sm, marginTop: SPACE.md, alignItems: "center" }}>
-                          <button type="button" style={chip} onClick={setStyleDefault} title="Use these colors, opacity and line weight for every new building">Set as default</button>
-                          <button type="button" style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
-                        </div>
-                      </Collapse>
-                    );
                     return (
                       <>
                         {/* NEW-1 — the ONE place a building's assigned number can be changed without deleting and
@@ -25680,11 +25390,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             Swap or Insert instead, so two buildings can never end up sharing a number, even for a
                             moment. Gaps left behind by an Insert (or by typing a number well past the current count)
                             are expected and are never auto-compacted. */}
-                        {conflictDialog}
-                        {footprint}
-                        {loading}
-                        {structure}
-                        {appearance}
+                        {conflict && <BuildingNumberConflict b={b} conflict={conflict} els={els} linkBtn={linkBtn} resolveBuildingNumberConflict={resolveBuildingNumberConflict} setBldgNumConflict={setBldgNumConflict} setBldgNumResetSeq={setBldgNumResetSeq} txtPrimary={txtPrimary} txtSecondary={txtSecondary} txtTertiary={txtTertiary} />}
+                        <BuildingFootprintSection ax={ax} b={b} buildingSqft={buildingSqft} chip={chip} editBuildingFootprint={editBuildingFootprint} linkBtn={linkBtn} muted={muted} resetBuildingFootprint={resetBuildingFootprint} resizeSelEl={resizeSelEl} rotateSelTo={rotateSelTo} txtPrimary={txtPrimary} unit={unit} />
+                        <BuildingLoadingSection addWallLayer={addWallLayer} applyBuildingLoading={applyBuildingLoading} b={b} bumpSpecsOf={bumpSpecsOf} hm={hm} muted={muted} noDock={noDock} numInput={numInput} removeBumpsOn={removeBumpsOn} removeWallLayer={removeWallLayer} setBumpSize={setBumpSize} setEmployeeParkingRows={setEmployeeParkingRows} setTrailerAisle={setTrailerAisle} setTrailerRowDepth={setTrailerRowDepth} setTrailerRows={setTrailerRows} setWallLayerDepth={setWallLayerDepth} settings={settings} toggleBumpCorner={toggleBumpCorner} toggleBumpEnd={toggleBumpEnd} txtPrimary={txtPrimary} wallLayersOn={wallLayersOn} />
+                        <BuildingStructureSection b={b} hasGridOverrides={hasGridOverrides} hm={hm} jumpToStandards={jumpToStandards} linkBtn={linkBtn} muted={muted} numInput={numInput} props={props} pushHistory={pushHistory} resetBtn={resetBtn} resetBuildingGridOverrides={resetBuildingGridOverrides} setSelEl={setSelEl} settings={settings} unit={unit} />
+                        <BuildingAppearanceSection chip={chip} clearElStyle={clearElStyle} colorCtl={colorCtl} curStyle={curStyle} fillOpacityCell={fillOpacityCell} setSelEl={setSelEl} setStyleDefault={setStyleDefault} strokeOpacityCell={strokeOpacityCell} strokeWidthRow={strokeWidthRow} />
                       </>
                     );
                   })() : (

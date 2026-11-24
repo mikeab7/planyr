@@ -43,8 +43,8 @@
 // "serial" is an integer day count since 1970-01-01 UTC (clean, DST-free).
 //
 // ⚠ This file is the single source of truth. The Schedule page does NOT carry a copy: it loads
-// public/sequence/engine.js, a bundle of this file (via src/shared/schedule/engine/pageEntry.js).
-// After editing, run `npm run build:sequence-engine`; CI fails if the committed bundle is stale.
+// public/sequence/page.js, a bundle of this file (via src/shared/schedule/engine/pageEntry.js).
+// After editing, run `npm run build:sequence-page`; CI fails if the committed bundle is stale.
 
 /* FORMULA-ENGINE:START */
 // ── Error type ────────────────────────────────────────────────────────────────

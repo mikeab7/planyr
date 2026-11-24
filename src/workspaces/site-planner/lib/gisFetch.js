@@ -56,8 +56,9 @@ export const GIS_MAX_GET_URL = 2000;
  *   'network'  — fetch threw (offline / DNS / connection / possibly CORS) (retryable once)
  */
 export class GisFetchError extends Error {
-  constructor(kind, message, { status = null, arcgisCode = null, url = null, retryable = false } = {}) {
+  constructor(kind, message, { status = null, arcgisCode = null, url = null, retryable = false, arcgisMessage = null } = {}) {
     super(message);
+    this.arcgisMessage = arcgisMessage; // the server's own words, without the " (code N)" suffix (callers that re-word errors use it)
     this.name = "GisFetchError";
     this.kind = kind;
     this.status = status;
@@ -240,13 +241,14 @@ export async function fetchArcgisJson(url, opts = {}) {
         // bad field). A real reject — not retryable, surfaced with the code.
         const code = j.error.code != null ? ` (code ${j.error.code})` : "";
         throw new GisFetchError("arcgis", (j.error.message || "ArcGIS query error.") + code, {
-          status: j.error.code ?? null, arcgisCode: j.error.code ?? null, url: target,
+          status: j.error.code ?? null, arcgisCode: j.error.code ?? null, url: target, arcgisMessage: j.error.message || null,
         });
       }
       return j;
     } catch (e) {
       const info = classifyGisError(e);
       const err = e instanceof GisFetchError ? e : new GisFetchError(info.kind, info.message, { url: target, retryable: info.retryable });
+      if (!(e instanceof GisFetchError)) err.unreadable = !!e && e.name === "SyntaxError"; // a 200 that was not JSON (callers word that apart from a network failure)
       if (info.retryable && attempt < retries) { lastErr = err; continue; }
       throw err;
     } finally {

@@ -313,3 +313,15 @@ describe("handleGisCache — parcel tile /query answers (wide view)", () => {
     expect(res.status).toBe(302);
   });
 });
+
+// ── pen-test 2026-11-24: same-origin relay must never serve active content ─────────────────────────────────
+import { safeContentType } from "../functions/api/gis-cache/_handler.js";
+describe("gis-cache never serves active content on the planyr.io origin", () => {
+  it("rebuilds the type from an allow-list", () => {
+    expect(safeContentType("text/html; charset=utf-8")).toEqual({ type: "application/octet-stream", safe: false });
+    expect(safeContentType("image/svg+xml").safe).toBe(false);
+    expect(safeContentType("IMAGE/PNG; x=y")).toEqual({ type: "image/png", safe: true });
+    expect(safeContentType("application/json")).toEqual({ type: "application/json; charset=utf-8", safe: true });
+    expect(safeContentType(undefined).safe).toBe(false);
+  });
+});

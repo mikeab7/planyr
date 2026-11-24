@@ -4,8 +4,8 @@ Adversarial input testing for the **Scheduler** date/cascade engine
 (`src/shared/schedule/engine/`). Run after touching any of the date math
 (`addBD`, `difBD`, `calcEnd`, `cascadeDates`, `rollupParentDates`, `parseFlexDate`).
 
-The engine lives in real modules under `src/shared/schedule/engine/` (the page loads them through the generated
-`public/sequence/engine.js`), and the stress scripts import those same modules via `test/helpers/schedulerEngine.js`
+The engine lives in real modules under `src/shared/schedule/engine/` (the page bundles them into the generated
+`public/sequence/page.js`), and the stress scripts import those same modules via `test/helpers/schedulerEngine.js`
 — there is no copy to keep in sync. The vitest suite `test/schedulerEngine.test.js` runs the same checks on every
 `npm test`.
 
@@ -14,9 +14,6 @@ The engine lives in real modules under `src/shared/schedule/engine/` (the page l
   CRASH / HANG / WRONG. `node ui-audit/stress/stress-scheduler.mjs`
 - `stress-scheduler2.mjs` — round 2: predecessor parsing, the four constraint types,
   and cascade/rollup performance at scale. `node ui-audit/stress/stress-scheduler2.mjs`
-- `check-babel.mjs` — extracts the inline `<script type="text/babel">` and runs it
-  through esbuild's JSX loader to confirm it still compiles after an edit (a fast
-  stand-in for a live browser when the sandbox won't keep a preview server alive).
 - `smoke-sequence.mjs` — loads `/sequence/` in headless Chromium to confirm the page
   renders the Gantt. Needs `playwright` installed and a running `vite preview`.
 

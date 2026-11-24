@@ -825,7 +825,7 @@ test.describe("NEW-1 — schedule row actions collapse into one kebab", () => {
  *
  * ⛔ EVERY OTHER CHECK ON THE MIGRATION READS THE CANONICAL MODULE IN src/. The embedded scheduler
  * cannot import from src/ — it carries a verbatim INLINED copy — and the production build then
- * pre-compiles its Babel blocks and strips @babel/standalone (see scripts/build-sequence-compiled).
+ * is bundled from ES modules (scripts/build-sequence-page.mjs); no in-browser Babel.
  * So "the module is correct" and "the module is alive in the page the owner loads" are two
  * different claims, and only the second one protects his data. A unit test on src/ would stay green
  * through a broken inline copy, a marker that drifted, or a build step that scoped the block away.

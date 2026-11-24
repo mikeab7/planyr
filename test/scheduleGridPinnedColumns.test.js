@@ -12,8 +12,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 describe("Schedule grid — pinned columns (NEW-1)", () => {
   it("pins the leading ID/Task run left and the trailing ●/Status run right with sticky cells", () => {

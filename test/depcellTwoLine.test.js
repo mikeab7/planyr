@@ -40,8 +40,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 // Adapted from the same helper in test/contactCreateConfirm.test.js — extended to skip past the
 // PARAMETER LIST first (via paren depth) before brace-matching the body, because DepCell destructures

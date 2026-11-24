@@ -14,7 +14,7 @@
  * (its console noise is the thing B691 was written to stop) and goes straight to the proxy.
  * When the proxy isn't deployed either, the failure is reported honestly — never a spinner.
  */
-import { GIS_FETCH_TIMEOUT_MS } from "./gisFetch.js";
+import { GIS_FETCH_TIMEOUT_MS, fetchArcgisJson, GisFetchError } from "./gisFetch.js";
 import L from "leaflet";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { gisProxyEnabled, rasterIdentifyLayers } from "./layers.js";
@@ -35,37 +35,24 @@ class UnreadableIdentifyError extends Error {
 }
 
 async function getJson(url, signal) {
-  // Audit B2 item 4: a hung identify host must reject, not hang the hover forever. Our own deadline aborts the
-  // fetch; a caller signal (hover cancel) still aborts it too.
-  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), GIS_FETCH_TIMEOUT_MS) : null;
-  const onAbort = () => { if (ctrl) ctrl.abort(); };
-  if (signal && ctrl) { if (signal.aborted) ctrl.abort(); else signal.addEventListener("abort", onAbort, { once: true }); }
-  try { return await getJsonOnce(url, ctrl ? ctrl.signal : signal); }
-  finally { if (timer) clearTimeout(timer); if (signal && ctrl) signal.removeEventListener("abort", onAbort); }
-}
-
-async function getJsonOnce(url, signal) {
-  const res = await fetch(url, signal ? { signal } : undefined);
-  if (!res.ok) throw new IdentifyHttpError(res.status);
-  /* A 200 that isn't JSON means we reached something that is NOT the service — a captive portal, an
-   * SPA index.html served for an unrouted path, a proxy error page. Say that plainly: letting
-   * `res.json()` throw would surface a raw parser message ("Unexpected token '<'…") in the user's
-   * readout, which is noise, not an honest failure. */
-  let j;
+  // Audit B2 item 4 + M3 (I3): one shared GIS fetch (own deadline, caller's hover-cancel signal chained in). One shot, no retry,
+  // exactly as before; the typed errors rasterIdentify.errorMessage reads are rebuilt from the helper's kinds.
   try {
-    j = await res.json();
-  } catch (_) {
-    throw new UnreadableIdentifyError();
+    return await fetchArcgisJson(url, { signal, timeoutMs: GIS_FETCH_TIMEOUT_MS, retries: 0 });
+  } catch (e) {
+    if (!(e instanceof GisFetchError)) throw e;
+    if (e.kind === "http-5xx" || e.kind === "http-4xx") throw new IdentifyHttpError(e.status);
+    if (e.kind === "timeout") { const a = new Error("The request was aborted"); a.name = "AbortError"; throw a; }
+    if (e.kind === "arcgis") {
+      // ArcGIS answers a failed operation with HTTP 200 and a JSON `{error:…}` body: a failure, not an empty result.
+      const err = new Error(e.arcgisMessage || "ArcGIS identify error");
+      err.status = e.diag.arcgisCode ?? null;
+      throw err;
+    }
+    // A 200 that isn't JSON means we reached something that is NOT the service (captive portal, SPA index.html, proxy error page).
+    if (e.unreadable) throw new UnreadableIdentifyError();
+    throw new TypeError("Failed to fetch"); // network / offline: the shape the proxy-retry above keys off
   }
-  // ArcGIS answers a failed operation with HTTP 200 and a JSON `{error:…}` body — the same trap
-  // arcgis.js documents. Treat it as the failure it is rather than an empty result.
-  if (j && j.error) {
-    const e = new Error(j.error.message || "ArcGIS identify error");
-    e.status = j.error.code ?? null;
-    throw e;
-  }
-  return j;
 }
 
 /* The injected fetcher for createHoverIdentify. `cfg` rides on the params object so the

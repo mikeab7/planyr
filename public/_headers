@@ -71,6 +71,10 @@
   Cache-Control: no-cache
   X-Frame-Options: SAMEORIGIN
   Content-Security-Policy: frame-ancestors 'self'
+# The page's code (audit batch J3) is one un-hashed script, public/sequence/page.js: revalidate it like the HTML so
+# the two can never come from different deploys.
+/sequence/page.js
+  Cache-Control: no-cache
 
 # The standalone marketing landing page (public/landing/) is the same kind of
 # self-contained HTML document — revalidate the HTML on every load so a redeploy

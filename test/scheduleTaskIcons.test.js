@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { sequenceSource } from "./helpers/sequenceSource.js";
+import { sequenceSource, sequenceHtmlSource } from "./helpers/sequenceSource.js";
 
 // SCHEDULE › TASK ICONS (NEW-1, owner-approved design 2026-11-06). The pure rules + the wiring, run against the REAL files:
 // public/sequence/taskIcons.js is evaluated (not mirrored) and the page source is sliced for the few functions that must carry
@@ -353,8 +353,9 @@ describe("collapsed-phase summary", () => {
 });
 
 describe("wiring in public/sequence/index.html", () => {
-  it("loads the library before the app compiles, and the app never touches the icons without it", () => {
-    const a = page.indexOf('<script src="/sequence/taskIcons.js"></script>'), b = page.indexOf('<script type="text/babel">');
+  it("loads the library before the page bundle runs, and the app never touches the icons without it", () => {
+    const html = sequenceHtmlSource();
+    const a = html.indexOf('<script src="/sequence/taskIcons.js"></script>'), b = html.indexOf('<script src="/sequence/page.js"></script>');
     expect(a).toBeGreaterThan(-1);
     expect(a).toBeLessThan(b);
   });
