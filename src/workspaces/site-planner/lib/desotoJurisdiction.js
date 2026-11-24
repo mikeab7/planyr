@@ -1,3 +1,4 @@
+import { pointInPairRing as inRing } from "./ringMath.js";
 /* DeSoto County MS — WHICH GOVERNMENT A POINT FALLS IN (B2507058 / B2507059).
  *
  * The county's zoning table holds several governments' zoning with no jurisdiction field, so a zoning result is labelled by where the SITE falls: inside one of the
@@ -15,14 +16,6 @@ export const UNINCORPORATED = "Unincorporated DeSoto County";
 /* [south, west, north, east] — a box a little larger than the county (measured parcel extent 34.711–34.997 N, −90.312 – −89.688 W). Only a guard against asking a far-away point. */
 const COUNTY_BOX = [34.68, -90.35, 35.01, -89.65];
 
-const inRing = (ring, x, y) => {
-  let c = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
-  }
-  return c;
-};
 /* GeoJSON Polygon / MultiPolygon containment, holes honoured (ring 0 is the outer, the rest are holes). */
 export function pointInGeometry(geometry, lng, lat) {
   if (!geometry) return false;

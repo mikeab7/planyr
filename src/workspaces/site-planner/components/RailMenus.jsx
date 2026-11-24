@@ -10,6 +10,7 @@
 import { Switch } from "../../../shared/ui/controls.jsx";
 import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { acresTwoOrBlank } from "../../../shared/units/numberFormat.js";
 
 const P = {
   draw: <><path d="M3 5.2 L8 2.6 L13.2 5.6 L12.2 12.4 L4.2 13.2 Z" /><circle cx="3" cy="5.2" r="1" fill="currentColor" stroke="none" /><circle cx="8" cy="2.6" r="1" fill="currentColor" stroke="none" /><circle cx="13.2" cy="5.6" r="1" fill="currentColor" stroke="none" /></>,
@@ -71,7 +72,7 @@ const Check = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-menu-check="1" style={{ flex: "none" }}><path d="M3.2 8.6 L6.6 12 L12.8 4.4" /></svg>
 );
 
-const fmtAcres = (a) => (Number.isFinite(a) ? `${a.toFixed(2)} AC` : "");
+const fmtAcres = acresTwoOrBlank;
 
 /**
  * PARCEL TOOLS. `groups` is `parcelMenuModel(...)`'s answer; `run` maps a row id to its handler;

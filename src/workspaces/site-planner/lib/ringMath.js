@@ -71,3 +71,57 @@ export function projectOntoSegment(a, b, p) {
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
   return { x: a.x + dx * t, y: a.y + dy * t };
 }
+
+/* ── Lon/lat (and other `[x, y]` PAIR) rings ─────────────────────────────────────────────────────
+ * B2671309 (audit batch M1). The pair-ring twin of `pointInRing` above existed ELEVEN more times
+ * (cityScopes, njnyJurisdiction, countyPolygonsCore, serviceAreas, desotoJurisdiction,
+ * parcelSnapshotGeom, georgiaStreamBuffers, jurisdictionShare, siteRecordKml, parcelSnapshotBuild,
+ * placeLabelAnchors) in five argument orders, all the same even-odd ray cast. ONE copy lives here.
+ * ⛔ A new `function pointInRing`/`inRing` anywhere else fails `test/geometryLeafSweep.test.js`.
+ *
+ * Deliberately NOT folded (different contract, not a copy): `siteRegion.js` walks a FLAT
+ * `[x0,y0,x1,y1,…]` array and `vectorLayers.js` tolerates sparse GeoJSON rings (`ring[i] || []`).
+ *
+ * Unlike `pointInRing`, this carries NO degenerate-ring guard: every caller already filtered, and a
+ * ring of fewer than three points ray-casts to false anyway. */
+export function pointInPairRing(ring, x, y) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/* Distance from point (px,py) to the FINITE segment (ax,ay)→(bx,by), clamped to the segment. A
+ * zero-length segment is the distance to its single point. The primitive form, so pair-array callers
+ * pay no allocation; `distToSegment` is the `{x,y}` spelling. Exactly the formula all eight
+ * hand-rolled copies used (they differed only in how a degenerate segment was spelled: `|| 1`,
+ * `1e-12`, `EPS`, `=== 0` — all of which return the distance to `a`). */
+export function distToSegmentXY(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+export const distToSegment = (p, a, b) => distToSegmentXY(p.x, p.y, a.x, a.y, b.x, b.y);
+
+/* Extent `[minX, minY, maxX, maxY]` over the points of a LIST OF RINGS (the bboxOf / bboxOfRings /
+ * bbox copies). `{x,y}` points and `[x,y]` pairs are separate entry points so no caller pays for a
+ * shape test per vertex. An empty input returns `[Infinity, Infinity, -Infinity, -Infinity]`,
+ * which is what every copy returned. */
+export function extentOfRings(rings) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of rings) for (const p of r) {
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+  }
+  return [x0, y0, x1, y1];
+}
+export function extentOfPairRings(rings) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of rings) for (const p of r) {
+    const x = p[0], y = p[1];
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return [x0, y0, x1, y1];
+}

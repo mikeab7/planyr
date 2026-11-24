@@ -95,6 +95,19 @@ export const JURISDICTION_SOURCES = {
     sourceName: "Colorado statewide county boundaries",
     note: "Colorado county boundary. Screening only — verify with the jurisdiction.",
   },
+  /* B-NEW (2026-11-24) — Colorado's CITY role. Colorado had a county row (countyCo) and NO city row at all, so every Colorado site asked zero city
+   * sources, `cityCentroid` stayed null and the badge led with "Couldn't check city limits" with no request ever made. DOLA's statewide municipal
+   * boundaries (registry `cityCo`, full-purpose only) answer it; a point in none is unincorporated county. Routed to inside Colorado only. */
+  cityCo: {
+    id: "cityCo", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityCo.serviceUrl,
+    fields: { name: GIS_SOURCES.cityCo.fields.name },
+    fullPurposeOnly: GIS_SOURCES.cityCo.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Colorado DOLA municipal boundaries",
+    note: "Colorado municipal limits (DOLA). A point in none reads as unincorporated — the county governs. Screening only — verify with the city.",
+  },
   /* NEW-1 (Georgia) — DCA statewide counties. Same `role: "county"` as the Texas and Colorado rows, so
    * every downstream consumer reads it identically; only endpoint and field names differ. Routed to by
    * `countySourcesForPoint` inside the Georgia envelope, never by default. */
@@ -831,6 +844,7 @@ CITY_SOURCES.push({
   note: "Waller County GIS's city-limits table (edited 2025-11-06). Screening only — verify with the city.",
 });
 export function citySourcesForPoint(lat, lng) {
+  if (inEnvelope(CO_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.cityCo]; // Colorado — mirrors countySourcesForPoint (envelopes are disjoint from TX)
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
   {

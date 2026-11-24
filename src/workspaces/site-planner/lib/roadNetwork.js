@@ -22,7 +22,7 @@
  * Pure: world feet in, world feet out. No React, no DOM. Unit-tested in test/roadNetwork.test.js.
  */
 import ClipperLib from "clipper-lib";
-import { pointInRing, ringArea } from "./ringMath.js";
+import { pointInRing, ringArea, distToSegment as segDist } from "./ringMath.js";
 import { DEFAULT_TESS_DEG } from "./roadGeometry.js";
 import { boundedCache, pointsSignature } from "./pureCache.js";
 
@@ -183,14 +183,6 @@ export function ringTurnAngles(ring) {
 
 // Distance from `p` to the straight segment a→b (ft). Used as a vertex's DRIFT: how far the ring
 // would move if that vertex were removed and its two neighbours joined directly.
-function segDist(p, a, b) {
-  const vx = b.x - a.x, vy = b.y - a.y;
-  const L2 = vx * vx + vy * vy;
-  if (!(L2 > 1e-12)) return Math.hypot(p.x - a.x, p.y - a.y);
-  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
-}
 
 // The worst distance any point of `orig` sits from the polyline/ring `ring` (ft) — the one-sided
 // Hausdorff distance used to bound how far a whole collapse pass may move the boundary from where

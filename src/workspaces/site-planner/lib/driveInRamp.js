@@ -19,6 +19,7 @@
  * `wallFrame(host, side).pt(u, v)`. Pure, no React, no imports.
  */
 
+import { pointInRing } from "./ringMath.js";
 export const RAMP_DEFAULTS = Object.freeze({ widthFt: 16, gradePct: 8, layout: "straight", dir: 1, door: "12x14", wings: true, bollards: true });
 export const RAMP_MAX_GRADE_PCT = 10;          // the practical forklift maximum
 export const RAMP_MIN_GRADE_PCT = 2;                      // one lane
@@ -209,14 +210,6 @@ export function fitAlongTheWall(ramp, { L, stops = [], dockHeightIn, keepDir = n
 }
 
 /* ---- flags (the amber style used elsewhere) ------------------------------------------------------------------------------------------------ */
-const pointInRing = (p, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-};
 const segsCross = (p, p2, q, q2) => {
   const o = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   const d1 = o(p, p2, q), d2 = o(p, p2, q2), d3 = o(q, q2, p), d4 = o(q, q2, p2);

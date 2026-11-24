@@ -10,13 +10,14 @@ import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, formatNumberDisplay, sanitize
 import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate, validateComp } from "./comps.js";
 import { rowHasBlockingFlags } from "./compParse.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
+import { usdFixed } from "../../units/numberFormat.js";
 export { SQFT_PER_ACRE as SF_PER_ACRE };
 
 
 const col = (key) => (key === "notes" ? NOTES_COLUMN : SHEET_COLUMNS[columnIndex(key)]);
 export const mobileCol = col;
 
-const money = (n, maxFrac = 0) => `$${n.toLocaleString("en-US", { minimumFractionDigits: maxFrac, maximumFractionDigits: maxFrac })}`;
+const money = usdFixed;
 const money2 = (n) => money(n, 2);
 
 /* ---- Deal-group field labels -------------------------------------------------------------- */

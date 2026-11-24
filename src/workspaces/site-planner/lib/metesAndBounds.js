@@ -21,6 +21,7 @@
  * model arrays wholesale.
  */
 import { identityCache } from "./pureCache.js";
+import { pointInRing } from "./ringMath.js";
 
 const _offCache = identityCache();
 const _bufCache = identityCache();
@@ -143,14 +144,6 @@ export function offsetPolylineMiterLimit(pts, dist, miterLimit = 2) {
  * Uses vertex-containment + edge-crossing (handles partial overlaps the bbox
  * test would miss). Good enough for "warn me if this easement crosses a
  * building/paving footprint". */
-function pointInRing(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
-    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
 const ccw = (a, b, c) => (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
 const segCross = (a, b, c, d) => ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
 

@@ -1,3 +1,4 @@
+import { pointInPairRing as pointInRing } from "./ringMath.js";
 /* B209502 — the WORKING half of the county resolver: decode, ray cast, edge distance.
  *
  * ⛔ WHY THIS IS SPLIT OFF `countyPolygons.js`, and why it must stay split. `counties.js` is on the
@@ -54,14 +55,7 @@ export function buildIndex(payload) {
  * float drift between the encode and the test. A point exactly on an edge is deliberately not
  * special-cased — `nearEdge` is how uncertainty at a boundary is reported, not a tie-break rule
  * that could only ever be arbitrary. */
-export function pointInRing(ring, x, y) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
+export { pointInRing };
 
 /* How far (in quantised units) the point sits from the nearest ring edge. Only ever called for the
  * county that already answered, so it costs one extra ring walk on a hit and nothing on a miss. */

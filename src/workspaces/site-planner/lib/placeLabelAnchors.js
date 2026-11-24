@@ -11,6 +11,7 @@
 import { polylabelWithHoles } from "./polylabel.js";
 import { geometryBox } from "./boundaryPaint.js";
 
+import { pointInPairRing as inRing } from "./ringMath.js";
 /* Name size (px) by zoom: 11 at the metro view, growing to 16 at parcel scale. */
 export const labelFontPx = (zoom) => (typeof zoom !== "number" ? 11 : Math.max(11, Math.min(16, 11 + (zoom - 11) * 1.0)));
 /* The box a name takes at that size (px), a conservative estimate — the pill's own padding included. */
@@ -40,7 +41,6 @@ export function clipRingToRect(ring, x0, y0, x1, y1) {
   return pts;
 }
 const areaOf = (ring) => { let a = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; };
-const inRing = (ring, x, y) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a[1] > y) !== (b[1] > y) && x < ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
 const toXY = (ring) => ring.map((p) => ({ x: p[0], y: p[1] }));
 
 /* The anchors for a FeatureCollection's features in the current view.

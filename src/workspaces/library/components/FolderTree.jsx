@@ -26,6 +26,7 @@ const TEMPLATE_FOLDER_COUNT = countTemplate(FOLDER_TEMPLATE);
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
 import { relTime } from "../../../shared/projects/projectModel.js";
 import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
+import { MenuItem } from "../../../shared/ui/controls.jsx";
 import { isFileMoveDrag } from "../lib/fileMove.js";
 
 /* Per-project remembered expansion (B-item: tree opens collapsed, not with every
@@ -571,11 +572,8 @@ export default function FolderTree({
 function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRename, onMove, onDelete }) {
   const node = menu.node; // null = empty-space menu
   const pinned = !!(node && pinnedIds && pinnedIds.has(node.id));
-  const item = (extra) => ({
-    display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-    padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer",
-    borderRadius: 6, font: "inherit", fontSize: 13, color: T.text, ...extra,
-  });
+  // Same look the hand-rolled rows had (flex row with a glyph seat, 13px, 6px radius, regular weight); MenuItem owns the rest.
+  const item = (extra) => ({ display: "flex", alignItems: "center", gap: 10, fontSize: 13, fontWeight: 400, borderRadius: 6, ...extra });
   const hoverOn = (e) => { e.currentTarget.style.background = "var(--hover-ghost)"; };
   const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
   const run = (fn) => () => { onClose(); fn(); };
@@ -594,23 +592,23 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
       <>
         <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node ? node.name : "Folders"}</div>
         {node && onTogglePin && (
-          <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onTogglePin(node))} style={item()}>
+          <MenuItem role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onTogglePin(node))} style={item()}>
             <span aria-hidden style={glyph}>{pinned ? "★" : "☆"}</span>{pinned ? "Unpin from Library home" : "Pin to Library home"}
-          </button>
+          </MenuItem>
         )}
         {/* On a row this creates INSIDE it; on empty space, at the top level (B698). */}
-        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node ? node.id : null))} style={item()}>
+        <MenuItem role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node ? node.id : null))} style={item()}>
           <span aria-hidden style={glyph}>＋</span>New folder
-        </button>
-        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onRename(node))} style={item()}>
+        </MenuItem>
+        {node && <MenuItem role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onRename(node))} style={item()}>
           <span aria-hidden style={glyph}>✎</span>Rename
-        </button>}
-        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onMove(node.id))} style={item()}>
+        </MenuItem>}
+        {node && <MenuItem role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onMove(node.id))} style={item()}>
           <span aria-hidden style={glyph}>⇄</span>Move
-        </button>}
-        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
+        </MenuItem>}
+        {node && <MenuItem role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
           <span aria-hidden style={glyph}>🗑</span>Delete
-        </button>}
+        </MenuItem>}
       </>
     </ContextMenu>
   );

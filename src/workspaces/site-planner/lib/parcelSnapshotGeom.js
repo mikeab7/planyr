@@ -5,6 +5,7 @@
  * parcelSnapshot.js, which re-exports all of it. */
 import { geoJsonToEsriFeature, outerRingsLngLat } from "./esriRings.js";
 
+import { pointInPairRing } from "./ringMath.js";
 /* [minLng, minLat, maxLng, maxLat] over a GeoJSON Polygon/MultiPolygon feature's coords, or null.
  * Pure. Memoised on the feature via a non-enumerable field so a viewport filter over ~30k parcels
  * doesn't recompute every pan. */
@@ -35,14 +36,7 @@ function ringsAreaAbs(parts) {
 }
 
 // Even-odd point-in-ring on [[lng,lat]…]. Same test as MapFinder.optimisticHitAt. Pure.
-function pointInRing(lng, lat, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
+const pointInRing = (lng, lat, ring) => pointInPairRing(ring, lng, lat);
 
 /* The features whose bbox intersects the view (lng/lat `{ w, s, e, n }`). Cheap bbox reject so only
  * a few hundred parcels are ever drawn/hit-tested at site zoom. Pure. */
