@@ -38,9 +38,27 @@ describe("markupUnderPoint — the B920/NEW-1 fill-or-unlocked rule", () => {
     expect(markupUnderPoint(m, { x: 300, y: 300 }, 1)).toBe(null);
   });
 
-  it("an UNLOCKED unfilled closed polygon IS hit on its interior — the ordinary drawn-shape case", () => {
+  it("2026-11-24: an UNLOCKED unfilled, unhatched closed polygon is hit on its outline ONLY (supersedes the 2026-09-07 interior grab)", () => {
     const m = square("u", 100, { fillOpacity: 0 });
-    expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toMatchObject({ area: 10000 });
+    expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toBe(null);
+    expect(markupUnderPoint(m, { x: 50, y: 2 }, 6)).not.toBe(null);
+  });
+  it("any visible fill, however faint, keeps the interior clickable", () => {
+    expect(markupUnderPoint(square("faint", 100, { fillOpacity: 0.02 }), { x: 50, y: 50 }, 6)).not.toBe(null);
+  });
+  it("rect, ellipse and cloud follow the same rule (fill on/off x hatch on/off)", () => {
+    const shapes = {
+      rect: { kind: "rect", cx: 50, cy: 50, w: 100, h: 100, rot: 0 },
+      ellipse: { kind: "ellipse", cx: 50, cy: 50, w: 100, h: 100, rot: 0 },
+      cloud: { kind: "cloud", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] },
+    };
+    for (const [name, base] of Object.entries(shapes)) {
+      const hitsAt = (extra) => markupUnderPoint({ id: name, ...base, ...extra }, { x: 50, y: 50 }, 6) != null;
+      expect(hitsAt({ fillOpacity: 0 }), `${name} bare`).toBe(false);
+      expect(hitsAt({ fillOpacity: 0.3 }), `${name} fill`).toBe(true);
+      expect(hitsAt({ fillOpacity: 0, hatch: "diagonal" }), `${name} hatch`).toBe(true);
+      expect(hitsAt({ fillOpacity: 0.3, hatch: "diagonal" }), `${name} both`).toBe(true);
+    }
   });
 
   it("a LOCKED unfilled closed polygon is NOT hit on its interior — only near its stroke (the real B920 case)", () => {
@@ -56,9 +74,9 @@ describe("markupUnderPoint — the B920/NEW-1 fill-or-unlocked rule", () => {
     expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toBe(null);
   });
 
-  it("a fillOpacity of undefined on an UNLOCKED shape still grabs by interior", () => {
+  it("a fillOpacity of undefined on an UNLOCKED shape is unfilled too (2026-11-24)", () => {
     const m = square("n2", 100); // no fillOpacity, no locked → unlocked
-    expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toMatchObject({ area: 10000 });
+    expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toBe(null);
   });
 
   it("a visible hatch makes a zero-opacity LOCKED closed markup body selectable", () => {

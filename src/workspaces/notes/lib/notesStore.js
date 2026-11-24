@@ -359,18 +359,60 @@ export function writeNoteView(pageId, view, s = scope) {
  * the old first-page default, never a banner — same reasoning as `readNoteView`/`writeNoteView`. */
 const activePageKey = (s = scope) => `${ACTIVE_PAGE_KEY_BASE}:${s}`;
 
-export function readActivePageId(s = scope) {
-  const st = store();
-  if (!st) return null;
-  try { return st.getItem(activePageKey(s)) || null; } catch (_) { return null; }
+/* PER-PROJECT MEMORY (2026-11-24, owner: "auto open to the last one you were on, within a
+ * project"). The same one blob per scope now holds `{ v: 2, last, byProject: { <key>: pageId } }`
+ * where `<key>` is the project id, or "org" / "all" for the two non-project routes
+ * (`activeProjectKey`). A blob written before this change is a bare page id string: it reads as
+ * `last` (legacy), so nobody loses their place on upgrade. A remembered id is only a HINT — the
+ * caller must still prove it exists AND is visible in the route's scope (a deleted page, or one
+ * moved to another project, falls back to the default), so a stale entry can never open a page
+ * from somewhere else. Scope = the signed-in account, so another account's memory is never read. */
+const ACTIVE_MAP_CAP = 200;
+
+export function activeProjectKey(projectId, orgScope) {
+  return projectId != null && projectId !== "" ? String(projectId) : (orgScope ? "org" : "all");
 }
 
-export function writeActivePageId(pageId, s = scope) {
+function readActiveBlob(s) {
+  const st = store();
+  if (!st) return null;
+  let raw;
+  try { raw = st.getItem(activePageKey(s)); } catch (_) { return null; }
+  if (!raw) return null;
+  if (raw[0] === "{") {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") return { legacy: false, last: typeof o.last === "string" ? o.last : null, byProject: o.byProject && typeof o.byProject === "object" ? o.byProject : {} };
+    } catch (_) { return null; }   // unreadable blob = no memory, the honest default page
+    return null;
+  }
+  return { legacy: true, last: raw, byProject: {} };
+}
+
+export function readActivePageId(s = scope, projectKey = null) {
+  const b = readActiveBlob(s);
+  if (!b) return null;
+  if (projectKey == null) return b.last || null;
+  const v = b.byProject[projectKey];
+  if (typeof v === "string" && v) return v;
+  return b.legacy ? (b.last || null) : null;
+}
+
+export function writeActivePageId(pageId, s = scope, projectKey = null) {
   const st = store();
   if (!st) return false;
   try {
-    if (pageId) st.setItem(activePageKey(s), pageId);
-    else st.removeItem(activePageKey(s));
+    const b = readActiveBlob(s) || { last: null, byProject: {} };
+    const byProject = { ...b.byProject };
+    if (projectKey != null) {
+      if (pageId) { delete byProject[projectKey]; byProject[projectKey] = pageId; }   // re-insert = most recent last
+      else delete byProject[projectKey];
+    }
+    const keys = Object.keys(byProject);
+    for (const k of keys.slice(0, Math.max(0, keys.length - ACTIVE_MAP_CAP))) delete byProject[k];
+    const last = pageId || (projectKey == null ? null : b.last);
+    if (!last && !Object.keys(byProject).length) st.removeItem(activePageKey(s));
+    else st.setItem(activePageKey(s), JSON.stringify({ v: 2, last: last || null, byProject }));
     return true;
   } catch (_) { return false; }
 }
