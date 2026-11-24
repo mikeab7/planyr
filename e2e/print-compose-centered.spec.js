@@ -32,6 +32,7 @@ async function loadPlan(page) {
   await page.goto("/#/site");
   if (!(await canvas(page).isVisible().catch(() => false))) await page.getByText("Goose Creek", { exact: true }).first().click();
   await expect(canvas(page)).toBeVisible();
+  /* el-tier: readiness gate only — waits for the building band to be on the canvas; the sheet itself is measured over every [data-feature] below. */
   await expect.poll(async () => page.locator("[data-el-id]").count(), { timeout: 20_000 }).toBeGreaterThan(10);
   await page.waitForTimeout(1000);
 }
