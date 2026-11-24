@@ -374,7 +374,7 @@ export function CompDetail({ comp, canEdit, onEdit, onConvert, onDelete, onBack,
               <MenuItem onClick={() => { setMenuOpen(false); onEdit(comp); }}>Edit</MenuItem>
               {/* A DELIVERED building becomes a regular record in place (same row, same site): the form opens
                   pre-filled for the signed lease / the sale, executed date blank, so nothing is guessed. */}
-              {comp.compType === "under_construction" && comp.ucStatus === "delivered" && onConvert && (
+              {comp.compType === "under_construction" && onConvert && (
                 <>
                   <MenuItem onClick={() => { setMenuOpen(false); onConvert(comp, "lease"); }}>Convert to lease record</MenuItem>
                   <MenuItem onClick={() => { setMenuOpen(false); onConvert(comp, "building_sale"); }}>Convert to sale record</MenuItem>
@@ -410,6 +410,15 @@ export function CompDetail({ comp, canEdit, onEdit, onConvert, onDelete, onBack,
             ? <RecordLink onClick={() => onOpenBrochure(overlay)} title={`Open the source brochure (p.${overlay.page})`}>{r.value}</RecordLink>
             : r.value)} />
       ))}
+      {/* Always visible on an under-construction record (not only in the ⋯ menu): it becomes a lease or a
+          sale record in place, keeping the building's details; the form opens pre-filled to confirm. */}
+      {canEdit && comp.compType === "under_construction" && onConvert && (
+        <div data-testid="comp-convert-row" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <span style={{ ...RECORD_BODY, color: "var(--text-secondary)" }}>Convert to</span>
+          <Button size="sm" onClick={() => onConvert(comp, "lease")}>Lease record</Button>
+          <Button size="sm" onClick={() => onConvert(comp, "building_sale")}>Sale record</Button>
+        </div>
+      )}
       {canEdit && confirmingDelete && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
           <span style={{ ...RECORD_BODY, color: "var(--danger-text)" }}>Delete this comp?</span>
