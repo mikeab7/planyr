@@ -369,7 +369,7 @@ export function ScaleTools({ o, onApply }) {
             style={{ ...inputStyle, flex: "none", width: 92, ...(bad ? { borderColor: WARN, color: WARN } : null) }}
             onChange={(e) => { setDraft(e.target.value); setBad(false); setDirty(true); }}
             onBlur={(e) => commit(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(e.currentTarget.value); else if (e.key === "Escape") { setDraft(roundFpi(curFpi)); setBad(false); setDirty(false); } }} />
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); /* B2671335: Enter commits through the blur and leaves the box */ } else if (e.key === "Escape") { setDraft(roundFpi(curFpi)); setBad(false); setDirty(false); } }} />
           <span style={{ ...valueStyle, flex: "none" }}>'</span>
         </div>
       )}

@@ -125,7 +125,7 @@ const decorationOf = (id) => page.evaluate((elId) => {
       const s = p.getAttribute("stroke");
       return s === "#f2f2f2";
     }).length,
-    dashedRowLines: [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray")).length,
+    dashedRowLines: [...g.querySelectorAll('polyline[data-row-line]')].filter((p) => p.getAttribute("stroke-dasharray")).length,
     rowLabel: [...g.querySelectorAll("text")].map((t) => t.textContent).find((t) => /R\.O\.W\./.test(t)) || null,
   };
 }, id);

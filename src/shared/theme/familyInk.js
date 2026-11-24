@@ -99,6 +99,7 @@ export const ELEMENT_DEFAULT_PAINT = {
   landscape: ["#bcd3a6", "#7f9a63"],
   road:      ["#9eabb7", "#66737f"],
   driveInRamp: ["#c8c9c6", "#6c7075"],
+  rightOfWay: ["#e2e7d9", "#5d6a5f"],
 };
 
 /** "#rgb" / "#rrggbb" → [r, g, b] 0..255. Returns null for anything else (a var(), a named

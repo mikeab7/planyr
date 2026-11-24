@@ -188,7 +188,7 @@ check(decoration && decoration.unclipped === 2, "B773730 fix: both parkway bands
 const rowGeom = await page.evaluate((id) => {
   const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   if (!g) return null;
-  const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
+  const dashedTertiary = [...g.querySelectorAll('polyline[data-row-line]')].filter((p) => p.getAttribute("stroke-dasharray"));
   const texts = [...g.querySelectorAll("text")].map((t) => t.textContent);
   return { dashedTertiaryCount: dashedTertiary.length, rowLabel: texts.find((t) => /R\.O\.W\./.test(t)) || null };
 }, road.id);
@@ -205,13 +205,13 @@ await page.screenshot({ path: OUT + "03-canvas-row-lines-zoom2.png" });
 // ---- 6. Layers/View toggle — "ROW lines" hides and restores the boundary + label --------------
 await page.locator('[data-testid="view-menu-btn"]').click();
 await page.waitForTimeout(200);
-const rowToggle = page.locator('label:has-text("ROW lines") input[type="checkbox"]');
-check(await rowToggle.count() === 1, "the View ▾ menu carries a \"ROW lines\" checkbox");
+const rowToggle = page.locator('label:has-text("Right-of-way") input[type="checkbox"]');
+check(await rowToggle.count() === 1, "the View ▾ menu carries a \"Right-of-way\" checkbox");
 await rowToggle.uncheck();
 await page.waitForTimeout(300);
 const afterHide = await page.evaluate((id) => {
   const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
-  const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
+  const dashedTertiary = [...g.querySelectorAll('polyline[data-row-line]')].filter((p) => p.getAttribute("stroke-dasharray"));
   const hasLabel = [...g.querySelectorAll("text")].some((t) => /R\.O\.W\./.test(t.textContent));
   return { dashedTertiaryCount: dashedTertiary.length, hasLabel };
 }, road.id);
@@ -221,7 +221,7 @@ await rowToggle.check();
 await page.waitForTimeout(300);
 const afterRestore = await page.evaluate((id) => {
   const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
-  const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
+  const dashedTertiary = [...g.querySelectorAll('polyline[data-row-line]')].filter((p) => p.getAttribute("stroke-dasharray"));
   return dashedTertiary.length;
 }, road.id);
 check(afterRestore === 2, "re-checking \"ROW lines\" restores both boundary lines", `count=${afterRestore}`);
@@ -278,7 +278,7 @@ if (exportHtml) {
   const exportedGroup = groupMatch ? groupMatch[0] : exportHtml;
   check(exportHtml.includes(`data-el-id="${road.id}"`), "the road appears in the exported sheet");
   check(/R\.O\.W\./.test(exportedGroup), "PDF-PARITY: the \"R.O.W.\" label is present in the exported SVG", /R\.O\.W\./.test(exportedGroup) ? "found" : "not found");
-  const exportedDashedTertiary = (exportedGroup.match(/stroke="var\(--text-tertiary\)"[^>]*stroke-dasharray/g) || []).length;
+  const exportedDashedTertiary = (exportedGroup.match(/data-row-line="[^"]*"/g) || []).length;
   check(exportedDashedTertiary >= 2, "PDF-PARITY: both dashed ROW boundary lines are present in the exported SVG", `count=${exportedDashedTertiary}`);
   const exportedSuccessFills = (exportedGroup.match(/fill="var\(--success-text\)"/g) || []).length;
   check(exportedSuccessFills === 3, "PDF-PARITY: all 3 band fills (median + 2 parkways) are present in the exported SVG", `count=${exportedSuccessFills}`);

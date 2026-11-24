@@ -30,6 +30,7 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
    * nothing; every other caller (whose `value` IS the persisted model value) keeps the old
    * equality-suppression, matching `BandWidthInput`'s identical fix in RoadCrossSectionDialog.jsx. */
   const dirtyRef = useRef(false);
+  const escapeRef = useRef(false); // Escape in progress: the blur it triggers must revert, not commit
   const fmtNum = (n) => String(Math.round(n * 1000) / 1000);
   /* `syncExternal` (dock-layer Auto fields): after an Enter the box stays focused (`editing` stays true), so a value that then
    * changes from OUTSIDE — the Auto pill handing back the computed number — would never reach the box. A change we did not
@@ -150,28 +151,22 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
       aria-describedby={note ? msgId : undefined}
       onFocus={(e) => { editing.current = true; e.currentTarget.setAttribute("data-num-pristine", "1"); }}
       onChange={(e) => { setAltered(null); setDraft(e.target.value); dirtyRef.current = true; e.target.removeAttribute("data-num-pristine"); /* B-Q-FIRST-PRESS: set synchronously, never from a render, so a key right after Enter sees it */ }}
-      onBlur={commit}
+      onBlur={() => { if (escapeRef.current) { escapeRef.current = false; editing.current = false; dirtyRef.current = false; setAltered(null); setDraft(value == null ? "" : String(value)); } else commit(); }}
       onKeyDown={(e) => {
-        /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
-         * root of the owner's data loss: focus landed on <body>, the building stayed selected, and
-         * his next Backspace deleted it and its eight bonded elements. The keyboard latch refuses
-         * that key now whatever happens here, but a field that ejects you on Enter is wrong on its
-         * own terms — every spreadsheet and CAD input in the world commits and stays put, and being
-         * silently thrown out of the box is half of "it's not letting me input the depth".
-         *
-         * The value is selected after the commit, so the next digits RETYPE it (you never have to
-         * clear it first) and the commit is visible: the number you get back is the one the app
-         * took, highlighted. */
+        /* B2671335 — ENTER COMMITS AND LEAVES THE BOX (owner, 2026-11-24: "if I hit enter there, that should
+         * take me out of that input box, and I should be able to hit Q normally").
+         * History: an earlier cut (NEW-1) kept the caret on Enter because the old `blur()` dropped focus on
+         * <body> and the next Backspace deleted a building + its bonded elements. That hazard is closed
+         * elsewhere — the keyboard LATCH (`canvasTouchRef` = FIELD, shared/keyboard/keyScope.js) keeps
+         * Delete/Backspace/arrows refused after the box is left, until the drawing is touched — so leaving
+         * the box is safe again, and it is what every other editor in the app does.
+         * The commit happens ONCE, through the blur (`onBlur={commit}`): calling commit() here as well would
+         * fire onCommit twice (two undo steps). Escape abandons the typed text and also leaves; the
+         * `escapeRef` makes the blur revert instead of commit (a synchronous blur reads the STALE draft). */
         if (e.key === "Enter" || e.key === "Escape") {
           e.preventDefault();
-          if (e.key === "Enter") commit(); else setDraft(value == null ? "" : String(value));
-          e.currentTarget.setAttribute("data-num-pristine", "1"); // committed (or abandoned): nothing unsaved in the box, so a tool letter may pass through
-          /* Still focused, so we are still editing — `commit()` clears this flag for the blur
-           * path, and leaving it cleared would let an incoming `value` change overwrite what the
-           * user types next. */
-          editing.current = true;
-          const el = e.currentTarget;
-          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+          if (e.key === "Escape") escapeRef.current = true;
+          e.currentTarget.blur();
         }
         else if (step != null && e.key === "ArrowUp") { e.preventDefault(); nudge(e.shiftKey ? coarseStep : step); }
         else if (step != null && e.key === "ArrowDown") { e.preventDefault(); nudge(-(e.shiftKey ? coarseStep : step)); }

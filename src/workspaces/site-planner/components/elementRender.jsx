@@ -2,7 +2,7 @@
  * (B1064 step 1). A pure text move: nothing here reads the planner component's state, and nothing imports back from
  * SitePlanner.jsx. SVG output is byte-identical (ui-audit/capture-plan-html.mjs). @planner-extract */
 import { memo } from "react";
-import { taperedOffset, taperedOffsetScaled } from "../lib/roadTaper.js";
+import { taperedOffsetScaled } from "../lib/roadTaper.js";
 import { rot2, elCorners, carStalls, trailerStalls, CURB, curbEdgesOf, isCenterlineRoad, roadCurbWidth, roadDenseCenterline, roadStripRing, roadCurbLines } from "../lib/siteGeometry.js";
 import { dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, dimFontScale, stallStripesExplicit, segmentsPath } from "../lib/labelLayout.js";
 import { pondContours, contourLabelPoint } from "../lib/pondGeom.js";
@@ -14,10 +14,11 @@ import { dogEarSize, isDogEarSide } from "../lib/dogEar.js";
 import { rampParts, rampLabel, rampBeltSpans, doorsAfterRamps, dockHeightInOf } from "../lib/driveInRamp.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "../lib/dimSlide.js";
 import { dockSidesFor, footprintDepth, footprintLength, footprintAxes } from "../lib/dockZones.js";
-import { elStyle } from "../lib/planStyle.js";
+import { elStyle, typeStyle } from "../lib/planStyle.js";
 import { regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments, rectBandOutlineCutPolylines, curbBandPieces } from "../lib/roadNetwork.js";
 import { curbStrokePx } from "../lib/roadGeometry.js";
-import { bandTypeOf, hasXSection, bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX } from "../lib/roadCrossSection.js";
+import { bandTypeOf, hasXSection, bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, designatedRowSides, rowMarginFt, XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX } from "../lib/roadCrossSection.js";
+import { rowSideLine } from "../lib/roadRowBand.js";
 import { offsetPolyline } from "../lib/metesAndBounds.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { keptRuns } from "../lib/parkingApproach.js";
@@ -619,14 +620,19 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         const rowFt = designatedRowFt(el.xsection);
         const rowMargin = rowFt != null ? rowMarginFt(el.xsection) : null;
         if (rowMargin != null && settings.showRowLines !== false) {
-          const rowHw = rowFt / 2;
-          // the ROW lines taper only against a narrow road that designates a ROW of its own (rowHalf); with none there is nothing to meet
-          const rowEdge = (sign) => (xsTaper && taperedOffset(xsDense, xsTaper, rowHw, sign, "rowHalf")) || offsetPolyline(xsDense, sign * rowHw);
-          const rowLineL = rowEdge(1), rowLineR = rowEdge(-1);
+          /* Owner, 2026-11-24 — each side at ITS OWN distance (an uneven ROW: `designatedRowSides`), and where two ROWs meet each line stops at the
+             other road's band or pavement (lib/roadRowBand.js, decided once in the road network). A road outside the network (a bonded rect road)
+             keeps the plain per-road lines. The line's colour and weight are the "Right-of-way" row of Standards → Colors (planStyle TYPE.rightOfWay);
+             the solid band itself is the planner's ground underlay, painted under every element. */
+          const rowGeo = roadNet && roadNet.rows ? roadNet.rows.get(el.id) : null;
+          const rowSides = designatedRowSides(el.xsection);
+          const rowLines = rowGeo ? [...(rowGeo.linesL || []), ...(rowGeo.linesR || [])]
+            : [rowSideLine(xsDense, xsTaper, rowSides.left, 1), rowSideLine(xsDense, xsTaper, rowSides.right, -1)];
+          const rowSt = typeStyle("rightOfWay", settings);
           const rowDash = `${9 * lfK} ${5 * lfK}`;
-          [rowLineL, rowLineR].forEach((line, i) => {
+          rowLines.forEach((line, i) => {
             if (!line || line.length < 2) return;
-            rparts.push(<polyline key={`rowln${i}`} points={toPts(line)} fill="none" stroke="var(--text-tertiary)" strokeWidth={Math.max(0.75, lfK)} strokeDasharray={rowDash} pointerEvents="none" />);
+            rparts.push(<polyline key={`rowln${i}`} data-row-line={el.id} points={toPts(line)} fill="none" stroke={rowSt.stroke} strokeOpacity={rowSt.strokeOpacity ?? 1} strokeWidth={Math.max(0.75, (rowSt.strokeWidth ?? 1) * lfK)} strokeDasharray={rowDash} pointerEvents="none" />);
           });
           if (settings.showDims !== false && xsDense.length >= 2) {
             // B2671331 — the label rides the road's centerline, turned with the road and kept upright (lib/roadRowLabel.js).

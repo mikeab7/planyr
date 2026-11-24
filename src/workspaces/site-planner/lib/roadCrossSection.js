@@ -134,10 +134,15 @@ export function normalizeBands(bands) {
 /* NEW-1 — `rowDesignFt` is optional and deliberately OMITTED (never written as null/undefined) when
  * not a real, positive number: presence of the key is the "has this road's ROW been designated"
  * signal every caller (the dialog, the canvas, the Properties panel) reads via `designatedRowFt`. */
-export function makeXSection(bands, rowDesignFt) {
+export function makeXSection(bands, rowDesignFt, rowShiftFt) {
   const x = { bands: normalizeBands(bands) };
   const r = designatedRowFt({ rowDesignFt });
-  if (r != null) x.rowDesignFt = r;
+  if (r != null) {
+    x.rowDesignFt = r;
+    // B-ROW-SIDES — an uneven right-of-way keeps its shift; it only means anything beside a designated width.
+    const sh = cleanRowShift(rowShiftFt, r);
+    if (sh != null) x.rowShiftFt = sh;
+  }
   return x;
 }
 
@@ -148,7 +153,7 @@ export function makeXSection(bands, rowDesignFt) {
  * to migrate FROM. */
 export function xsectionFromRoad(el) {
   if (el && el.xsection && Array.isArray(el.xsection.bands) && el.xsection.bands.length) {
-    return makeXSection(el.xsection.bands, el.xsection.rowDesignFt);
+    return makeXSection(el.xsection.bands, el.xsection.rowDesignFt, el.xsection.rowShiftFt);
   }
   const w = Number.isFinite(+(el && el.travelW)) && +el.travelW > 0 ? +el.travelW : 24;
   return makeXSection([{ type: "travel", w }]);
@@ -239,10 +244,64 @@ export function bandExtents(xsection) {
  * OTHER side still has slack, even though the section's own total is comfortably under the designated
  * ROW — the owner's repro (29' modeled bands under a 30' ROW, one side over by 2') is exactly this. */
 export function rowMarginsBySide(xsection) {
-  const designated = designatedRowFt(xsection);
-  if (designated == null) return null;
+  const sides = designatedRowSides(xsection);
+  if (sides == null) return null;
   const { left, right } = bandExtents(xsection);
-  return { left: designated / 2 - left, right: designated / 2 - right };
+  return { left: sides.left - left, right: sides.right - right };
+}
+
+/* Owner, 2026-11-24 ("I should be able to edit the right-of-way boundary") — an UNEVEN right-of-way. The ROW used to be
+ * centred on the road's drawn centerline by construction (half the designated width each side). A real dedication often
+ * is not: the road sits closer to one property line. Stored as ONE extra optional number beside the width it modifies,
+ * `xsection.rowShiftFt`: how far the middle of the ROW sits toward the road's LEFT side (the same "+" = left-normal sign
+ * every offset in this file uses; negative = toward the right). Each side's distance from the centerline is then
+ *   left  = rowDesignFt / 2 + rowShiftFt        right = rowDesignFt / 2 − rowShiftFt
+ * so the stored total keeps meaning exactly what it always meant (the label, the taper, the dialog all read it unchanged)
+ * and a road saved before this feature (no `rowShiftFt`) is centred, as it always was. Like `rowDesignFt`, the key is
+ * OMITTED when zero / not finite — absent means centred, never a stored 0. */
+function cleanRowShift(shift, total) {
+  const v = +shift;
+  if (!Number.isFinite(v) || Math.abs(v) < 0.005) return null;
+  const lim = Number.isFinite(+total) ? +total / 2 : Infinity;   // neither side may go past the centerline
+  return Math.max(-lim, Math.min(lim, Math.round(v * 100) / 100));
+}
+export function rowShiftOf(xsection) {
+  const total = designatedRowFt(xsection);
+  if (total == null) return 0;
+  return cleanRowShift(xsection.rowShiftFt, total) ?? 0;
+}
+/* Each side's distance from the drawn centerline to its ROW line, `{ left, right }` in feet; null when nothing is designated. */
+export function designatedRowSides(xsection) {
+  const total = designatedRowFt(xsection);
+  if (total == null) return null;
+  const sh = rowShiftOf(xsection);
+  return { left: total / 2 + sh, right: total / 2 - sh };
+}
+/* The ONE writer of a side pair: a new xsection with the ROW set so the left line sits `left` ft and the right line `right`
+ * ft from the centerline (the width becomes their sum, the shift their half-difference). Non-positive / non-finite input
+ * returns the xsection unchanged. Never mutates. */
+export function withRowSides(xsection, left, right) {
+  const L = +left, R = +right;
+  if (!Number.isFinite(L) || !Number.isFinite(R) || L < 0 || R < 0 || !(L + R > 0)) return xsection;
+  const x = makeXSection(xsection && xsection.bands, L + R, (L - R) / 2);
+  return x;
+}
+/* Set ONE side (`sign` +1 = left, −1 = right), leaving the other side's line exactly where it is. */
+export function withRowSide(xsection, sign, ft) {
+  const s = designatedRowSides(xsection);
+  if (!s) return xsection;
+  return sign > 0 ? withRowSides(xsection, ft, s.right) : withRowSides(xsection, s.left, ft);
+}
+/* Set the WIDTH and keep the shift (both sides move by half the change) — what typing a new total in the panel means. A
+ * shift too large for the new width is pulled back so neither side crosses the centerline. */
+export function withRowWidth(xsection, total) {
+  const t = +total;
+  if (!Number.isFinite(t) || !(t > 0)) {
+    const next = { ...(xsection || {}) };
+    delete next.rowDesignFt; delete next.rowShiftFt;
+    return next;
+  }
+  return makeXSection(xsection && xsection.bands, t, xsection ? xsection.rowShiftFt : undefined);
 }
 
 /* The undesignated margin, AVERAGED across both sides — a true, single "(Y-X)/2 each side" figure

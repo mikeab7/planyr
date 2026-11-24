@@ -280,7 +280,7 @@ import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
 import { liftTrailersOverRoads, arrangeRuleNote } from "./lib/trailerOverRoads.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
-import { bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { bufferPolyline, ringsOverlap, offsetPolyline } from "./lib/metesAndBounds.js";
 // The deed workflow (parser + parcel-alignment solver) is loaded on demand — nothing on the boot
 // path may static-import deedParse.js / deedAlign.js. See lib/deedLazy.js.
 import { loadDeed, deedNow } from "./lib/deedLazy.js";
@@ -355,7 +355,8 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide, isFlushWallLayer, wallKidPerp, wallKidAlong, hostAxisExtents, bumpsOfHost, extentFieldsFor, sideParkStack, repackFlushLayers } from "./lib/dogEar.js";
-import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth } from "./lib/roadCrossSection.js";
+import { makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, designatedRowFt, rowWidth, designatedRowSides, withRowSide, withRowWidth, rowMarginFt } from "./lib/roadCrossSection.js";
+import { rowSideMinFt, rowSideCompass, signedOffsetFrom } from "./lib/roadRowBand.js";
 import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
@@ -1234,6 +1235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
   const [draftRoadPts, setDraftRoadPts] = useState(null); // [{x,y}…] in-progress centerline road (B596/NEW-1)
+  const [rowDrag, setRowDrag] = useState(null); // 2026-11-24 — a live right-of-way line drag's PREVIEW {id, sign, ft, dense}; the plan is written on release
   const [roadVtxSel, setRoadVtxSel] = useState(null); // {id, idx} selected road vertex (panel: flip treatment, B597)
   const [roadSnapTarget, setRoadSnapTarget] = useState(null); // {x,y} world pt of an engaged road-connect magnet (B945/NEW-1) — highlight ring
   const [roadDragBearing, setRoadDragBearing] = useState(null); // NEW-2 {deg, at, locked} — the live bearing of the leg being dragged
@@ -8601,6 +8603,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setCallout(d.id, { rot: ((rot % 360) + 360) % 360 });
       return;
     }
+    if (d.mode === "rowSide") { // 2026-11-24 — drag one RIGHT-OF-WAY line: a PREVIEW only (one small offset per move); written once, on release
+      const off = signedOffsetFrom(d.dense, fp);
+      if (off == null) return;
+      let ft = Math.max(d.min, d.sign * off);
+      ft = snapOn ? Math.round(ft) : Math.round(ft * 10) / 10;   // whole feet with Snap on (Alt bypasses), tenths without
+      scheduleFrameJob("rowSide", () => setRowDrag((r) => (r && r.id === d.id && r.sign === d.sign && r.ft === ft ? r : { id: d.id, sign: d.sign, ft, dense: d.dense })));
+      d.ft = ft;
+      return;
+    }
     if (d.mode === "dimMove") { // B146/B592: slide a selected element's dimension callout along its length
       const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
       // B592: only the length-axis component slides; the perpendicular (depth) component is dropped
@@ -9321,6 +9332,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-1 — `dragArmed` on every release path that WRITES or WARNS: a press that never travelled is
     // a click, so it must not weld a junction, prune an apron, re-derive a footprint, or flash a
     // civil-radius warning about a curve nobody touched.
+    if (d && d.mode === "rowSide") {
+      // 2026-11-24 — the ROW-line drag commits ONCE here (one undo frame); a press that never travelled changes nothing.
+      if (dragArmed(d) && Number.isFinite(d.ft)) { const el = els.find((x) => x.id === d.id); if (el) setRoadRowSide(el, d.sign, d.ft); }
+      setRowDrag(null);
+    }
     if (d && dragArmed(d) && d.mode === "roadVtx") {
       // B945/NEW-1 — finalize a snap-and-connect if the endpoint released on a target: a ROAD (merge /
       // weld / tee) or (B955) a PARKING drive / TRUCK COURT edge (weld + store the drive junction).
@@ -11488,6 +11504,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Drag one VERTEX of a centerline road (B596/B597); also selects it so the panel can flip its
   // treatment. Shift = 45° lock relative to the adjacent vertex; the strip bbox re-syncs live.
+  /* 2026-11-24 — press on a selected road's RIGHT-OF-WAY line (or its square grip): drag that side out or in. The other side stays put. */
+  const startRowDrag = (e, id, sign) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el || !isCenterlineRoad(el) || el.locked || designatedRowFt(el.xsection) == null) return;
+    const dense = roadDenseCenterline(el, settings, sharpFor(el), roundTrim(el));
+    if (!dense || dense.length < 2) return;
+    setSel({ kind: "el", id });
+    drag.current = { mode: "rowSide", id, sign, dense, min: rowSideMinFt(el, sign), ...startGate(e, { rebase: false }) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   const startRoadVtx = (e, id, idx) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -15439,14 +15467,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  // B2671333 — where a NEW print frame is centred: the development AND the visible property lines together,
-  // so the site (boundary + elements) lands in the middle of the sheet. devExtent itself is untouched (export crop).
+  // B2671333 — where a NEW print frame is centred: the PROPERTY LINE (visible parcels) when there is one, so the site sits in the
+  // middle of the sheet; the development extent only when no parcel is drawn. devExtent itself is untouched (export crop).
   const printSeedExtent = () => {
-    const dev = devExtent();
     const pts = [];
-    if (dev) pts.push({ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 });
     visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
-    if (!pts.length) return null;
+    if (!pts.length) return devExtent();
     const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
     const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
@@ -16654,8 +16680,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the alignment (Shift = 45° lock); click a handle to SELECT that vertex, then flip it
     // sharp / arc / smooth in the Element panel. Interior handles are hollow→filled when selected.
     if (isCenterlineRoad(el)) {
+      /* 2026-11-24 — the RIGHT-OF-WAY grips: each ROW line is draggable along its whole length (a wide invisible band over the dashed line)
+         and carries a small square grip at its middle so it is discoverable. Selection-gated chrome (CHROME-NEVER-EATS-A-PRESS), never
+         exported. While a drag is live the line shows where it will land, with that side's distance from the centerline. */
+      const rowSides = settings.showRowLines !== false && rowMarginFt(el.xsection) != null ? designatedRowSides(el.xsection) : null;
+      const rowDense = rowSides ? roadDenseCenterline(el, settings, sharpFor(el), roundTrim(el)) : null;
+      const rowGrips = rowSides && rowDense && rowDense.length >= 2 ? [1, -1].map((sign) => {
+        const live = rowDrag && rowDrag.id === el.id && rowDrag.sign === sign ? rowDrag : null;
+        const line = offsetPolyline(live ? live.dense : rowDense, sign * (live ? live.ft : (sign > 0 ? rowSides.left : rowSides.right)));
+        if (!line || line.length < 2) return null;
+        const pts = line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+        const mi = Math.floor(line.length / 2), a = line[Math.max(0, mi - 1)], b = line[Math.min(line.length - 1, mi)];
+        const m = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+        const A = f2p(a), B = f2p(b);
+        const cur = resizeCursor(-(B.y - A.y), B.x - A.x);   // perpendicular to the line: the way it moves
+        return (
+          <g key={`rowg${sign}`} data-testid={`road-row-grip-${sign > 0 ? "l" : "r"}`}>
+            <polyline points={pts} fill="none" stroke="transparent" strokeWidth={12} data-export="skip" data-row-grip={sign}
+              style={{ cursor: cur }} onPointerDown={(e) => startRowDrag(e, el.id, sign)}>
+              <title>Drag to move this right-of-way line</title>
+            </polyline>
+            {live && <polyline points={pts} fill="none" stroke={SEL_BLUE} strokeWidth={1.5} strokeDasharray="7 4" data-export="skip" pointerEvents="none" />}
+            <rect x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2} data-export="skip" data-testid={`road-row-handle-${sign > 0 ? "l" : "r"}`}
+              fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5} style={{ cursor: cur }} onPointerDown={(e) => startRowDrag(e, el.id, sign)}>
+              <title>Drag to move this right-of-way line</title>
+            </rect>
+            {live && (
+              <text x={m.x} y={m.y - 12} textAnchor="middle" fontSize={11} fontFamily={NUM_FONT} fontWeight="700" fill={SEL_BLUE} {...INK_HALO} data-export="skip" pointerEvents="none">
+                {`${f1(live.ft)}′ from center`}
+              </text>
+            )}
+          </g>
+        );
+      }) : null;
       return (
         <g>
+          {rowGrips}
           {el.pts.map((p, i) => {
             const m = f2p(p);
             const isEnd = i === 0 || i === el.pts.length - 1;
@@ -18892,10 +18952,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // cross-section dialog has no section yet; designating a ROW gives it the dialog's own single-band wrapper
       // (`xsectionFromRoad`), which `hasXSection` still reads as "plain" — width, paving and cost are unchanged.
       if (!x.xsection) return { ...x, xsection: makeXSection(xsectionFromRoad(x).bands, +ft) };
-      const next = { ...x.xsection };
-      if (Number.isFinite(+ft) && +ft > 0) next.rowDesignFt = +ft; else delete next.rowDesignFt;
-      return { ...x, xsection: next };
+      // 2026-11-24 — a new WIDTH keeps an uneven ROW's shift (both lines move by half the change); clearing drops both keys.
+      return { ...x, xsection: withRowWidth(x.xsection, want ? +ft : null) };
     }));
+  };
+  /* Owner, 2026-11-24 ("I should be able to edit the right-of-way boundary") — ONE side of the ROW, typed in the panel or dragged on the
+     plan: that side's line moves to `ft` from the centerline and the OTHER side's line stays exactly where it was (lib/roadCrossSection.js
+     `withRowSide`). Never closer than the modeled section / back of curb on that side (`rowSideMinFt`). One undo frame per commit. */
+  const setRoadRowSide = (el, sign, ft) => {
+    if (!el || !el.xsection || designatedRowFt(el.xsection) == null) return;
+    const v = Math.max(rowSideMinFt(el, sign), Math.round(+ft * 100) / 100);
+    if (!Number.isFinite(v)) return;
+    const cur = designatedRowSides(el.xsection);
+    if (cur && Math.abs((sign > 0 ? cur.left : cur.right) - v) < 0.005) return; // no change — no history frame
+    pushHistory();
+    setEls((a) => a.map((x) => (x.id === el.id && x.xsection ? { ...x, xsection: withRowSide(x.xsection, sign, v) } : x)));
   };
   /* NEW-1 (road-traced parking, 2026-11-24) — this road's own parking keep-back (ft), beating its class default from Standards → Roads
      (lib/parkingRoadTrim.js parkSetbackFor). 0 is a real answer ("parking may come right up to this road"); a cleared box (null) removes the key so the
@@ -20687,6 +20758,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })),
     [roadNet, roadEdgeOwners, f2p, settings],
   );
+  /* Owner, 2026-11-24 ("maybe it should be opaque up to the right-of-way boundary") — every road's RIGHT-OF-WAY BAND as ONE solid ground
+     underlay, painted under every drawn element: the pavement, curb, markings and the dashed ROW line sit on it, and nothing you drew is
+     ever covered by it (constraint 10's "never lose anything"). Overlapping ROWs at an intersection simply merge (one fill colour, opaque).
+     The band geometry is decided once per model change in the road network (lib/roadRowBand.js); only the feet → px projection runs here,
+     keyed on `f2p` like `roadRegionPaths` (VIEW-INDEPENDENT-ONCE). Gated with the ROW lines on View ▾ "Right-of-way". */
+  const rowUnderlay = useMemo(() => {
+    if (settings.showRowLines === false || !roadNet.rows || !roadNet.rows.size) return null;
+    const parts = [];
+    for (const [id, g] of roadNet.rows) {
+      if (!g.band) continue;
+      parts.push({ id, d: g.band.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" });
+    }
+    if (!parts.length) return null;
+    const st = typeStyle("rightOfWay", settings);
+    return { parts, fill: st.fill, fillOpacity: st.fillOpacity ?? 1 };
+  }, [roadNet, f2p, settings]);
   /* B1788912 (NEW-1) — the road-network composite's own JSX, factored out of the old fixed
      `road-network-layer` block so each cluster can take its place in `elPaintItems`'s unified
      z-sorted stack instead of always painting first. Same markup as before (a `pointerEvents:none`
@@ -21838,6 +21925,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
+              {/* The road RIGHT-OF-WAY ground band (see `rowUnderlay`): the very bottom of the drawing, under every element and every
+                  annotation sent behind the plan. Not a feature of its own (no `data-feature`), so it is never a click target and stays page
+                  content in an editable PDF — the ground the road annotations sit on, printed exactly as the screen shows it. */}
+              {rowUnderlay && (
+                <g data-testid="row-underlay" data-row-underlay="1" pointerEvents="none">
+                  {rowUnderlay.parts.map((p) => <path key={`rowb-${p.id}`} data-row-band={p.id} d={p.d} fill={rowUnderlay.fill} fillOpacity={rowUnderlay.fillOpacity} fillRule="nonzero" stroke="none" />)}
+                </g>
+              )}
               {drawMarkupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
               {/* NEW-2 — callouts / text boxes the user has sent BEHIND the plan. Same renderer,
                   first pass, exactly like the markup and measurement bands above and below. */}
@@ -24426,6 +24521,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const travelFt = Math.round(roadTravel(selEl));
                     const rowFt = designatedRowFt(selEl.xsection);
                     const showRow = cl || !!selEl.xsection;
+                    // 2026-11-24 — each side of a designated ROW, named by the compass side it lies on (an uneven ROW is typed here or dragged on the plan)
+                    const rowSidesNow = cl && rowFt != null ? designatedRowSides(selEl.xsection) : null;
+                    const rowSideDense = rowSidesNow ? roadDenseCenterline(selEl, settings, sharpFor(selEl), roundTrim(selEl)) : null;
+                    const rowSideInfo = rowSidesNow ? [1, -1].map((sign) => ({ sign, name: rowSideCompass(rowSideDense, sign), ft: sign > 0 ? rowSidesNow.left : rowSidesNow.right, min: rowSideMinFt(selEl, sign) })) : null;
                     const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
                     const readout = { display: "flex", alignItems: "baseline", gap: SPACE.sm, minWidth: 0, overflow: "hidden", fontSize: FONT_SIZE.control, color: "var(--text-primary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" };
                     const mutedEll = { ...muted, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }; // the muted tail may ellipsise at the narrowest panel; the number never does
@@ -24440,7 +24539,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadParkSetback={setRoadParkSetback} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
+                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadParkSetback={setRoadParkSetback} setRoadRowFt={setRoadRowFt} setRoadRowSide={setRoadRowSide} rowSideInfo={rowSideInfo} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
                       {cl && <RoadXSectionSection roadCurbOf={roadCurbOf} roadTravel={roadTravel} selEl={selEl} setXsDialog={setXsDialog} travelFt={travelFt} />}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
