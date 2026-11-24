@@ -9,7 +9,9 @@ const roadBranch = (() => {
   const a = SRC.indexOf('selEl.type === "road" ? (() => {');
   const b = SRC.indexOf("})() : isDockLayerEl(selEl) ? (() => {", a);
   expect(a).toBeGreaterThan(0); expect(b).toBeGreaterThan(a);
-  return SRC.slice(a, b);
+  // batch G2 (B2671311): the road body's sections now live in components/RoadInspectorSections.jsx, so the branch is the
+  // call sites in SitePlanner PLUS the section components.
+  return SRC.slice(a, b) + "\n" + readFileSync(new URL("../src/workspaces/site-planner/components/RoadInspectorSections.jsx", import.meta.url), "utf8");
 })();
 
 describe("NEW-2 — cost is gone from the road panel", () => {
@@ -58,7 +60,8 @@ describe("NEW-1 — the rebuilt panel", () => {
     expect(roadBranch).not.toContain("Design cross-section…");
   });
   it("intersection params sit in one collapsed-by-default section, only when the road has a junction", () => {
-    expect(roadBranch).toMatch(/\{cl && \(myTees\.length > 0 \|\| myDrives\.length > 0\) && \(\s*<Collapse sectionId="road-intersection" title="Intersection">/);
+    expect(roadBranch).toMatch(/\{cl && \(myTees\.length > 0 \|\| myDrives\.length > 0\) && <RoadIntersectionSection /);
+    expect(roadBranch).toMatch(/<Collapse sectionId="road-intersection" title="Intersection">/);
   });
   it("the label controls are shared and slider-free", () => {
     const a = SRC.indexOf("const inlineLabelControls = ");
@@ -73,8 +76,9 @@ describe("NEW-1 — the rebuilt panel", () => {
 describe("NEW-3 — the min-radius review is hidden behind ONE flag", () => {
   it("the panel parts render only when the flag is on", () => {
     expect(roadBranch).toMatch(/const warn = radiusReviewOn && cl \?/);
-    expect(roadBranch).toMatch(/\{radiusReviewOn && warn && \(/);
-    expect(roadBranch).toMatch(/\{radiusReviewOn && cl && \(\s*<div data-testid="road-curve-at-vertex"/);
+    expect(roadBranch).toMatch(/\{radiusReviewOn && warn && <RoadRadiusWarning /);
+    expect(roadBranch).toMatch(/\{radiusReviewOn && cl && <RoadCurveAtVertex /);
+    expect(roadBranch).toMatch(/<div data-testid="road-curve-at-vertex"/);
   });
   it("the canvas flags and the tight-corner toasts are gated too", () => {
     expect(SRC).toMatch(/const roadRadiusFlags = useMemo\(\(\) => \{\s*const out = \[\];\s*if \(!radiusReviewOn\) return out;/);

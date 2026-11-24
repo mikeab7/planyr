@@ -256,7 +256,7 @@ describe("NEW-3 — every element panel takes layout A's control rules", () => {
     expect(SP).toMatch(/const renderElAppearance = \(\) => \(/);
     const top = SP.indexOf("{!roadPanel && elAppearanceOn && renderElAppearance()}");
     const sz = SP.indexOf('<StdSubLabel section="size">Size & position</StdSubLabel>\n                      <Field label="Width (ft)">');
-    const roadLast = SP.indexOf('sectionId="road-intersection"');
+    const roadLast = SP.indexOf("<RoadIntersectionSection ");
     const bottom = SP.indexOf("{roadPanel && elAppearanceOn && renderElAppearance()}");
     expect(top).toBeGreaterThan(-1); expect(sz).toBeGreaterThan(top);
     expect(bottom).toBeGreaterThan(roadLast); expect(roadLast).toBeGreaterThan(top);
