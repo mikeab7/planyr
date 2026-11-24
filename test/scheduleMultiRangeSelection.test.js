@@ -5,7 +5,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const html = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+import { sequencePageSource } from "./helpers/sequenceSource.js";
+const html = sequencePageSource();
 const grid = html.slice(html.indexOf("function GridView("), html.indexOf("function GridView(") + 400000);
 
 describe("Schedule grid — Ctrl+click / edge-scroll wiring", () => {

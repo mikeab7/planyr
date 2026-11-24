@@ -21,7 +21,7 @@
  */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { GIS_FETCH_TIMEOUT_MS } from "./gisFetch.js";
+import { GIS_FETCH_TIMEOUT_MS, fetchArcgisJson, GisFetchError } from "./gisFetch.js";
 import { OK_VECTOR_SOURCES } from "./oklahomaStatic.js"; // NEW-1 (Oklahoma screening)
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
@@ -1055,16 +1055,12 @@ export function buildQueryUrl(baseUrl, params) {
 async function defaultFetchJson(url, { timeoutMs } = {}) {
   // Audit B2 item 4: NEVER unbounded — no `timeoutMs` (absent OR null) means the shared GIS cap; a row's own `query.timeoutMs` still wins.
   if (timeoutMs == null) timeoutMs = GIS_FETCH_TIMEOUT_MS;
-  const ctrl = timeoutMs && typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
-    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
-    const j = await res.json();
-    if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
-    return j;
-  } finally {
-    if (timer) clearTimeout(timer);
+    return await fetchArcgisJson(url, { timeoutMs: timeoutMs || GIS_FETCH_TIMEOUT_MS, retries: 0, noCoalesce: true }); // audit M3 (I3): the one GIS fetch helper; one shot, as before
+  } catch (e) {
+    if (e instanceof GisFetchError && (e.kind === "http-5xx" || e.kind === "http-4xx")) throw new Error(`Server returned HTTP ${e.status}.`);
+    if (e instanceof GisFetchError && e.kind === "arcgis") throw new Error(e.arcgisMessage || "ArcGIS query error.");
+    throw e;
   }
 }
 

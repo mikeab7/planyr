@@ -19,14 +19,18 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 const masterViewSrc = (() => {
   const start = seq.indexOf("function MasterView(");
   expect(start, "MasterView must exist").toBeGreaterThan(-1);
-  const next = seq.indexOf("\nfunction ", start + 10);
-  return seq.slice(start, next > -1 ? next : start + 20000);
+  // MasterView is the last declaration of taskReport/TaskReport.jsx (an `export function`); its body ends where the
+  // next top-level function, or the module's harness-registration block, begins.
+  const rest = seq.slice(start + 10);
+  const m = /\n(?:export )?function |\n\/\/ harness compatibility/.exec(rest);
+  return seq.slice(start, m ? start + 10 + m.index : start + 60000);
 })();
 
 describe("MasterView — a double-click must not lose focus to the table wrapper's stale timer", () => {

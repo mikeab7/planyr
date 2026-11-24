@@ -11,6 +11,7 @@
 import { polyArea } from "./polygonSplit.js";
 import { parcelExceptSqft } from "./parcelArea.js"; // NEW-2 — save-and-except holes come off the site area (leaf module: this file is on the boot path)
 import ClipperLib from "clipper-lib";
+import { distToSegment as segDist } from "./ringMath.js";
 
 const EPS = 1e-9;
 
@@ -236,12 +237,6 @@ const MERGE_CLOSE_FT = MERGE_GAP_FT / 2 + 0.05;
 const MERGE_MITER = 10; // keeps a sharp convex lot corner exact through grow→shrink (≥ ~12° angles)
 const MERGE_SAMPLE_FT = 0.5;
 
-function segDist(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
-  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
 
 // Length of ringA's boundary that lies within `tol` of ringB's boundary (sampled along A's edges).
 function boundaryNear(ringA, ringB, tol) {

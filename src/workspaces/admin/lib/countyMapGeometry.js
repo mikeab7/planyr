@@ -7,6 +7,7 @@
  * than a dependency would cost the admin chunk.
  */
 
+import { extentOfPairRings } from "../../site-planner/lib/ringMath.js";
 const RAD = Math.PI / 180;
 
 function albers({ lat0, lon0, p1, p2 }) {
@@ -42,13 +43,7 @@ function projectRing(flat, scale, project) {
   return pts;
 }
 
-const bboxOf = (rings) => {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const r of rings) for (const [x, y] of r) {
-    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-  }
-  return [x0, y0, x1, y1];
-};
+const bboxOf = extentOfPairRings;
 
 /**
  * Build the drawing: one SVG path string per county (same order as `payload.counties`) in a

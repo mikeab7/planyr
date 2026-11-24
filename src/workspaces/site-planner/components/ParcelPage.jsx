@@ -13,7 +13,7 @@
  *   · unknown  — nothing proves where it came from: no chip, no source line, just the editable fields link.
  * Module-scope components only (MODULE-SCOPE-COMPONENTS).
  */
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
@@ -22,7 +22,10 @@ import { taxTableForCombined } from "../lib/taxRates.js";
 import { fetchAdamsTable } from "../lib/adamsCoTax.js";
 import { noteStaleRoll } from "../lib/taxRollStale.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
-import { countyRecord, apprAll } from "../lib/appraisal.js";
+import { countyRecord, apprAll, apprRows } from "../lib/appraisal.js";
+
+const ParcelCopyNote = lazy(() => import("./ParcelCopyNote.jsx")); // NEW-1 (2026-10-29) — the "this is a copy of the county's data" line, loaded only when a county lot's page opens
+const isHttp = (v) => /^https?:\/\//i.test(String(v ?? ""));
 import { agUseLine, AG_USE_RULES } from "../lib/agUseRules.js";
 import { accountOf as recordAccountOf } from "../lib/parcelOrigin.js";
 
@@ -67,7 +70,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, addrParts, countyState }) {
+export default function ParcelPage({ parcel, name, unnamed, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom, idField, addrField, addrParts, countyState, county }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -139,8 +142,12 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
             <Fact label="Owner">{rec.owner || parcel.owner}</Fact>
             <Fact label="Account">{rec.account}</Fact>
             <Fact label="Address">{rec.address}</Fact>
+            {(() => { const a = apprRows(parcel.attrs).find((r) => r.label === "Assessor" && isHttp(r.value)); return a ? ( // NEW-3 (Meriwether GA) — the county assessor's own record, a short link (#45: never the raw URL)
+              <Fact label="Assessor"><a href={String(a.value)} target="_blank" rel="noopener noreferrer" data-testid="parcel-assessor-link" style={{ color: "var(--accent-site-text, var(--text-primary))", fontWeight: 650 }}>Open record ↗</a></Fact>
+            ) : null; })()}
             <Fact label="Deed acres">{deedAc != null ? <>{fmt(deedAc)} <span style={{ color: "var(--text-secondary)" }}>· drawn {fmt(drawnAcresOf(parcel))}</span></> : null}</Fact>
             <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{[cadName ? `Source: ${cadName}` : "Source: county appraisal district", rec.taxYear ? `tax year ${rec.taxYear}` : null].filter(Boolean).join(" · ")}</div>
+            {county && <Suspense fallback={null}><ParcelCopyNote county={county} testId="parcel-copy" /></Suspense>}
             {(() => { const line = agUseLine(rec.agUse); return line ? (
               <div data-testid="parcel-ag-use" title={AG_USE_RULES[rec.agUse.ruleId].note} style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm, overflowWrap: "anywhere" }}>{line}</div>
             ) : null; })()}
@@ -151,7 +158,7 @@ export default function ParcelPage({ parcel, name, unnamed, acres, included, ori
                   {apprAll(parcel.attrs).map((r) => (
                     <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: SPACE.lg, alignItems: "baseline", padding: "2px 0" }}>
                       <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", flex: "none" }}>{r.label}</span>
-                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)", textAlign: "right", overflowWrap: "anywhere" }}>{String(r.value)}</span>
+                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)", textAlign: "right", overflowWrap: "anywhere" }}>{isHttp(r.value) ? <a href={String(r.value)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-site-text, var(--text-primary))" }}>Open ↗</a> : String(r.value)}</span>
                     </div>
                   ))}
                 </div>

@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { ctrlJumpIndex, gridCtrlArrowTarget, gridCellBlank } from "../src/workspaces/scheduler/lib/gridCtrlNav.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 // A column of cells written as a picture: x = filled, . = blank.
 const col = s => i => s[i] === ".";
 const jump = (s, cur, dir) => ctrlJumpIndex(col(s), s.length, cur, dir);
@@ -207,7 +208,7 @@ describe("drift guard — the copies inlined in public/sequence/index.html are b
     }
     return source.slice(start, i);
   };
-  const html = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+  const html = sequencePageSource();
   const lib = readFileSync(new URL("../src/workspaces/scheduler/lib/gridCtrlNav.js", import.meta.url), "utf8");
   for (const sig of [
     "function ctrlJumpIndex(isBlank, n, cur, dir) {",
@@ -224,7 +225,7 @@ describe("drift guard — the copies inlined in public/sequence/index.html are b
 });
 
 describe("the key handler wiring (public/sequence/index.html)", () => {
-  const html = readFileSync(new URL("../public/sequence/index.html", import.meta.url), "utf8");
+  const html = sequencePageSource();
   const at = html.indexOf("NEW-1 (B2451776) — Ctrl/Cmd+Arrow: jump across blank cells");
   const block = at < 0 ? "" : html.slice(at, html.indexOf("// Fix #8: Ctrl/Cmd+Z", at));
   it("exists once, ahead of the Ctrl+Z branch and the plain-arrow branch", () => {

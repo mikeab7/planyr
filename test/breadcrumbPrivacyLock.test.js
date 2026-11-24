@@ -42,6 +42,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { plannerSource } from "./helpers/plannerSource.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const code = (p) => readFileSync(resolve(here, p), "utf8")
   .replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -72,7 +73,7 @@ describe("NEW-1 — the breadcrumb's project-privacy padlock is gone", () => {
 
   it("every OTHER lock/padlock icon in the app is untouched (enumerated, not guessed)", () => {
     // Schedule grid's constrained-date padlock (pinned start / locked finish) — real + clickable.
-    const gantt = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+    const gantt = sequencePageSource();
     expect(gantt).toContain('onClick={unpin}');
     expect(gantt).toMatch(/rect x="3" y="11" width="18" height="11"/);
 

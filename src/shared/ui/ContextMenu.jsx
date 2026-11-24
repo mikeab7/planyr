@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { placeContextMenu } from "./contextMenuPlacement.js";
 import { consumeProgrammaticScroll } from "./programmaticScroll.js";
 import { MENU_LAYER_ATTR } from "./menuLayers.js";
+import { nextMenuIndex, MENU_ROW_SELECTOR } from "./menuRoving.js";
 
 /**
  * ContextMenu — the ONE shared right-click / context menu primitive (B915).
@@ -133,7 +134,22 @@ export default function ContextMenu({
   // carries a mark, so it always dismisses; an unmarked scroll on any OTHER element (a real page
   // scroll, a different panel) also always dismisses, exactly as before.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onCloseRef.current?.(); } };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); onCloseRef.current?.(); return; }
+      // Roving focus (audit M2): arrows / Home / End walk the menu's rows. A text field OUTSIDE the menu keeps its own
+      // arrows (the caret), so a menu left open over an editor never steals them.
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const t = e.target;
+      if (t instanceof Element && !panel.contains(t) && (t.closest("input,textarea,select,[contenteditable=''],[contenteditable='true']"))) return;
+      const rows = Array.from(panel.querySelectorAll(MENU_ROW_SELECTOR)).filter((el) => el.offsetParent !== null);
+      const to = nextMenuIndex(e.key, rows.indexOf(document.activeElement), rows.length);
+      if (to === null) return;
+      e.preventDefault(); e.stopPropagation();
+      rows[to].focus();
+    };
     const onScroll = (e) => {
       if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
       if (consumeProgrammaticScroll(e.target)) return; // the app's own adjustment, not a user gesture

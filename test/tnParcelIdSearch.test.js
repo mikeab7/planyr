@@ -156,7 +156,7 @@ describe("pickIdMatch", () => {
 describe("the search box offers the id search itself", () => {
   it("an id leads the list with its own row, and the geocoder's 'No matches' note is not shown over it", () => {
     const a = buildPlaceRows("nomatch", [], "156-027.00-000");
-    expect(a.rows[0]).toEqual({ kind: "parcelId", text: "156-027.00-000" });
+    expect(a.rows[0]).toEqual({ kind: "parcelId", text: "156-027.00-000", tn: true });
     expect(a.noMatchNote).toBeNull();
     const b = buildPlaceRows("ready", [{ label: "x", lat: 1, lon: 2 }], "156-027.00-000");
     expect(b.rows[0].kind).toBe("parcelId");

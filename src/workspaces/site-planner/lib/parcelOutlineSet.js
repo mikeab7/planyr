@@ -17,6 +17,7 @@
  * beyond the callbacks it is handed. */
 
 import { layerInDrawRange } from "./parcelDisplayZoom.js";
+import { pointInPairRing } from "./ringMath.js";
 
 export const OUTLINE_LOAD_TIMEOUT_MS = 8000;
 
@@ -38,14 +39,7 @@ export function layerReach(layer) {
  * wins (parity with MapFinder.optimisticHitAt). Even-odd on each outer ring; a hole is ignored — this only decides what to FLASH on a
  * click, the authoritative answer is still the county's own point query (B137). Pure. */
 export function lotAtPoint(ghosts, lng, lat) {
-  const inRing = (ring) => {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-      if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  };
+  const inRing = (ring) => pointInPairRing(ring, lng, lat);
   let best = null, bestArea = Infinity;
   for (const g of ghosts || []) {
     const b = g && g.bbox;

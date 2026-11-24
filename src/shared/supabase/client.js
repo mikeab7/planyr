@@ -13,6 +13,7 @@
  * only grants what Row-Level Security permits (RLS is a later phase).
  */
 import { createClient } from "@supabase/supabase-js";
+import { isDiagArmed } from "../telemetry/diagArm.js";
 
 /* B1843888 — vitest must NEVER build a client that can reach a real project, regardless of
  * what VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY are set to in the process. CI's required
@@ -80,7 +81,20 @@ export const supabase = supabaseConfigured()
 // live console). Uses the public anon key + the signed-in user's JWT, so it
 // exercises Row-Level Security exactly as a real client would. No effect on the
 // app's localStorage save/load.
-try { if (typeof window !== "undefined") window.pfSupabase = supabase; } catch (_) {}
+/* AUDIT M2 — `window.pfSupabase` answers ONLY when the diagnostic surface is armed (`?planyrDiag=1`, the `planyr:diag`
+ * session key, `window.__PLANYR_E2E`) or the browser is under automation (`navigator.webdriver`, which a real person's
+ * browser never is). It is a GETTER, so the gate is read at CALL time: arming never needs a remount, and an unarmed
+ * production tab reads `undefined`. Nothing in `src/` reads it; it exists for the console and the harnesses. */
+export function pfSupabaseExposed(win = typeof window === "undefined" ? undefined : window) {
+  if (!win) return false;
+  if (isDiagArmed(win)) return true;
+  try { return !!(win.navigator && win.navigator.webdriver === true); } catch (_) { return false; }
+}
+try {
+  if (typeof window !== "undefined") {
+    Object.defineProperty(window, "pfSupabase", { configurable: true, enumerable: false, get: () => (pfSupabaseExposed() ? supabase : undefined) });
+  }
+} catch (_) {}
 
 /* Phase-1 connection test: confirms the app can REACH Supabase AND that the anon/
  * publishable key is accepted — without touching any table or site data. Uses the

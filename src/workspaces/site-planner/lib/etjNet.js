@@ -11,6 +11,7 @@
  *   • the removal is REPORTED (`removed`), never silent: how many features were dropped or cut, so a caller can say so.
  * Pure — no network, no DOM. The caller supplies the city polygons (the city layer's own cached features: one source of truth). */
 import { esriPolygons, netPolysToEsriRings } from "./jurisdictionShare.js";
+import { extentOfPairRings } from "./ringMath.js";
 
 /** `cityFeatures`: GeoJSON-style features whose Polygon geometry coordinates are an ESRI flat ring list (what `featuresToGeoJson` stores). */
 export function cityPolysFromGeoJson(cityFeatures) {
@@ -24,11 +25,7 @@ export function cityPolysFromGeoJson(cityFeatures) {
   return polys;
 }
 
-const bboxOf = (rings) => {
-  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-  for (const r of rings) for (const [x, y] of r) { if (x < a) a = x; if (x > c) c = x; if (y < b) b = y; if (y > d) d = y; }
-  return [a, b, c, d];
-};
+const bboxOf = extentOfPairRings;
 const meets = (p, q) => !(p[2] < q[0] || q[2] < p[0] || p[3] < q[1] || q[3] < p[1]);
 
 /** Net ESRI ETJ features against city polygons. Returns `{ features, touched, dropped }`: `touched` = features whose ground a city's

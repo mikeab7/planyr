@@ -48,23 +48,12 @@ jobs:
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
         run: npm run lint
-      # Scheduler syntax guard (B643105). `public/sequence/index.html` — the single largest
-      # surface in this app, ~13,900 lines — is invisible to BOTH of the checks above it: ESLint's
-      # `files:` glob is `**/*.{js,jsx}` and never matches an `.html` file, and its
-      # `<script type="text/babel">` content is transformed at RUNTIME in the browser via
-      # `@babel/standalone` loaded from a CDN — Vite copies the file verbatim as a static asset and
-      # never parses it. So a hard syntax error here previously passed every check in this job and
-      # shipped, failing silently in the first browser that opened the Scheduler tab. This walks
-      # both `<script type="text/babel">` blocks through esbuild's JSX transform — syntax only, the
-      # same class of check as the lint step above it, not a logic or type check.
-      - name: Scheduler syntax guard (public/sequence/index.html — B643105)
-        run: node ui-audit/stress/check-babel.mjs
-      # Schedule engine bundle (audit batch J1). The page loads public/sequence/engine.js, a committed bundle of
-      # src/shared/schedule/engine/* (+ formula, ownership, selection, health rules). It replaces four paste-in
-      # copies that used to be kept in step by tests; this fails when the committed bundle is stale.
-      # Fix: npm run build:sequence-engine
-      - name: Schedule engine bundle is current (public/sequence/engine.js — audit batch J1)
-        run: node scripts/build-sequence-engine.mjs --check
+      # Schedule page bundle (audit batch J3). The Schedule is real ES modules under src/workspaces/scheduler/page/,
+      # bundled with the engine (src/shared/schedule/*) into the committed public/sequence/page.js that index.html loads.
+      # Syntax and undefined-name errors in those modules are caught by the lint step above; this fails when the
+      # committed bundle is stale. Fix: npm run build:sequence-page
+      - name: Schedule page bundle is current (public/sequence/page.js — audit batch J3)
+        run: node scripts/build-sequence-page.mjs --check
       # Required-check contract guard (NEW-2). On 2026-08-06 seven PRs were stuck at
       # "build — Expected — Waiting for status to be reported" with nothing red anywhere, and GitHub
       # offers no merge control at all in that state. This asserts that every context the ruleset

@@ -25,6 +25,7 @@
 import { annualLeaseRate, buildingPricePerSf, landPricePerSf, landSizeSf, parseLeaseTermYears, sortCompsByRecency } from "./comps.js";
 import { compSizeSf, countyLabel } from "../../../workspaces/dashboard/lib/compsCardModel.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
+import { usdUpTo2 } from "../../units/numberFormat.js";
 export { SQFT_PER_ACRE as SF_PER_ACRE };
 
 export const DATE_WINDOW_DAYS = { "3mo": 90, "6mo": 180, "12mo": 365 };
@@ -326,7 +327,7 @@ export function countyShort(key) {
 /* ---- chips and section summaries ----------------------------------------------------------- */
 
 const fmtN = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
-const fmtMoney = (n) => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const fmtMoney = usdUpTo2;
 /** 100000 → "100k" (chips stay short); anything not a clean thousand keeps its full figure. */
 const fmtK = (n) => (Number.isInteger(n) && n >= 1000 && n % 1000 === 0 ? `${n / 1000}k` : fmtN(n));
 const fmtYear = (n) => String(n);

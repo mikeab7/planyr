@@ -1,0 +1,14 @@
+# Pen-test 2026-11-24: automatic security + version PRs for the dependency tree and the CI actions.
+# Weekly, small batches, patch/minor grouped so it never floods; majors arrive one at a time for a human look.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 3

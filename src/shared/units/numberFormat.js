@@ -38,3 +38,15 @@ export const fixedDec1 = (n) => n.toFixed(1);
 /* ---- TRIM: toString, so a whole number drops its ".0"; non-numbers read as an em dash ---- */
 export const trimInt = (n) => (Number.isFinite(n) ? Math.round(n).toString() : "—");
 export const trimDec1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "—");
+
+/* ---- MONEY and ACRES (audit M2). Same rule as above: each is the body a call site already used, character for character. ---- */
+// "$1,235" - whole dollars, en-US (tnTaxUnits).
+export const usdWhole = (n) => `$${Math.round(n).toLocaleString("en-US")}`;
+// "$1,234.50" with a FIXED number of decimals, en-US (comp mobile sheet; default 0).
+export const usdFixed = (n, frac = 0) => `$${n.toLocaleString("en-US", { minimumFractionDigits: frac, maximumFractionDigits: frac })}`;
+// "$12.5" - up to two decimals, trailing zeros dropped, en-US (comps column formats).
+export const usdUpTo2 = (n) => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+// "12.34 AC" - two decimals, upper-case unit; a non-number reads as "" (parcel-group header).
+export const acresTwoOrBlank = (a) => (Number.isFinite(a) ? `${a.toFixed(2)} AC` : "");
+// "<0.1 AC" / "9.5 AC" / "120 AC" - tiered precision for site-check sentences.
+export const acresTiered = (a) => (a < 0.1 ? "<0.1 AC" : `${a < 10 ? a.toFixed(1) : Math.round(a)} AC`);
