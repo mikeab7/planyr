@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { plannerSource } from "./helpers/plannerSource.js";
+import { plannerSource, plannerParts } from "./helpers/plannerSource.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SP = plannerSource();
@@ -22,7 +22,9 @@ const SP = plannerSource();
 const start = SP.indexOf("const identifyTok = useRef(0);");
 const end = SP.indexOf("const siteLabel = useProjectName(");
 if (start < 0 || end < 0) throw new Error("parcelClickRouting.test.js: identify region markers moved — update the slice");
-const region = SP.slice(start, end);
+// batch G2 (B2671311): the identify handlers now live in lib/useParcelIdentify.js (listed in plannerSource), so the region is that hook plus the planner's remaining slice.
+const hookSrc = plannerParts().find((p) => p.file === "lib/useParcelIdentify.js").text;
+const region = SP.slice(start, end) + "\n" + hookSrc;
 
 describe("NEW-1: in-planner parcel identify routes by the CLICKED POINT, never a frozen county", () => {
   it("candidateCountiesForPoint drives BOTH the outlines and the click query", () => {
