@@ -113,6 +113,8 @@ await page.evaluate(() => document.activeElement && document.activeElement.blur(
 await page.keyboard.press("Control+z"); await page.waitForTimeout(800);
 xA = await storedA();
 check(xA.rowDesignFt === 100 && xA.rowShiftFt === -10, "Ctrl+Z undoes that one edit", JSON.stringify(xA));
+const stale = await page.evaluate(() => /Showing \d/.test(document.body.innerText));
+check(!stale, "after a blur + undo the side box does not claim it is 'Showing' a value it never altered (NumInput commit-echo fix)");
 
 // drag the south grip 20 ft further south (screen +y)
 const g = await page.evaluate(() => { const n = document.querySelector('[data-testid="road-row-handle-l"]'); const b = n.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; });

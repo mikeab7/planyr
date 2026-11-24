@@ -125,6 +125,13 @@ describe("B464051 — a number the app changed says so, in the moment (LOUD-FAIL
     expect(b).toMatch(/committedRef\.current/);
   });
 
+  it("the 'Showing' check is armed only by a commit actually SENT (B2671334: blur, then Undo, said 'Showing 40' under an untouched 40)", () => {
+    const b = numInput();
+    // the ref is set inside the same branch that calls onCommit, never unconditionally before it
+    expect(b).toMatch(/if \(v !== value \|\| \(forceCommit && wasDirty\)\) \{ committedRef\.current = v; onCommit\(v\); \}/);
+    expect(b).not.toMatch(/\n\s*committedRef\.current = v;\n\s*if \(v !== value/);
+  });
+
   it("an adjustment is NEVER dressed as a rejection", () => {
     const b = numInput();
     // aria-invalid is keyed on invalidReason alone, never on `note` / `altered`.

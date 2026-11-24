@@ -81,8 +81,10 @@ export function NumInput({ value, onCommit, min, max, style, placeholder, step, 
     const shown = Math.abs(v - typed) > 1e-9 ? v : null;
     setAltered(shown != null ? `Using ${fmtNum(v)}` : null);
     setDraft(String(v));
-    committedRef.current = v;
-    if (v !== value || (forceCommit && wasDirty)) onCommit(v);
+    /* Arm the "Showing …" check ONLY when a commit is really sent. A blur that re-commits the value already shown (click a box,
+     * then click Undo) sends nothing, so it must not arm it either: the next `value` would be the UNDO's, not an echo of ours,
+     * and the box would claim "Showing 40" under a 40 it never altered (B2671334 live check, 2026-11-24). */
+    if (v !== value || (forceCommit && wasDirty)) { committedRef.current = v; onCommit(v); }
   };
   /* ⛔ B464051, THE OTHER HALF — AND THE FIRST GUESS ABOUT IT WAS WRONG, which is why it is worth
    * writing down. It looked like these fields silently ROUND: every dimension call site passes
