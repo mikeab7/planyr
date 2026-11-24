@@ -1,5 +1,6 @@
 // Audit batch L: a component moved to its own file must IMPORT every component it renders. eslint's no-undef does not see JSX
 // tags, so a forgotten import is a runtime ReferenceError that only a browser run catches (it hid DocMenu's missing MiniBar).
+// source-scan: eslint cannot see JSX tags, so a missing import in a moved component is only visible in the source text.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 

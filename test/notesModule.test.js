@@ -50,6 +50,8 @@ const JSX_SURFACES = [
   // theme-token and module-scope guards cover them like every other visible surface.
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx",
   "components/QuickOpen.jsx",
+  // audit batch L1 — pieces moved verbatim out of NoteEditor.jsx stay on the surface list.
+  "components/NoteEditorBars.jsx", "components/PasteOptions.jsx", "components/MiniBar.jsx", "components/DocMenu.jsx",
   // B842624, extended by the follow-up brief's NEW-1/NEW-2/NEW-3 — the conflict comparison
   // surfaces. Squarely what the "no second person" scan (below) exists for, so all four belong
   // on this list, not just ALL_NOTES_FILES.
@@ -57,6 +59,7 @@ const JSX_SURFACES = [
   "components/NoteRedline.jsx",
 ];
 const ALL_NOTES_FILES = [
+  "components/NoteEditorBars.jsx", "components/PasteOptions.jsx", "components/MiniBar.jsx", "components/DocMenu.jsx", "components/noteEditorCss.js", "components/useNoteE2EHook.js",
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
   "components/IntegrityBanner.jsx",

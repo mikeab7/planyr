@@ -136,7 +136,7 @@ const MAP_FINDER_ITEMS = [
   item({
     id: "site.map-escape", label: "Close the open map menu or popover",
     combo: ["esc"],
-    evidence: [{ file: "src/workspaces/site-planner/MapFinder.jsx", pattern: 'e.key === "Escape") setStatusMenu(null)' }],
+    evidence: [{ file: "src/workspaces/site-planner/lib/useMapEscapeKeys.js", pattern: 'e.key === "Escape") setStatusMenu(null)' }],
   }),
   item({
     id: "site.map-remove-lot", label: "Remove a lot you added with Select parcels",
