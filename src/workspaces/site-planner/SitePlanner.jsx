@@ -522,7 +522,9 @@ import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInsp
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
 import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
 import { BuildingNumberConflict, BuildingFootprintSection, BuildingLoadingSection, BuildingStructureSection, BuildingAppearanceSection } from "./components/BuildingInspectorSections.jsx";
-import { EasementInspector, MarkupStyleInspector, NeutralMarkupInspector } from "./components/MarkupInspector.jsx";
+import { EasementInspector, NeutralMarkupInspector } from "./components/MarkupInspector.jsx";
+import { DeedInspector } from "./components/DeedInspector.jsx";
+import { courseLabelLayout, nameAnchor, nameShown } from "./lib/deedCourses.js";
 import { CURB_STROKE_MIN_PX, INLINE_LABEL_SPACING, centroid, dist, inlineLabelEls, labelPlaceOf, ringMinSpanFt, ringSpanFt } from "./lib/planRenderHelpers.jsx";
 import { NumInput } from "./components/NumInput.jsx";
 import { ElNode, dimSlideFor, dockDoorRun, rampDoorRunOf, rampSpansOnSide, resolveElNeighbors } from "./components/elementRender.jsx";
@@ -21933,7 +21935,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const trace = deedTrace(m);
                   const ring = trace.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline || []).map(f2p);
-                  const ctr = centroid(trace.ring), cp = f2p(ctr);
+                  const ctr = centroid(trace.ring);
                   const gapSeg = trace.gap ? { a: f2p(trace.gap.from), b: f2p(trace.gap.to) } : null;
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
@@ -21952,12 +21954,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {deedCallsShown(m) && labelPpf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
-                        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-                        return <text key={i} x={mx} y={my - 3 * labelK} textAnchor="middle" fontSize={9 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
+                        // NEW-1 (2026-11-24) — per-course look and visibility (lib/deedCourses.js): which half shows, size, colour, above/on/below, along the line.
+                        const cl = courseLabelLayout(m, c, a, b, labelK);
+                        if (!cl) return null;
+                        return <text key={i} transform={`translate(${cl.x} ${cl.y}) rotate(${cl.angle}) scale(${cl.scale})`} x={0} y={cl.dy} textAnchor="middle" fontSize={9 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={m.courseLabelColor || stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{cl.text}</text>;
                       })}
                       {/* NEW-6 — same rule as the easement label below (see labelLayout.js): a feature's
                           name may not render wider than the feature, and the font rides the shared ramp. */}
-                      {featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, ENCUMBER_LABEL_BASE_PX) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, ENCUMBER_LABEL_BASE_PX) * labelK} fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
+                      {nameShown(m) && featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, m.labelSize ?? ENCUMBER_LABEL_BASE_PX) && (() => { const np = f2p(nameAnchor(m, trace.ring, ctr)); return <text x={0} y={0} transform={`translate(${np.x} ${np.y}) rotate(${m.labelRot || 0}) scale(${(m.labelSize ?? ENCUMBER_LABEL_BASE_PX) / ENCUMBER_LABEL_BASE_PX})`} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, ENCUMBER_LABEL_BASE_PX) * labelK} fontWeight="700" fill={m.labelColor || stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>; })()}
                     </g>
                   );
                 }
@@ -24996,23 +25000,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   textInput={textInput}
                   toggleMarkupLock={toggleMarkupLock}
                 />}
-          {/* selected markup shape — geometry + style. The neutral kinds have their own three-section panel above; this is the
-              remaining non-neutral kind (a deed encumbrance), unchanged. */}
-          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && !NEUTRAL_MARKUP_KINDS.includes(selMarkup.kind) && <MarkupStyleInspector
+          {/* NEW-1 (2026-11-24) — a plotted deed / title tract (metes and bounds, kind "encumbrance") has its own panel: name and labels,
+              appearance, closure, every course typed, then size and position. */}
+          {!multiStyleable && selMarkup && selMarkup.kind === "encumbrance" && <DeedInspector
                   PAL={PAL}
                   alignDeedToParcel={alignDeedToParcel}
                   chip={chip}
+                  coalesceLabelWrite={coalesceLabelWrite}
                   colorCtl={colorCtl}
                   deedAlreadyPromoted={deedAlreadyPromoted}
                   deedGroupMembers={deedGroupMembers}
                   deedMainOf={deedMainOf}
                   deleteSel={deleteSel}
+                  flashWarn={flashWarn}
+                  labelSessionRef={labelSessionRef}
                   liveMarkup={liveMarkup}
                   numInput={numInput}
                   parcels={parcels}
                   promoteDeedToParcel={promoteDeedToParcel}
+                  pushHistory={pushHistory}
                   rotateDeedTo={rotateDeedTo}
                   selMarkup={selMarkup}
+                  setMarkups={setMarkups}
                   setSelMarkup={setSelMarkup}
                   setSelMarkupGeom={setSelMarkupGeom}
                   toggleMarkupLock={toggleMarkupLock}

@@ -11,8 +11,7 @@ import ColorField from "../../../shared/ui/ColorField.jsx";
 import { fmtSf, fmtAcres, fmtFeet } from "../lib/measureLabel.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { toHex6 } from "../lib/planStyle.js";
-import { EASEMENT_TYPES, easementType, easementLabel, easementRecordingSummary, easementArea, easementStyle, encumbranceStyle, deedCallsShown } from "../lib/easements.js";
-import { deedTrace, deedGapText } from "../lib/deedGap.js";
+import { EASEMENT_TYPES, easementType, easementLabel, easementRecordingSummary, easementArea, easementStyle } from "../lib/easements.js";
 import { HATCH_OPTIONS } from "../../../shared/style/hatchPatterns.js";
 import Collapse from "./Collapse.jsx";
 import { SQFT_PER_ACRE } from "../lib/siteGeometry.js";
@@ -279,118 +278,6 @@ export const NeutralMarkupInspector = memo(function NeutralMarkupInspector({
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
                 </div>}
-              </Section>
-              </div>
-            );
-});
-
-export const MarkupStyleInspector = memo(function MarkupStyleInspector({
-  PAL,
-  alignDeedToParcel,
-  chip,
-  colorCtl,
-  deedAlreadyPromoted,
-  deedGroupMembers,
-  deedMainOf,
-  deleteSel,
-  liveMarkup,
-  numInput,
-  parcels,
-  promoteDeedToParcel,
-  rotateDeedTo,
-  selMarkup,
-  setSelMarkup,
-  setSelMarkupGeom,
-  toggleMarkupLock,
-}) {
-            // NEW-1 — NO `background` here. ColorField paints the CURRENT COLOUR as the chip's background and then spreads this override on top.
-            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            return (
-              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
-              <div>
-              <Section title={null}>
-                {/* NEW-3 (layout "A") — the deed / title tract: APPEARANCE (Outline | Fill table — colour, opacity as a typed % box instead of the old
-                    slider, weight with no unit, right-aligned pattern selects; a deed's fill pattern is its hatch) then SIZE & POSITION (the closure
-                    read-out, Show calls, the align / promote actions and Rotation). An encumbrance shares the easement appearance model
-                    (fill / fill opacity / hatch, type default + per-element override). */}
-                {(() => {
-                  const isDeed = selMarkup.kind === "encumbrance";
-                  const est = isDeed ? encumbranceStyle(selMarkup) : null;
-                  const patSel = { ...numInput, width: "100%", height: CONTROL_H.md, boxSizing: "border-box", padding: "0 6px", fontFamily: "inherit", textAlign: "right", textAlignLast: "right" };
-                  return (<>
-                    <StdSubLabel section="appearance">Appearance</StdSubLabel>
-                    <PairedFieldHead left="Outline" right={isDeed ? "Fill" : ""} />
-                    <PairedField label="Colour"
-                      left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
-                      right={isDeed ? <ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /> : undefined}
-                    />
-                    {isDeed && <PairedField label="Opacity" right={<PercentField boxed value={est.fillOpacity} max={60} onCommit={(v) => setSelMarkup({ fillOpacity: v })} ariaLabel="Fill opacity" />} />}
-                    <PairedField label="Weight" left={<NumInput boxed fill ariaLabel="Line weight" testid="markup-weight" value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} />} />
-                    <PairedField label="Pattern"
-                      left={<select autoComplete="off" aria-label="Line pattern" style={patSel} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
-                      right={isDeed ? <select autoComplete="off" aria-label="Fill pattern" style={patSel} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select> : undefined}
-                    />
-                    {isDeed && est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
-                    <StdSubLabel section="size">Size & position</StdSubLabel>
-                  </>);
-                })()}
-                {selMarkup.kind === "encumbrance" && (() => {
-                  const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
-                  const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
-                  const gapInfo = deedGapText(deedTrace(selMarkup));
-                  return (
-                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
-                      {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
-                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.danger }}>
-                        {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
-                      </div>
-                      {/* NEW-1 — per-shape "Show calls" (default OFF, saved on the shape, one undo frame). Uses
-                          setSelMarkupGeom, NOT setSelMarkup: that one also writes the shared mkStyle, which new
-                          markups inherit. Not-closing warning above stays here regardless of the toggle. */}
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer", marginBottom: 6 }}>
-                        <input type="checkbox" data-testid="deed-show-calls" checked={deedCallsShown(selMarkup)} onChange={(e) => setSelMarkupGeom({ showCalls: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
-                        <span>Show calls</span>
-                      </label>
-                      {(selMarkup.calls || []).length > 0 && (
-                        <details data-testid="deed-courses-list" style={{ fontSize: 11, color: PAL.ink, marginBottom: 8 }}>
-                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Courses ({selMarkup.calls.length})</summary>
-                          <ol style={{ margin: "4px 0 0", paddingLeft: 18, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>
-                            {selMarkup.calls.map((c, i) => <li key={i}>{c.label}</li>)}
-                          </ol>
-                        </details>
-                      )}
-                      <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
-                        onClick={() => alignDeedToParcel(dm.id)}>
-                        📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
-                      </button>
-                      {/* NEW-2 — promote the plotted deed to a real parcel boundary. */}
-                      <button data-testid="deed-promote" style={{ ...chip, width: "100%", fontWeight: 700, marginTop: 6 }}
-                        disabled={deedAlreadyPromoted(dm)}
-                        title={deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it"}
-                        onClick={() => promoteDeedToParcel(dm.id)}>
-                        ▦ {deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary"}
-                      </button>
-                      {!deedAlreadyPromoted(dm) && (
-                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
-                          With the county map down, the legal description is the best boundary you have. The deed stays on the plan either way.
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
-                        {hasParcel
-                          ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
-                          : "No county parcel loaded to fit to — this applies the State Plane grid-north correction for this location. Load the parcel (Add parcel → Identify) for an exact fit, or nudge below."}
-                      </div>
-                      <Field label="Rotation"><RotationField value={dm.rotApplied || 0} locked={!!selMarkup.locked} lockedReason="Unlock this deed to rotate it"
-                        onCommit={(deg) => rotateDeedTo(dm.id, deg)}
-                        onStep={(d) => rotateDeedTo(dm.id, normalizeDeg((dm.rotApplied || 0) + d))} /></Field>
-                    </div>
-                  );
-                })()}
-                {selMarkup.locked && <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>Locked — click Unlock below to move or reshape it.</div>}
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
-                </div>
               </Section>
               </div>
             );
