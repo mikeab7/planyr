@@ -21,6 +21,7 @@ export const LAZY_LAYER_FILES = [
   { key: "desoto", packs: [], load: () => withPacks([], () => import("./desotoLayers.js")), pick: (m) => ({ layers: m.DESOTO_LAYERS, vintage: m.DESOTO_VINTAGE }) },
   { key: "sugarland", mergeRank: 2, packs: ["sugarland"], load: () => withPacks(["sugarland"], () => import("./sugarLandLayers.js")), pick: (m) => ({ layers: m.SUGARLAND_LAYERS, vintage: m.SUGARLAND_VINTAGE, merge: m.SUGARLAND_MERGE_GROUPS }) },
   { key: "fortbend", mergeRank: 3, packs: ["fortbend"], load: () => withPacks(["fortbend"], () => import("./fortBendLayers.js")), pick: (m) => ({ layers: m.FORTBEND_LAYERS, vintage: m.FORTBEND_VINTAGE, merge: m.FORTBEND_MERGE_GROUPS }) },
+  { key: "waller", packs: ["waller"], load: () => withPacks(["waller"], () => import("./wallerLayers.js")), pick: (m) => ({ layers: m.WALLER_LAYERS, vintage: m.WALLER_VINTAGE }) },
   { key: "nashville", packs: ["nashville"], load: () => withPacks(["nashville"], () => import("./nashvilleLayers.js")), pick: (m) => ({ layers: m.NASHVILLE_LAYERS, vintage: m.NASHVILLE_VINTAGE }) },
   { key: "nashvilleBuffers", mergeRank: 4, packs: ["nashvilleBuffers"], load: () => withPacks(["nashvilleBuffers"], () => import("./nashvilleBufferLayers.js")), pick: (m) => ({ layers: m.NASHVILLE_BUFFER_LAYERS, merge: m.NASHVILLE_BUFFER_MERGE_GROUPS }) },
   { key: "georgia", mergeRank: 5, packs: ["georgia"], load: () => withPacks(["georgia"], () => import("./georgiaLayers.js")), pick: (m) => ({ layers: m.GEORGIA_LAYERS, vintage: m.GEORGIA_VINTAGE, merge: m.GEORGIA_MERGE_GROUPS }) },

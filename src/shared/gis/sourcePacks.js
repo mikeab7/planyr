@@ -17,6 +17,7 @@ export const SOURCE_PACKS = [
   { id: "oklahoma", load: () => import("./sourcesOk.js").then((m) => ({ sources: m.OK_SOURCES, reach: m.OK_FIXTURE_REACH })) },
   { id: "txCityZoning", load: () => import("./sourcesTxCityZoning.js").then((m) => ({ sources: m.TX_CITY_ZONING_SOURCES, reach: m.TX_CITY_ZONING_FIXTURE_REACH })) },
   { id: "sugarland", load: () => import("./sourcesSugarLand.js").then((m) => ({ sources: m.SUGARLAND_SOURCES, reach: m.SUGARLAND_FIXTURE_REACH })) },
+  { id: "waller", load: () => import("./sourcesWaller.js").then((m) => ({ sources: m.WALLER_SOURCES, reach: m.WALLER_FIXTURE_REACH })) },
   { id: "fortbend", load: () => import("./sourcesFortBend.js").then((m) => ({ sources: m.FORTBEND_SOURCES, reach: m.FORTBEND_FIXTURE_REACH })) },
   { id: "nashvilleBuffers", load: () => import("./sourcesNashvilleBuffers.js").then((m) => ({ sources: m.NASHVILLE_BUFFER_SOURCES, reach: m.NASHVILLE_BUFFER_FIXTURE_REACH })) },
   { id: "nashville", load: () => import("./sourcesNashville.js").then((m) => ({ sources: m.NASHVILLE_SOURCES, reach: m.NASHVILLE_FIXTURE_REACH })) },

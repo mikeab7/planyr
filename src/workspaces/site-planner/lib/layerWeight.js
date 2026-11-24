@@ -172,6 +172,9 @@ export const LAYER_TIER = {
   fb_levees: "constraint", fb_brazos_inundation: "constraint", fb_brazos_floodplain: "constraint", fb_mtp_proposed: "constraint",
   fb_lid: "reference", fb_dev_agreements: "reference",
   fb_tirz: "context", fb_mmd: "context",
+  // Waller County (NEW-1, 2026-11-24): the thoroughfare plan and the conservation land bind the parcel; the service areas and districts are look-ups; the county floodway buffer is a constraint drawn by the county.
+  waller_thoroughfare: "constraint", waller_cpc_easements: "constraint", waller_cpc_owned: "constraint", waller_floodway_buffer: "constraint",
+  waller_ccn: "reference", waller_mud: "reference",
   // Metro Nashville (NEW-1, 2026-11-12): zoning, overlays, the downtown code and PUDs are look-ups; the NashvilleNext policy is planning-intent wash.
   tn_nash_zoning: "reference", tn_nash_overlays: "reference", tn_nash_dtc: "reference", tn_nash_pud: "reference", tn_nash_ccm: "context",
   sl_flu: "context",

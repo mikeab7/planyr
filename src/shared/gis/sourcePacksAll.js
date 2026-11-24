@@ -5,6 +5,7 @@ import { OK_SOURCES, OK_FIXTURE_REACH } from "./sourcesOk.js";
 import { TX_CITY_ZONING_SOURCES, TX_CITY_ZONING_FIXTURE_REACH } from "./sourcesTxCityZoning.js";
 import { SUGARLAND_SOURCES, SUGARLAND_FIXTURE_REACH } from "./sourcesSugarLand.js";
 import { FORTBEND_SOURCES, FORTBEND_FIXTURE_REACH } from "./sourcesFortBend.js";
+import { WALLER_SOURCES, WALLER_FIXTURE_REACH } from "./sourcesWaller.js";
 import { NASHVILLE_BUFFER_SOURCES, NASHVILLE_BUFFER_FIXTURE_REACH } from "./sourcesNashvilleBuffers.js";
 import { NASHVILLE_SOURCES, NASHVILLE_FIXTURE_REACH } from "./sourcesNashville.js";
 import { TENNESSEE_SOURCES, TENNESSEE_FIXTURE_REACH } from "./sourcesTennessee.js";
@@ -20,6 +21,7 @@ export const PACKS_ALL = {
   oklahoma: { sources: OK_SOURCES, reach: OK_FIXTURE_REACH },
   txCityZoning: { sources: TX_CITY_ZONING_SOURCES, reach: TX_CITY_ZONING_FIXTURE_REACH },
   sugarland: { sources: SUGARLAND_SOURCES, reach: SUGARLAND_FIXTURE_REACH },
+  waller: { sources: WALLER_SOURCES, reach: WALLER_FIXTURE_REACH },
   fortbend: { sources: FORTBEND_SOURCES, reach: FORTBEND_FIXTURE_REACH },
   nashvilleBuffers: { sources: NASHVILLE_BUFFER_SOURCES, reach: NASHVILLE_BUFFER_FIXTURE_REACH },
   nashville: { sources: NASHVILLE_SOURCES, reach: NASHVILLE_FIXTURE_REACH },

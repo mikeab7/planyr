@@ -2548,7 +2548,7 @@ const JURISDICTION_LAYERS_RAW = {
   waller: {
     label: "Waller County",
     layers: {},
-    note: "Waller County publishes its own ETJ, city-limit and drainage maps (ArcGIS Online); the site's jurisdiction reads them. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Waller County's own layers (proposed thoroughfares, Katy Prairie Conservancy land, water and sewer service areas, municipal utility districts, floodway buffer) sit in the Access, Environmental, Utilities and Flood & Drainage groups, shown only on a Waller site, and its ETJ, city-limit and drainage maps feed the site's jurisdiction. FEMA, wetlands and TxRRC layers above still apply.",
   },
 };
 
