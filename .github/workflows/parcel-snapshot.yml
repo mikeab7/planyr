@@ -51,7 +51,7 @@ jobs:
           cat parcel-snapshot-report.txt
       - name: Open or bump a @claude issue on failure
         if: steps.build.outputs.code != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require("fs");
@@ -82,7 +82,7 @@ jobs:
             }
       - name: Close the issue when green
         if: steps.build.outputs.code == '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;

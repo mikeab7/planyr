@@ -116,7 +116,7 @@ jobs:
           retention-days: 14
       - name: Open or bump a @claude issue on failure
         if: steps.drift.outputs.code != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require("fs");
@@ -158,7 +158,7 @@ jobs:
             }
       - name: Close the e2e issue when green
         if: steps.drift.outputs.code == '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;
