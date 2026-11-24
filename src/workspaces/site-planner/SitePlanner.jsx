@@ -15877,7 +15877,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
         // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
         const tc = cfgOf(el);
-        const count = poly ? estTrailers(area, tc) : trailerStalls(el.w, el.h, tc).count;
+        const count = poly ? estTrailers(area, tc) : (metrics.trimmedCounts && metrics.trimmedCounts.get(el.id)) ?? trailerStalls(el.w, el.h, tc).count;   // NEW-1 (2026-11-24) — a road-trimmed row counts only the trailers it keeps
         // NEW-1 — the COUNT is the line a too-shallow row keeps (keepLine): a 50′ row used to lose its count
         // first and read as unlabelled beside the deeper row under it.
         ({ lines, keepLine } = trailerRowLabel({ depthFt: tc.trailerL, count, est: poly, name, rowDepths: poly ? null : tc.trailerRowDepths }));
@@ -18899,6 +18899,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return { ...x, xsection: next };
     }));
   };
+  /* NEW-1 (road-traced parking, 2026-11-24) — this road's own parking keep-back (ft), beating its class default from Standards → Roads
+     (lib/parkingRoadTrim.js parkSetbackFor). 0 is a real answer ("parking may come right up to this road"); a cleared box (null) removes the key so the
+     road follows its class again. The trim itself is derived from this at render time, never stored. */
+  const setRoadParkSetback = (el, ft) => {
+    const want = ft != null && Number.isFinite(+ft) && +ft >= 0;
+    const cur = el.parkSetbackFt != null && Number.isFinite(+el.parkSetbackFt) ? +el.parkSetbackFt : null;
+    if (!want && cur == null) return;                     // nothing to clear — no history frame for a no-op
+    if (want && cur === +ft) return;
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id) return x;
+      if (want) return { ...x, parkSetbackFt: +ft };
+      const { parkSetbackFt: _drop, ...rest } = x;
+      return rest;
+    }));
+  };
   /* NEW-1 (2026-11-10) — the owner's own length for the taper at one end of a road that meets a narrower (or wider) one end to end
      (lib/roadTaper.js). `end` is "s" | "e"; a blank/zero clears it back to the automatic length. The ONLY stored fact about a taper —
      whether a road tapers at all is derived from the roads, never saved. */
@@ -20636,7 +20652,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Total car / trailer stalls across the selected fields, via the same counters the single panel and the on-plan label use.
   const multiStalls = multiKinds && multiKinds.members.length > 1 ? stallTotals(multiKinds.members, {
     carCount: (el) => { const pc = cfgOf(el); if (el.points) return { count: estStalls(polyArea(el.points), settings), est: true }; return { count: ((roadNet.stallClips && roadNet.stallClips.get(el.id)) || carStalls(el.w, el.h, pc)).count }; },
-    trailerCount: (el) => { const tc = cfgOf(el); return el.points ? { count: estTrailers(polyArea(el.points), tc), est: true } : { count: trailerStalls(el.w, el.h, tc).count }; },
+    trailerCount: (el) => { const tc = cfgOf(el); return el.points ? { count: estTrailers(polyArea(el.points), tc), est: true } : { count: ((roadNet.stallClips && roadNet.stallClips.get(el.id)) || trailerStalls(el.w, el.h, tc)).count }; },
   }) : null;
   const multiStallsShown = !!(multiStalls && (multiStalls.car || multiStalls.trailer));
   /* NEW-1 (B1783376 ×3) — the cluster's OUTLINE is one path in the WIDEST road's style, but each road's face-of-curb stripes are drawn in that road's OWN (this
@@ -24426,7 +24442,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
+                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadParkSetback={setRoadParkSetback} setRoadRowFt={setRoadRowFt} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
                       {cl && <RoadXSectionSection roadCurbOf={roadCurbOf} roadTravel={roadTravel} selEl={selEl} setXsDialog={setXsDialog} travelFt={travelFt} />}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
@@ -24675,7 +24691,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} SF) → <b style={{ color: PAL.ink }}>{f0(area + ba)} SF</b> total<br /></span>;
                     })()}
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || carStalls(selEl.w, selEl.h, cfgOf(selEl))).count)}</b>{poly ? " (est.)" : <> @ {cfgOf(selEl).stallW}′×{cfgOf(selEl).stallDepth}′ {cfgOf(selEl).parkAngle}°, {cfgOf(selEl).aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
-                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
+                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : ((roadNet.stallClips && roadNet.stallClips.get(selEl.id)) || trailerStalls(selEl.w, selEl.h, tc)).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
                       // (B568/B569): doors fall between columns, so the count reflects the column
