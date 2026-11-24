@@ -33,7 +33,8 @@ async function fetchUpstream(fetchImpl, url, timeoutMs = UPSTREAM_TIMEOUT_MS, se
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = ctrl ? setTimer(() => ctrl.abort(), timeoutMs) : null;
   try {
-    return await fetchImpl(url, { headers: UPSTREAM_HEADERS, ...(ctrl ? { signal: ctrl.signal } : {}) });
+    // redirect "error": an allow-listed host that answers 3xx must not carry the relay on to a host nobody listed (SSRF via an open redirect on a government site)
+    return await fetchImpl(url, { headers: UPSTREAM_HEADERS, redirect: "error", ...(ctrl ? { signal: ctrl.signal } : {}) });
   } finally {
     if (timer) clearTimer(timer);
   }
@@ -43,11 +44,28 @@ import { json as baseJson } from "../lib/http.js";
 const json = (obj, status = 200) => baseJson(obj, status, { "cache-control": "no-store" });
 // Manual 302 (not Response.redirect) so the shape is identical across Node/Workers and testable.
 const redirectTo = (url) => new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store" } });
-const bytesResponse = (bytes, contentType) =>
-  new Response(bytes, { status: 200, headers: {
-    "content-type": contentType || "application/octet-stream",
+/* SECURITY (pen-test 2026-11-24): this route is SAME-ORIGIN (planyr.io), and its host allow-list includes whole families (*.arcgis.com, *.usgs.gov …) that
+ * anyone can publish content on. A body served here with the upstream's own Content-Type (text/html, image/svg+xml) would run as a page ON planyr.io, where
+ * the signed-in session lives: a link to /api/gis-cache/svc/<b64 of an attacker's hosted HTML>/x was a one-click account-takeover. So the type is rebuilt from
+ * a short allow-list (JSON, raster images, protobuf, GeoJSON); anything else is served as an opaque download, and every response carries a sandboxing CSP. Pure. */
+const SAFE_TYPES = new Set(["application/json", "application/geo+json", "text/json", "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/tiff", "application/x-protobuf", "application/protobuf"]);
+export function safeContentType(contentType) {
+  const media = String(contentType || "").split(";")[0].trim().toLowerCase();
+  if (SAFE_TYPES.has(media)) return { type: media.startsWith("image/") || media.includes("protobuf") ? media : media + "; charset=utf-8", safe: true };
+  return { type: "application/octet-stream", safe: false };
+}
+const bytesResponse = (bytes, contentType) => {
+  const { type, safe } = safeContentType(contentType);
+  const headers = {
+    "content-type": type,
     "cache-control": "public, max-age=300",
-  } });
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "cross-origin-resource-policy": "same-origin",
+  };
+  if (!safe) headers["content-disposition"] = "attachment";
+  return new Response(bytes, { status: 200, headers });
+};
 
 // Same-origin (no Origin header) or our own hosts only — don't be an open image relay. Pure.
 export function originOk(origin, selfHost) {
