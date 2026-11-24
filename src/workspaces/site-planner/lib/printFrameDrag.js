@@ -84,3 +84,15 @@ export function resizeFrame({ opp, sx, sy, wFt0, hFt0, fp, aspect, snap = false 
 export function orientationForAspect(aspect) {
   return aspect >= 1 ? "landscape" : "portrait";
 }
+
+// B2671333 — the smallest frame of the given aspect that CONTAINS `frame`, sharing its centre.
+// The sheet's plan window has one fixed shape; a frame of any other shape used to be nested
+// "meet" inside it, leaving empty white bands (top/bottom or left/right) between the title
+// block and the picture. Growing the frame to the window's shape instead puts more map in
+// those bands, so the picked area stays fully visible AND stays centred, and the picture fills
+// the window. Pure; an unusable aspect or frame is returned unchanged.
+export function frameToAspect(frame, aspect) {
+  if (!frame || !(aspect > 0) || !(frame.wFt > 0) || !(frame.hFt > 0)) return frame;
+  const wFt = Math.max(frame.wFt, frame.hFt * aspect);
+  return { cx: frame.cx, cy: frame.cy, wFt, hFt: wFt / aspect };
+}
