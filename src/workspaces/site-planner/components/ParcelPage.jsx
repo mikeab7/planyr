@@ -19,6 +19,7 @@ import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js"
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { fetchTaxUnits, tableFromUnits, accountOf, TAX_UNIT_COUNTIES } from "../lib/taxUnitsClient.js";
 import { taxTableForCombined } from "../lib/taxRates.js";
+import { fetchAdamsTable } from "../lib/adamsCoTax.js";
 import { noteStaleRoll } from "../lib/taxRollStale.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
 import { countyRecord, apprAll } from "../lib/appraisal.js";
@@ -240,6 +241,12 @@ function ServerTaxTable({ county, lots, combined, idField }) {
   const [res, setRes] = useState({ key: "", tables: null });
   useEffect(() => {
     let live = true;
+    if (county === "co_adams") { // Colorado: mills from the county's own tax tables (lib/adamsCoTax.js); a hidden/failed answer is null
+      const pins = lots.map((l) => accountOf(l, idField, county) || (l?.attrs && (l.attrs.PIN ?? l.attrs.pin)) || l?.acct);
+      if (!pins.length || pins.some((a) => !a)) { setRes({ key, tables: null }); return undefined; }
+      Promise.all(pins.map((a) => fetchAdamsTable(a))).then((rs) => { if (live) setRes({ key, tables: rs.map((t) => (t && !t.hidden ? t : null)) }); });
+      return () => { live = false; };
+    }
     if (!TAX_UNIT_COUNTIES.has(county) || !accts.length || accts.some((a) => !a)) { setRes({ key, tables: null }); return undefined; }
     Promise.all(accts.map((a) => fetchTaxUnits(county, a))).then((rs) => { if (live) setRes({ key, tables: rs.map(tableFromUnits) }); });
     return () => { live = false; };
