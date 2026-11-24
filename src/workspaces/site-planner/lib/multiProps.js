@@ -43,8 +43,10 @@ export function readShared(members, field, ctx) {
 const rect = (el) => !el.points;
 const num = (id, label, unit, spec) => ({ id, label, unit, kind: "num", applies: rect, ...spec });
 
+// `assemblyWide`: the planner's rotate turns the member's WHOLE bonded assembly (building + every field/row bonded to
+// it), so a bulk write turns each assembly ONCE (applyBulk) — two parking fields on one building must not turn it twice.
 const ROTATION = num("rotation", "Rotation", "°", {
-  min: 0, max: 360, step: 1, coarse: 15,
+  min: 0, max: 360, step: 1, coarse: 15, assemblyWide: true,
   read: (el) => Math.round(((el.rot || 0) % 360 + 360) % 360),
   write: (ops, el, v) => ops.rotateTo(el, ((v % 360) + 360) % 360),
 });
@@ -98,9 +100,15 @@ export function fieldsFor(type) {
 /** Run a field write over every applicable, UNLOCKED member. Returns { done, skippedLocked }. */
 export function applyBulk(members, field, value, ops) {
   let done = 0, skippedLocked = 0;
+  const turnedRoots = new Set(); // assembly roots an `assemblyWide` field already moved in this batch
   for (const el of members) {
     if (!field.applies(el)) continue;
     if (el.locked) { skippedLocked++; continue; }
+    if (field.assemblyWide) {
+      const root = el.attachedTo || el.id;
+      if (turnedRoots.has(root)) continue; // already turned with an earlier member of the same assembly
+      turnedRoots.add(root);
+    }
     field.write(ops, el, value);
     done++;
   }
