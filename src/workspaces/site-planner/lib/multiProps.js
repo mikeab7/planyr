@@ -114,3 +114,17 @@ export function applyBulk(members, field, value, ops) {
   }
   return { done, skippedLocked };
 }
+
+/** Total stalls across a multi-selection: { car, trailer } each { count, n, est } or null when none of that kind is selected.
+ *  `ctx.carCount(el)` / `ctx.trailerCount(el)` return { count, est } for ONE member through the SAME counters the single-element
+ *  panel and the on-plan label read, so the total can never disagree with the sum of what each row shows. Pure, recomputed per render. */
+export function stallTotals(members, ctx) {
+  const tally = (type, counter) => {
+    const ms = (members || []).filter((m) => m.type === type && !m.dogEar);
+    if (!ms.length) return null;
+    let count = 0, est = false;
+    for (const m of ms) { const r = counter(m); count += r.count || 0; if (r.est) est = true; }
+    return { count, n: ms.length, est };
+  };
+  return { car: tally("parking", ctx.carCount), trailer: tally("trailer", ctx.trailerCount) };
+}

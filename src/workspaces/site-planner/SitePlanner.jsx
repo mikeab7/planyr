@@ -521,7 +521,7 @@ import { MapContextMenu, OverlayContextMenu, ParcelMenuHost } from "./components
 import { LeftPanelBody } from "./components/LeftPanelBody.jsx";
 import { CalloutInspector, DockLayerInspector, DriveInRampInspector, MeasureInspector, MultiStyleInspector } from "./components/ElementInspectors.jsx";
 import { MultiPropsInspector } from "./components/MultiPropsInspector.jsx";
-import { selectionKinds, fieldsFor, applyBulk } from "./lib/multiProps.js";
+import { selectionKinds, fieldsFor, applyBulk, stallTotals } from "./lib/multiProps.js";
 import { BuildingInspectorHeader, RoadInspectorHeader } from "./components/InspectorHeaders.jsx";
 import { RoadSizeSection, RoadXSectionSection, RoadLabelSection, RoadIntersectionSection, RoadTaperSection, RoadRadiusWarning, RoadCurveAtVertex } from "./components/RoadInspectorSections.jsx";
 import { useDrainageCheck } from "./lib/useDrainageCheck.js";
@@ -20625,6 +20625,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* the body is lib/roadNetBuild.js `roadNetSteps` (round 5, B2233521) — the SAME steps the plan-open warm-up drives in slices; hidden roads are filtered THERE (`elHidden(hiddenGroups, x)`) */
     return driveSteps(roadNetSteps({ els, settings, hiddenGroups, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts }));
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
+  // Total car / trailer stalls across the selected fields, via the same counters the single panel and the on-plan label use.
+  const multiStalls = multiKinds && multiKinds.members.length > 1 ? stallTotals(multiKinds.members, {
+    carCount: (el) => { const pc = cfgOf(el); if (el.points) return { count: estStalls(polyArea(el.points), settings), est: true }; return { count: ((roadNet.stallClips && roadNet.stallClips.get(el.id)) || carStalls(el.w, el.h, pc)).count }; },
+    trailerCount: (el) => { const tc = cfgOf(el); return el.points ? { count: estTrailers(polyArea(el.points), tc), est: true } : { count: trailerStalls(el.w, el.h, tc).count }; },
+  }) : null;
+  const multiStallsShown = !!(multiStalls && (multiStalls.car || multiStalls.trailer));
   /* NEW-1 (B1783376 ×3) — the cluster's OUTLINE is one path in the WIDEST road's style, but each road's face-of-curb stripes are drawn in that road's OWN (this
    * file's stripe pass), so a drive narrower than — or styled differently from — the trunk it joins had its arc outline and its arc stripe in two different weights /
    * colours: the owner's "the right-hand arc is crisper/heavier than the straight edge". When the roads of a cluster do not all share one edge style, each piece of the
@@ -24058,11 +24064,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}
-          {multiStyleable && multiPropFields.length > 0 && <MultiPropsInspector
+          {multiStyleable && (multiPropFields.length > 0 || multiStallsShown) && <MultiPropsInspector
                   members={multiKinds.members}
                   type={multiKinds.type}
                   fields={multiPropFields}
                   ctx={multiPropCtx}
+                  stalls={multiStalls}
                   onWrite={writeMultiProp}
                   muted={PAL.muted}
                 />}
