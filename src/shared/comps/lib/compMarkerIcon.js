@@ -10,6 +10,7 @@ const TYPE_COLOR = {
   land: "#8a6d3b", // tan/brown — raw land
   building_sale: "#2f6fb0", // blue — a built asset changing hands
   lease: "#3f8f5f", // green — an occupancy deal
+  under_construction: "#d9822b", // orange — competing supply, not a transaction
 };
 
 export function compMarkerColor(compType) {
@@ -48,6 +49,12 @@ export function compMarkerSvg(compType, { selected = false } = {}) {
     `transform="rotate(45 ${cx} ${cy})" fill="#fff" stroke="none"/>` +
     `<rect x="${cx - r + ring}" y="${cy - r + ring}" width="${(r - ring) * 2}" height="${(r - ring) * 2}" rx="2" ` +
     `transform="rotate(45 ${cx} ${cy})" fill="${col}" stroke="${col}" stroke-width="0.6"/>` +
+    // A building still being built reads apart from every deal by SHAPE, not only colour: a
+    // dashed white ring inside the tag (the "hatched" look of a construction site).
+    (compType === "under_construction"
+      ? `<rect x="${cx - r + ring * 2.2}" y="${cy - r + ring * 2.2}" width="${(r - ring * 2.2) * 2}" height="${(r - ring * 2.2) * 2}" rx="1" ` +
+        `transform="rotate(45 ${cx} ${cy})" fill="none" stroke="#fff" stroke-width="0.9" stroke-dasharray="1.6 1.4"/>` // design-exempt: map-marker keyline white, the same white as the tag's backing rect
+      : "") +
     `</svg>`
   );
 }

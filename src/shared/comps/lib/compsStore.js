@@ -26,7 +26,8 @@ export const SELECT_COLS =
   "land_size_unit,bldg_price,bldg_size_sf,clear_height_ft,year_built,bldg_noi,bldg_cap_rate," +
   "lease_rate,lease_rate_period,lease_rate_expense,lease_ti,lease_opex,lease_term,lease_size_sf," +
   "power_amps,power_volts,power_phase,dock_doors," +
-  "lease_free_rent_months,lease_escalation_pct,comp_party_provider,comp_party_acquirer,created_at,updated_at";
+  "lease_free_rent_months,lease_escalation_pct,comp_party_provider,comp_party_acquirer," +
+  "uc_status,uc_delivery_kind,uc_start_date,uc_delivery_date,uc_preleased_pct,created_at,updated_at";
 // Trash-view select — the same shape as SELECT_COLS plus `deleted_at`, so a "Recently deleted"
 // row can reuse every existing display helper (compHeadline, useCompLocationText) rather than a
 // second, narrower row shape (comps.sql's TABLE is small — no pagination cost either way).

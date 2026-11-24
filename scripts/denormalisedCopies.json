@@ -424,14 +424,18 @@
     "recovery_20261008_combined_madefrom_snapshot": [
       "site_id"
     ],
-    "ops_ingest_tokens": ["label"],
+    "ops_ingest_tokens": [
+      "label"
+    ],
     "signup_attempts_log": [
       "email_domain"
     ],
     "auth_email_link_log": [
       "email_key"
     ],
-    "cad_taxunit_shards": ["county"],
+    "cad_taxunit_shards": [
+      "county"
+    ],
     "comp_import_drafts": [
       "raw_name",
       "status"
@@ -446,7 +450,12 @@
       "project_id",
       "site_plan_overlay_id",
       "site_plan_point",
-      "title"
+      "title",
+      "uc_status",
+      "uc_delivery_kind",
+      "uc_start_date",
+      "uc_delivery_date",
+      "uc_preleased_pct"
     ],
     "map_notes": [
       "anchor_kind",

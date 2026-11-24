@@ -2493,7 +2493,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         const { size, anchor } = compMarkerSize(false);
         const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
-        const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${c.compDate || ""}`;
+        // A building under construction has no executed date: its tooltip says when it delivers instead.
+        const tipWhen = c.compType === "under_construction" ? (c.ucDeliveryDate ? `delivers ${c.ucDeliveryDate}` : "") : (c.compDate || "");
+        const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${tipWhen}`;
         if (!selectMode && !placingCompPin) {
           // B711329 — right-click a comp marker (any type, not just lease) to export its owning
           // site record to Google Earth. Same "select mode wins every click" discipline the site

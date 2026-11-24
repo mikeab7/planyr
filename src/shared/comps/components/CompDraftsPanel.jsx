@@ -16,7 +16,7 @@ import {
 } from "../lib/comps.js";
 import { draftTitleFor } from "../lib/compDrafts.js";
 
-const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
+const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease", under_construction: "Under construction" };
 
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12, borderRadius: 6, fontFamily: "inherit",

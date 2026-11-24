@@ -14,7 +14,26 @@
 import { formatDateDisplay } from "./compDates.js";
 import { SQFT_PER_ACRE } from "../../units/areaUnits.js";
 
-export const COMP_TYPES = ["land", "building_sale", "lease"];
+export const COMP_TYPES = ["land", "building_sale", "lease", "under_construction"];
+
+/* ---- UNDER CONSTRUCTION (competing supply, owner ask 2026-11-24) ------------------------------
+ * A fourth record type in the SAME `comps` table (`db/comps_under_construction.sql`): a building
+ * being built, logged beside the transactions. It is never a transaction: it has no executed date,
+ * and no average, $/SF headline or lease summary ever includes it (every summariser filters on its
+ * own compType). Developer = partyProvider, Tenant = partyAcquirer, size = bldgSizeSf, asking rate
+ * = the lease rate fields (period still required with a rate). */
+export const UC_STATUSES = [
+  { value: "planned", label: "Planned" },
+  { value: "under_construction", label: "Under construction" },
+  { value: "delivered", label: "Delivered" },
+];
+export const UC_DELIVERY_KINDS = [
+  { value: "spec", label: "Spec" },
+  { value: "bts", label: "Build-to-suit" },
+];
+export const isUnderConstruction = (comp) => comp?.compType === "under_construction";
+export const ucStatusLabel = (v) => UC_STATUSES.find((o) => o.value === v)?.label || null;
+export const ucKindLabel = (v) => UC_DELIVERY_KINDS.find((o) => o.value === v)?.label || null;
 export const LEASE_PERIODS = ["annual", "monthly"];
 export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
 
@@ -445,6 +464,7 @@ export function compDateLabel(compDate) {
 export function partyLabels(compType) {
   if (compType === "land") return { provider: "Seller", acquirer: "Buyer" };
   if (compType === "building_sale") return { provider: "Seller", acquirer: "Buyer/User" };
+  if (compType === "under_construction") return { provider: "Developer", acquirer: "Tenant" };
   return { provider: "Owner/Developer", acquirer: "Tenant" }; // lease, and the honest default
 }
 
@@ -511,6 +531,23 @@ export function compFieldRows(comp, displayPeriod, opts) {
     // least two were ever known. Shown together, in the same order Michael specified them.
     if (comp?.bldgNoi != null) push("noi", "NOI", fmtMoney(comp.bldgNoi));
     if (comp?.bldgCapRate != null) push("capRate", "Cap rate", `${(Number(comp.bldgCapRate) * 100).toFixed(2)}%`);
+  } else if (comp?.compType === "under_construction") {
+    const status = ucStatusLabel(comp?.ucStatus);
+    push("ucStatus", "Status", status);
+    push("ucKind", "Delivery type", ucKindLabel(comp?.ucDeliveryKind));
+    if (comp?.bldgSizeSf != null) push("size", "Building size", `${Number(comp.bldgSizeSf).toLocaleString()} SF`);
+    if (comp?.clearHeightFt != null) push("clearHeight", "Clear height", `${Number(comp.clearHeightFt).toLocaleString()} ft`);
+    if (comp?.dockDoors != null) push("dockDoors", "Dock doors", Number(comp.dockDoors).toLocaleString());
+    push("power", "Power", powerLabel(comp));
+    if (comp?.ucStartDate) push("ucStart", "Construction start", fmtCompDate(comp.ucStartDate));
+    if (comp?.ucDeliveryDate) push("ucDelivery", comp?.ucStatus === "delivered" ? "Delivered" : "Expected delivery", fmtCompDate(comp.ucDeliveryDate));
+    if (comp?.ucPreleasedPct != null) push("ucPreleased", "Pre-leased", `${Number(comp.ucPreleasedPct).toLocaleString()}%`);
+    if (comp?.leaseRate != null) {
+      const disp = leaseRateDisplayFor(comp, displayPeriod);
+      const period = disp.period === "monthly" ? "/mo" : disp.period === "annual" ? "/yr" : "";
+      const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
+      push("rate", "Asking rate", `$${disp.formatted}/SF${period}${basis}`);
+    }
   } else if (comp?.compType === "lease") {
     if (comp?.leaseRate != null) {
       const disp = leaseRateDisplayFor(comp, displayPeriod);
@@ -577,6 +614,7 @@ export function compFieldRows(comp, displayPeriod, opts) {
 export function compBadgeLabel(compType) {
   if (compType === "land") return "LAND";
   if (compType === "building_sale") return "SALE";
+  if (compType === "under_construction") return "UNDER CONSTRUCTION";
   return "LEASE";
 }
 
@@ -586,6 +624,7 @@ export function compBadgeLabel(compType) {
 const RECORD_DEAL_ORDER = {
   lease: ["rate", "term", "escalation", "freeRent", "ti", "opex", "commencement", "date", "netEffective", "opexNormalized", "dateEntered"],
   building_sale: ["price", "psf", "capRate", "noi", "date", "dateEntered"],
+  under_construction: ["ucStatus", "ucKind", "ucStart", "ucDelivery", "ucPreleased", "rate", "dateEntered"],
   land: ["price", "psf", "size", "date", "dateEntered"],
 };
 const RECORD_BUILDING_KEYS = ["size", "clearHeight", "yearBuilt", "parcelApn"];
@@ -641,6 +680,11 @@ export function compHeadline(comp, displayPeriod) {
     }
     return "Lease comp";
   }
+  if (comp?.compType === "under_construction") {
+    const bits = [ucStatusLabel(comp.ucStatus) || "Under construction"];
+    if (comp.bldgSizeSf != null) bits.push(`${Number(comp.bldgSizeSf).toLocaleString()} SF`);
+    return bits.join(" · ");
+  }
   return "Comp";
 }
 
@@ -671,13 +715,15 @@ export function validateComp(draft) {
   // NEW-1 (round 3, 2026-10-19) — only when a RATE is present: no rate, nothing to pick a period for
   // (`comps_lease_rate_requires_period` is `lease_rate is null or period is not null`).
   const hasRate = draft?.leaseRate !== "" && draft?.leaseRate != null && Number.isFinite(Number(draft.leaseRate));
-  if (draft?.compType === "lease" && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
+  if ((draft?.compType === "lease" || draft?.compType === "under_construction") && hasRate && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
   // db/comps_power_docks.sql: integer columns, and phase is 1 or 3 — refused here in plain words
   // instead of surfacing the raw Postgres text.
   const blank = (v) => v === "" || v == null;
   for (const [k, label] of [["powerAmps", "Power (amps)"], ["powerVolts", "Power (volts)"], ["dockDoors", "Dock doors"]]) {
     if (!blank(draft?.[k]) && !(Number.isInteger(Number(draft[k])) && Number(draft[k]) >= 0)) errors.push(`${label} must be a whole number.`);
   }
+  if (!blank(draft?.ucPreleasedPct) && !(Number(draft.ucPreleasedPct) >= 0 && Number(draft.ucPreleasedPct) <= 100)) errors.push("Pre-leased must be between 0 and 100%.");
+  if (!blank(draft?.ucStartDate) && !blank(draft?.ucDeliveryDate) && String(draft.ucDeliveryDate) < String(draft.ucStartDate)) errors.push("Delivery can't be before the construction start.");
   if (!blank(draft?.powerPhase) && ![1, 3].includes(Number(draft.powerPhase))) errors.push("Power phase must be 1 or 3.");
   return errors;
 }
@@ -759,6 +805,12 @@ export function rowToComp(r) {
     leaseEscalationPct: r.lease_escalation_pct != null ? Number(r.lease_escalation_pct) : null,
     partyProvider: r.comp_party_provider || null,
     partyAcquirer: r.comp_party_acquirer || null,
+    // Under-construction facts (`db/comps_under_construction.sql`) — null on every other type.
+    ucStatus: r.uc_status || null,
+    ucDeliveryKind: r.uc_delivery_kind || null,
+    ucStartDate: r.uc_start_date || null,
+    ucDeliveryDate: r.uc_delivery_date || null,
+    ucPreleasedPct: r.uc_preleased_pct != null ? Number(r.uc_preleased_pct) : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -804,6 +856,7 @@ export function emptyDraft(anchor) {
     // over this default — see compParse.js's BASIS_RE/genericToDraft.
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
+    ucStatus: "", ucDeliveryKind: "", ucStartDate: "", ucDeliveryDate: "", ucPreleasedPct: "",
   };
 }
 
@@ -905,6 +958,9 @@ export function draftToComp(d) {
     // the line below already did this correctly; compDate now matches it.
     compDate: d.compDate || null,
     leaseCommencementDate: d.leaseCommencementDate || null,
+    ucStatus: d.ucStatus || null, ucDeliveryKind: d.ucDeliveryKind || null,
+    ucStartDate: d.ucStartDate || null, ucDeliveryDate: d.ucDeliveryDate || null,
+    ucPreleasedPct: num(d.ucPreleasedPct),
   };
 }
 
@@ -930,6 +986,8 @@ export function compToDraft(c) {
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
     leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
     leaseEscalationPct: str(c.leaseEscalationPct), leaseOpex: str(c.leaseOpex),
+    ucStatus: c.ucStatus || "", ucDeliveryKind: c.ucDeliveryKind || "",
+    ucStartDate: c.ucStartDate || "", ucDeliveryDate: c.ucDeliveryDate || "", ucPreleasedPct: str(c.ucPreleasedPct),
   };
 }
 
@@ -978,6 +1036,36 @@ export function compToRow(comp) {
     lease_opex: comp.leaseOpex ?? null,
     comp_party_provider: comp.partyProvider || null,
     comp_party_acquirer: comp.partyAcquirer || null,
+    uc_status: comp.ucStatus || null,
+    uc_delivery_kind: comp.ucDeliveryKind || null,
+    uc_start_date: comp.ucStartDate || null,
+    uc_delivery_date: comp.ucDeliveryDate || null,
+    uc_preleased_pct: comp.ucPreleasedPct ?? null,
     updated_at: new Date().toISOString(),
   };
+}
+
+/* ---- converting a DELIVERED building into a regular record --------------------------------------
+ * The only way an under-construction record becomes a transaction. Pure: returns the draft for the
+ * new record, never writes. `to` is "lease" (the usual case: it delivered and a tenant leased it) or
+ * "building_sale". What carries: location/anchor, title, notes, site link, team, the building facts,
+ * the developer (as landlord / seller), the tenant, and the asking rate as the lease rate (so it is
+ * visibly the same figure, to be corrected to the signed one). What is dropped: the uc_* fields. The
+ * executed date is left BLANK — never guessed (comp_date is a fact about the deal). */
+export function convertDeliveredComp(comp, to = "lease") {
+  const target = to === "building_sale" ? "building_sale" : "lease";
+  const d = compToDraft(comp);
+  const out = {
+    ...d,
+    compType: target,
+    compDate: "",
+    ucStatus: "", ucDeliveryKind: "", ucStartDate: "", ucDeliveryDate: "", ucPreleasedPct: "",
+  };
+  if (target === "lease") {
+    out.leaseSizeSf = d.bldgSizeSf;
+    out.bldgSizeSf = "";
+  } else {
+    out.leaseRate = ""; out.leaseRatePeriod = "";
+  }
+  return out;
 }

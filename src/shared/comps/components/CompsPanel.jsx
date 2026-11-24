@@ -28,6 +28,7 @@ import {
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft, anchorCountyFlag,
   resolveCapTriangle, sortCompsByRecency, compDateLabel, anchorTeamConflict, compRecordSections, compBadgeLabel,
+  UC_STATUSES, UC_DELIVERY_KINDS, convertDeliveredComp,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { resolveCompFocus, COMP_FOCUS_MISSING_NOTICE } from "../lib/compFocus.js";
@@ -175,7 +176,7 @@ function useOwningSiteBinStatus(projectId, projects, trackedSites) {
   return info;
 }
 
-const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
+const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease", under_construction: "Under construction" };
 
 const inputStyle = {
   width: "100%", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
@@ -293,9 +294,9 @@ function RecordBadge({ type }) {
   return (
     <span data-testid="comp-record-badge" style={{
       display: "inline-flex", alignItems: "center", gap: 6, fontSize: FONT_SIZE.control, fontWeight: 700,
-      textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--accent-site-text)",
+      textTransform: "uppercase", letterSpacing: "0.1em", color: type === "under_construction" ? "var(--text-primary)" : "var(--accent-site-text)",
     }}>
-      <span aria-hidden="true" style={{ width: 8, height: 8, background: "var(--accent-site)", transform: "rotate(45deg)" }} />
+      <span aria-hidden="true" style={{ width: 8, height: 8, background: type === "under_construction" ? compMarkerColor(type) : "var(--accent-site)", transform: "rotate(45deg)" }} />
       {compBadgeLabel(type)}
     </span>
   );
@@ -321,7 +322,7 @@ function sourceOverlayOf(comp, overlaysById) {
   return (overlaysById && overlaysById[comp.anchor.sitePlanOverlayId]) || null;
 }
 
-export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice, projects, trackedSites, compsRatePeriod }) {
+export function CompDetail({ comp, canEdit, onEdit, onConvert, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice, projects, trackedSites, compsRatePeriod }) {
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
   const locationText = useCompLocationText(comp.anchor, overlaysById);
@@ -369,8 +370,16 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
             }}>
               <KebabIcon />
             </button>
-            <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuAnchorRef} placement="below-right" width={150}>
+            <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuAnchorRef} placement="below-right" width={comp.compType === "under_construction" ? 210 : 150}>
               <MenuItem onClick={() => { setMenuOpen(false); onEdit(comp); }}>Edit</MenuItem>
+              {/* A DELIVERED building becomes a regular record in place (same row, same site): the form opens
+                  pre-filled for the signed lease / the sale, executed date blank, so nothing is guessed. */}
+              {comp.compType === "under_construction" && comp.ucStatus === "delivered" && onConvert && (
+                <>
+                  <MenuItem onClick={() => { setMenuOpen(false); onConvert(comp, "lease"); }}>Convert to lease record</MenuItem>
+                  <MenuItem onClick={() => { setMenuOpen(false); onConvert(comp, "building_sale"); }}>Convert to sale record</MenuItem>
+                </>
+              )}
               <MenuItem onClick={() => { setMenuOpen(false); setConfirmingDelete(true); }} style={{ color: "var(--danger-text)" }}>Delete</MenuItem>
             </AnchoredMenu>
           </div>
@@ -445,9 +454,11 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
           NEW-3 (owner chat, 2026-09-08) — relabeled "Executed" (was "Executed date"), matching
           the detail view's row label exactly, so the two surfaces never again disagree on the
           name for this field. */}
-      <Field label="Executed" stacked>
-        <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
-      </Field>
+      {draft.compType !== "under_construction" && (
+        <Field label="Executed" stacked>
+          <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
+        </Field>
+      )}
       {draft.compType === "lease" && (
         <Field label="Commencement" stacked>
           <input type="date" value={draft.leaseCommencementDate} onChange={set("leaseCommencementDate")} style={inputStyle} />
@@ -476,6 +487,43 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
           listboxId="comp-party-acquirer-suggest"
         />
       </Field>
+
+      {draft.compType === "under_construction" && (
+        <>
+          {/* Competing supply (`db/comps_under_construction.sql`): never a transaction, so no price,
+              no executed date. Asking rate keeps the same period rule as a lease rate. */}
+          <Field label="Status" stacked>
+            <select value={draft.ucStatus} onChange={set("ucStatus")} style={inputStyle}>
+              <option value="">—</option>
+              {UC_STATUSES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Spec or build-to-suit" stacked>
+            <select value={draft.ucDeliveryKind} onChange={set("ucDeliveryKind")} style={inputStyle}>
+              <option value="">—</option>
+              {UC_DELIVERY_KINDS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Building SF" stacked><NumField value={draft.bldgSizeSf} onChange={setVal("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Construction start" stacked><input type="date" value={draft.ucStartDate} onChange={set("ucStartDate")} style={inputStyle} /></Field>
+          <Field label="Expected delivery" stacked><input type="date" value={draft.ucDeliveryDate} onChange={set("ucDeliveryDate")} style={inputStyle} /></Field>
+          <Field label="Pre-leased (%)" stacked><input type="number" min="0" max="100" value={draft.ucPreleasedPct} onChange={set("ucPreleasedPct")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Asking rate ($/SF)" stacked>
+            <span style={{ display: "flex", gap: 6 }}>
+              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 60, flex: "none" }}>
+                <option value="">?</option>
+                {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
+              </select>
+            </span>
+          </Field>
+          <Field label="Basis" stacked>
+            <select value={draft.leaseRateExpense} onChange={set("leaseRateExpense")} style={inputStyle}>
+              {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
+            </select>
+          </Field>
+        </>
+      )}
 
       {draft.compType === "land" && (
         <>
@@ -595,7 +643,7 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
         </>
       )}
 
-      {(draft.compType === "building_sale" || draft.compType === "lease") && (
+      {(draft.compType === "building_sale" || draft.compType === "lease" || draft.compType === "under_construction") && (
         <>
           <Field label="Power (amps)" stacked><NumField value={draft.powerAmps} onChange={setVal("powerAmps")} placeholder="optional, e.g. 2000" style={inputStyle} /></Field>
           <Field label="Power (volts)" stacked><NumField value={draft.powerVolts} onChange={setVal("powerVolts")} placeholder="optional, e.g. 480" style={inputStyle} /></Field>
@@ -1055,6 +1103,7 @@ export default function CompsPanel({
 
   const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); setPinNotice(null); };
   const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setAssignNotice(null); setView("form"); };
+  const openConvert = (c, to) => { setDraft(convertDeliveredComp(c, to)); setErrors([]); setAssignNotice(null); setView("form"); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
 
   const save = async () => {
@@ -1395,7 +1444,7 @@ export default function CompsPanel({
         )}
         {!loading && view === "detail" && activeComp && (
           <CompDetail
-            comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
+            comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onConvert={openConvert} onDelete={remove} onBack={() => setView("list")}
             overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
             assignNotice={assignNotice} onDismissAssignNotice={() => setAssignNotice(null)}
             projects={projects} trackedSites={trackedSites} compsRatePeriod={compsRatePeriod}

@@ -88,7 +88,7 @@ import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 // title — where the comp IS) and BUILDING (clear height, year built — physical facts about the
 // improvement, not the deal); Notes left the sheet entirely as its own column (see NOTES_COLUMN
 // below) so NOTES drops out of the band list too. Banding only — no column's meaning moved.
-export const GROUPS = ["TYPE", "LOCATION", "BUILDING", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+export const GROUPS = ["TYPE", "LOCATION", "BUILDING", "CONSTRUCTION", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
 
 // HARDENING-10 — leaseTerm's cell boundary: the stored field stays free text (a real deal can be
 // "10 yr + 2x5 options", which a bare-months cell can't hold) but the SHEET CELL itself only ever
@@ -109,7 +109,17 @@ export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
   { value: "building_sale", label: "Bldg Sale" },
   { value: "lease", label: "Lease" },
+  { value: "under_construction", label: "Under constr." },
 ];
+export const UC_STATUS_OPTIONS = [
+  { value: "planned", label: "Planned" },
+  { value: "under_construction", label: "Building" },
+  { value: "delivered", label: "Delivered" },
+];
+export const UC_KIND_OPTIONS = [{ value: "spec", label: "Spec" }, { value: "bts", label: "BTS" }];
+// Types whose Size column is the BUILDING's square feet (`bldgSizeSf`), and that carry building specs.
+const isBldgSizeType = (t) => t === "building_sale" || t === "under_construction";
+const hasBldgSpecs = (t) => t === "building_sale" || t === "lease" || t === "under_construction";
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
 export const BASIS_OPTIONS = [{ value: "nnn", label: "NNN" }, { value: "gross", label: "GROSS" }];
 export const UNIT_OPTIONS = [{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }];
@@ -223,7 +233,8 @@ export const SHEET_COLUMNS = [
       // typed override states explicitly, not the common case. Per (rate period, monthly vs
       // annual) is NOT given a default here or anywhere else — that ambiguity is a real 12x
       // error risk with no safe guess, unlike Basis, so it stays genuinely blank.
-      if (v === "lease" && !d.leaseRateExpense) next.leaseRateExpense = "nnn";
+      if ((v === "lease" || v === "under_construction") && !d.leaseRateExpense) next.leaseRateExpense = "nnn";
+      if (v === "under_construction" && !d.ucStatus) next.ucStatus = "under_construction";
       return next;
     },
     flagKey: () => "compType",
@@ -258,9 +269,9 @@ export const SHEET_COLUMNS = [
   {
     key: "size", label: "Size", group: "BUILDING", width: 62, align: "right", kind: "number",
     appliesTo: () => true,
-    getValue: (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" ? d.bldgSizeSf : d.leaseSizeSf),
-    setValue: (d, v) => (d.compType === "land" ? { ...d, landSizeValue: v } : d.compType === "building_sale" ? { ...d, bldgSizeSf: v } : { ...d, leaseSizeSf: v }),
-    flagKey: (d) => (d.compType === "land" ? "landSizeValue" : d.compType === "building_sale" ? "bldgSizeSf" : "leaseSizeSf"),
+    getValue: (d) => (d.compType === "land" ? d.landSizeValue : isBldgSizeType(d.compType) ? d.bldgSizeSf : d.leaseSizeSf),
+    setValue: (d, v) => (d.compType === "land" ? { ...d, landSizeValue: v } : isBldgSizeType(d.compType) ? { ...d, bldgSizeSf: v } : { ...d, leaseSizeSf: v }),
+    flagKey: (d) => (d.compType === "land" ? "landSizeValue" : isBldgSizeType(d.compType) ? "bldgSizeSf" : "leaseSizeSf"),
   },
   {
     // B1119282 (×2, owner live-click measurement, 2026-09-03) — REVERSES the earlier "fixed,
@@ -301,11 +312,11 @@ export const SHEET_COLUMNS = [
   // B1519296 (owner mockup pick) — moved out of PROPERTY into its own BUILDING band: clear height
   // and year built are physical characteristics of the improvement, not the deal's location, and
   // grouping them with the street address read as if they were the same kind of fact.
-  simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "powerAmps", label: "Power (A)", fullLabel: "Power (amps)", group: "BUILDING", width: 64, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "powerVolts", label: "Volts", fullLabel: "Power (volts)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "powerPhase", label: "Phase", fullLabel: "Power (phase: 1 or 3)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "dockDoors", label: "Docks", fullLabel: "Dock doors", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: hasBldgSpecs }),
+  simpleColumn({ key: "powerAmps", label: "Power (A)", fullLabel: "Power (amps)", group: "BUILDING", width: 64, align: "right", kind: "number", appliesTo: hasBldgSpecs }),
+  simpleColumn({ key: "powerVolts", label: "Volts", fullLabel: "Power (volts)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: hasBldgSpecs }),
+  simpleColumn({ key: "powerPhase", label: "Phase", fullLabel: "Power (phase: 1 or 3)", group: "BUILDING", width: 52, align: "right", kind: "number", noThousands: true, appliesTo: hasBldgSpecs }),
+  simpleColumn({ key: "dockDoors", label: "Docks", fullLabel: "Dock doors", group: "BUILDING", width: 50, align: "right", kind: "number", noThousands: true, appliesTo: hasBldgSpecs }),
   simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.
@@ -321,7 +332,14 @@ export const SHEET_COLUMNS = [
   // carry `required: true` any more or the mobile sheet's "Needed to save"/footer machinery
   // (compMobileLayout.js, sourced from this flag) re-demands it on its own, contradicting the
   // very save gate it's supposed to describe.
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy" }),
+  // Executed is a fact about a TRANSACTION: an under-construction record has none (it carries start/delivery dates instead).
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t !== "under_construction" }),
+  // CONSTRUCTION — competing supply (`db/comps_under_construction.sql`); applies to the under-construction type only.
+  simpleColumn({ key: "ucStatus", label: "Status", group: "CONSTRUCTION", width: 76, align: "left", kind: "select", options: UC_STATUS_OPTIONS, appliesTo: (t) => t === "under_construction" }),
+  simpleColumn({ key: "ucDeliveryKind", label: "Spec/BTS", fullLabel: "Spec or build-to-suit", group: "CONSTRUCTION", width: 66, align: "left", kind: "select", options: UC_KIND_OPTIONS, appliesTo: (t) => t === "under_construction" }),
+  simpleColumn({ key: "ucStartDate", label: "Start", fullLabel: "Construction start", group: "CONSTRUCTION", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t === "under_construction" }),
+  simpleColumn({ key: "ucDeliveryDate", label: "Delivery", fullLabel: "Expected delivery", group: "CONSTRUCTION", width: 64, align: "right", kind: "date", editHint: "mm/dd/yy", appliesTo: (t) => t === "under_construction" }),
+  simpleColumn({ key: "ucPreleasedPct", label: "Pre-lsd (%)", fullLabel: "Pre-leased (%)", group: "CONSTRUCTION", width: 70, align: "right", kind: "number", appliesTo: (t) => t === "under_construction" }),
   simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 68, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
   {
     // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",
@@ -376,9 +394,9 @@ export const SHEET_COLUMNS = [
 
   // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
   // because escalation IS rent, over time — never a generic "term".
-  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" || t === "under_construction" }),
+  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" || t === "under_construction" }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" || t === "under_construction" }),
   // B843664 (owner: "add opex as an optional input") — fixed at $/SF/YR regardless of the rate's
   // own Per (mo/yr): industrial OpEx is conventionally quoted $/SF/yr even when rent isn't, and a
   // second period selector wasn't worth the friction. Optional in every sense — never required,
