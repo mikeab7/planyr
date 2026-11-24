@@ -29,9 +29,10 @@ async function withBuildingSelected(page) {
 }
 
 test.describe("Q arms Callout on the first press around number boxes", () => {
-  test("after typing a value and pressing Enter", async ({ page }) => {
+  test("after typing a value and pressing Enter: the box is left and Q arms Callout on the first press", async ({ page }) => {
     const { field } = await withBuildingSelected(page);
     await field.click(); await field.fill("300"); await page.keyboard.press("Enter");
+    expect(await page.evaluate(() => document.activeElement.tagName)).not.toBe("INPUT");
     await page.keyboard.press("q");
     await expect.poll(() => calloutArmed(page)).toBe("true");
   });
@@ -48,6 +49,15 @@ test.describe("Q arms Callout on the first press around number boxes", () => {
     await field.click(); await field.fill("12"); await page.keyboard.press("q");
     expect(await calloutArmed(page)).not.toBe("true");
     await expect(field).toHaveValue("12q");
+  });
+  test("Escape in a box abandons the typed text, leaves the box, and Q still works", async ({ page }) => {
+    const { field } = await withBuildingSelected(page);
+    const before = await field.inputValue();
+    await field.click(); await field.fill("999"); await page.keyboard.press("Escape");
+    // Escape also closes the inspector (the field may be gone): what matters is the typed 999 was never committed.
+    if (await field.count()) expect(await field.inputValue()).not.toBe("999");
+    await page.keyboard.press("q");
+    await expect.poll(() => calloutArmed(page)).toBe("true");
   });
   test("after Tab, after clicking the map, after Escape, and pressing Q twice", async ({ page }) => {
     const { box, field } = await withBuildingSelected(page);
