@@ -1,0 +1,21 @@
+# Pen-test 2026-11-24: known-vulnerability scan of the shipped (production) dependency tree.
+# NOT a required check (a new advisory landing overnight must not block unrelated PRs); it goes red on a CRITICAL advisory and
+# prints every high/moderate one in the log. Runs weekly, on demand, and on any PR that changes the lockfile.
+name: dependency-audit
+on:
+  schedule: [{ cron: "17 13 * * 1" }]
+  workflow_dispatch: {}
+  pull_request:
+    paths: [package-lock.json, package.json]
+permissions: { contents: read }
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - name: Full report (informational)
+        run: npm audit --omit=dev || true
+      - name: Fail on critical
+        run: npm audit --omit=dev --audit-level=critical

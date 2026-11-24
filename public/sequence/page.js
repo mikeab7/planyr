@@ -5610,42 +5610,8 @@
     }
   }
 
-  // src/workspaces/scheduler/page/main.jsx
-  var { useState, useEffect, useRef, useMemo, useCallback } = React;
-  function removeScheduleFromDoc(d, id) {
-    if (!d || !d.projects || !d.projects[id]) return d;
-    const newProjects = { ...d.projects };
-    delete newProjects[id];
-    const remaining = Object.keys(newProjects).map(Number);
-    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
-    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
-  }
-  function logMergeToastEvent(changedRows, changedPids, projects) {
-    try {
-      if (!window.__sb) return;
-      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
-      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
-      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
-      }, () => {
-      });
-    } catch (e) {
-    }
-  }
-  var ROW_H = 24;
-  var GRID_LINE = "1px solid var(--bd)";
-  var GRID_LINE_RANGE = "1px solid #93c5fd";
-  var PPD = 22;
-  var TL_H = 30;
-  var BUF = 6;
-  var WIN_CHUNK = 8;
-  var WIN_OVER = 12;
-  var rowWindowTop = (st) => Math.floor(Math.max(0, st) / ROW_H / WIN_CHUNK) * WIN_CHUNK;
-  var rowWindow = (winTop, viewH, total) => ({
-    startIdx: Math.max(0, winTop - WIN_OVER),
-    endIdx: Math.min(total, winTop + WIN_CHUNK + Math.ceil(viewH / ROW_H) + 1 + WIN_OVER)
-  });
-  var GRID_SCROLL_MEMO = /* @__PURE__ */ new Map();
-  var GANTT_SCROLL_MEMO = /* @__PURE__ */ new Map();
+  // src/workspaces/scheduler/page/common.jsx
+  var { useState, useRef, useCallback } = React;
   var NO_AUTOFILL = {
     autoComplete: /iP(hone|ad|od)/.test(navigator.userAgent) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1 ? "x-planyr" : "off",
     "data-1p-ignore": true,
@@ -5733,28 +5699,6 @@
     }, [open]);
     return open ? pos : null;
   }
-  var ROW_COLORS = [
-    { color: "#fef3c7", label: "Yellow tint" },
-    { color: "#ffedd5", label: "Orange tint" },
-    { color: "#fee2e2", label: "Red tint" },
-    { color: "#fce7f3", label: "Pink tint" },
-    { color: "#f3e8ff", label: "Purple tint" },
-    { color: "#fde68a", label: "Yellow" },
-    { color: "#fed7aa", label: "Orange" },
-    { color: "#fecaca", label: "Red" },
-    { color: "#fbcfe8", label: "Pink" },
-    { color: "#e9d5ff", label: "Purple" },
-    { color: "#d9f99d", label: "Lime" },
-    { color: "#bbf7d0", label: "Green" },
-    { color: "#a5f3fc", label: "Cyan" },
-    { color: "#bfdbfe", label: "Blue" },
-    { color: "#c7d2fe", label: "Indigo" },
-    { color: "#ecfccb", label: "Lime tint" },
-    { color: "#d1fae5", label: "Green tint" },
-    { color: "#cffafe", label: "Cyan tint" },
-    { color: "#dbeafe", label: "Blue tint" },
-    { color: "#e0e7ff", label: "Indigo tint" }
-  ];
   var BASE_HEALTH = {
     gray: { label: "Not Started", dot: "#ffffff", border: "1.5px solid #d1d5db", bar: "#f8fafc", ganttBar: "#94a3b8", ganttStyle: "solid" },
     yellow: { label: "In Progress", dot: "#c47b00", border: "none", bar: "#fff7d9", ganttBar: "#c47b00", ganttStyle: "solid" },
@@ -5783,37 +5727,6 @@
       if (!HK.includes(ch.k)) HK.push(ch.k);
     });
   };
-  var escapeHtml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  var pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map((f) => `linear-gradient(${f},${f})`).join(",");
-  var SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
-  var isValidColor = (v) => v == null || SAFE_COLOR_RE.test(v);
-  var FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
-  var FONT_SIZE_MIN = FONT_SIZE_STEPS[0];
-  var FONT_SIZE_MAX = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
-  var isValidFontSize = (n) => typeof n === "number" && Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX;
-  var stepFontSize = (cur, dir) => {
-    const base = typeof cur === "number" ? cur : 12;
-    if (dir > 0) {
-      const next = FONT_SIZE_STEPS.find((v) => v > base);
-      return next != null ? next : FONT_SIZE_MAX;
-    }
-    const prev = FONT_SIZE_STEPS.filter((v) => v < base);
-    return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
-  };
-  var fmtBarDate = (s, withYear) => {
-    if (!s) return "";
-    const d = /* @__PURE__ */ new Date(s + "T12:00:00");
-    return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()}` + (withYear === false ? "" : `/${String(d.getFullYear()).slice(2)}`);
-  };
-  var barLabelText = (t, field, withYear) => {
-    if (!field || field === "none") return "";
-    if (field === "start") return fmtBarDate(t.start, withYear);
-    if (field === "end") return fmtBarDate(t.end, withYear);
-    if (field === "owner") return ownerDisplayParts(ownerListOf(t)).label;
-    if (field === "pct") return `${t.percentComplete || 0}%`;
-    return "";
-  };
-  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
   var showToast = /* @__PURE__ */ (() => {
     let _activeToast = null;
     return (msg, { type = "error", duration = 3e3 } = {}) => {
@@ -5892,6 +5805,2215 @@
       };
     };
   })();
+  function getInitials(name) {
+    if (!name) return "?";
+    const parts = name.trim().split(/\s+/);
+    return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+  }
+  var AVATAR_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
+  function avatarColor(name) {
+    if (!name) return "#94a3b8";
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = h * 31 + name.charCodeAt(i) >>> 0;
+    return AVATAR_COLORS[h % AVATAR_COLORS.length];
+  }
+  var _cpCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+  var _cpCtx = _cpCanvas ? _cpCanvas.getContext("2d") : null;
+  function _cpMeasure(text, font) {
+    if (!_cpCtx) return 0;
+    _cpCtx.font = font;
+    return _cpCtx.measureText(text).width;
+  }
+  function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, variant = "master" }) {
+    const isGrid = variant === "grid";
+    const initialOwners = React.useMemo(() => Array.isArray(owners) ? owners : owners ? [owners] : [], []);
+    const [chips, setChips] = React.useState(initialOwners);
+    const [query, setQuery] = React.useState(seedText || "");
+    const [highlight, setHighlight] = React.useState(-1);
+    const [ghost, setGhost] = React.useState(null);
+    const [warn, setWarn] = React.useState(null);
+    const [dragIdx, setDragIdx] = React.useState(null);
+    const lastPrefixWarnedFor = React.useRef(null);
+    const newContactsRef = React.useRef([]);
+    const inputRef = React.useRef(null);
+    const wrapRef = React.useRef(null);
+    const closedRef = React.useRef(false);
+    const lastWrittenRef = React.useRef(initialOwners);
+    const chipsRef = React.useRef(initialOwners);
+    const queryRef = React.useRef(seedText || "");
+    React.useEffect(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const n = el.value.length;
+      el.setSelectionRange(n, n);
+    }, []);
+    const chipSet = React.useMemo(() => new Set(chips.map((c) => c.toLowerCase())), [chips]);
+    chipsRef.current = chips;
+    queryRef.current = query;
+    const q = query.trim().toLowerCase();
+    const suggestions = (q ? contacts.filter((c) => !chipSet.has(c.name.toLowerCase()) && (c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q))) : contacts.filter((c) => !chipSet.has(c.name.toLowerCase()))).slice(0, 6);
+    const trimmed = query.trim();
+    const isNewName = trimmed.length > 0 && !contacts.some((c) => ownerKey(c.name) === ownerKey(trimmed));
+    const atCap = chips.length >= OWNER_CAP;
+    const totalItems = suggestions.length + (isNewName ? 1 : 0);
+    const prediction = query ? contacts.find((c) => c.name.toLowerCase().startsWith(query.toLowerCase()) && c.name.length > query.length && !chipSet.has(c.name.toLowerCase())) : null;
+    const ghostText = prediction ? prediction.name.slice(query.length) : "";
+    React.useEffect(() => {
+      setHighlight((h) => h >= totalItems ? -1 : h);
+    }, [totalItems]);
+    React.useEffect(() => {
+      lastPrefixWarnedFor.current = null;
+      setWarn((w) => w && w.kind === "prefix" ? null : w);
+    }, [query]);
+    React.useLayoutEffect(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      const cs = window.getComputedStyle(el);
+      const fontFamily = cs.fontFamily, fontSize = cs.fontSize, fontWeight = cs.fontWeight || "400";
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const bordL = parseFloat(cs.borderLeftWidth) || 0;
+      const w = _cpMeasure(query, `${fontWeight} ${fontSize} ${fontFamily}`);
+      setGhost({ left: padL + bordL + w, fontSize, fontFamily, fontWeight });
+    }, [query]);
+    const pos = useAnchoredPopover(true, inputRef, (r) => {
+      const popupH = Math.min(260, 40 + totalItems * 40);
+      const roomBelow = window.innerHeight - r.bottom;
+      const above = roomBelow < popupH + 8 && r.top > popupH + 8;
+      return {
+        left: Math.round(r.left),
+        top: above ? Math.round(r.top - popupH - 2) : Math.round(r.bottom + 2),
+        width: Math.max(240, r.width),
+        above
+      };
+    }, () => finishEditing());
+    function writeThrough(next, newContact) {
+      const news = newContact ? [newContact] : [];
+      if (news.length) newContactsRef.current = [...newContactsRef.current, ...news];
+      const prev = lastWrittenRef.current;
+      const same = prev.length === next.length && prev.every((n, i) => n === next[i]);
+      if (same && !news.length) return;
+      lastWrittenRef.current = next;
+      onOwnersChange(next, news);
+    }
+    function closeEditor() {
+      if (closedRef.current) return;
+      closedRef.current = true;
+      onClose();
+    }
+    function finishEditing() {
+      if (closedRef.current) return;
+      const liveChips = chipsRef.current;
+      const liveTrimmed = String(queryRef.current || "").trim();
+      if (liveTrimmed) {
+        const lower = liveTrimmed.toLowerCase();
+        const existing = contacts.find((c) => ownerKey(c.name) === lower);
+        const already = liveChips.some((n) => ownerKey(n) === lower);
+        if (existing && !already) writeThrough([...liveChips, existing.name]);
+      }
+      closeEditor();
+    }
+    function addChip(name, newContact) {
+      const n = String(name || "").trim();
+      if (!n) return;
+      if (chipSet.has(n.toLowerCase())) {
+        setQuery("");
+        setWarn(null);
+        return;
+      }
+      if (atCap) {
+        setWarn({ kind: "cap", text: `Owner is capped at ${OWNER_CAP} people — remove one to add another.` });
+        return;
+      }
+      const next = [...chips, n];
+      setChips(next);
+      writeThrough(next, newContact);
+      setQuery("");
+      setWarn(null);
+      setHighlight(-1);
+      requestAnimationFrame(() => inputRef.current && inputRef.current.focus());
+    }
+    function removeChip(i) {
+      const next = chips.filter((_, idx) => idx !== i);
+      setChips(next);
+      writeThrough(next);
+    }
+    function reorderChips(from, to) {
+      if (from === to || from == null || to == null) return;
+      const next = [...chips];
+      const [m] = next.splice(from, 1);
+      next.splice(to, 0, m);
+      setChips(next);
+      writeThrough(next);
+    }
+    function attemptCreate(name) {
+      if (name.includes(",")) {
+        setWarn({ kind: "comma", text: `A contact name can't contain a comma — that's how two people become one. Use comma or Enter to add each person separately.` });
+        return;
+      }
+      const prefixHit = contacts.find((c) => c.name.toLowerCase().startsWith(name.toLowerCase()) && c.name.length > name.length);
+      if (prefixHit && lastPrefixWarnedFor.current !== name.toLowerCase()) {
+        lastPrefixWarnedFor.current = name.toLowerCase();
+        setWarn({ kind: "prefix", text: `"${prefixHit.name}" already exists — press Enter again to add "${name}" anyway, or → to use that instead.` });
+        return;
+      }
+      addChip(name, { name, email: "" });
+    }
+    function selectItem(i) {
+      if (i < suggestions.length) addChip(suggestions[i].name);
+      else attemptCreate(trimmed);
+    }
+    function acceptGhost() {
+      if (!prediction) return;
+      addChip(prediction.name);
+    }
+    React.useEffect(() => {
+      function onDocMouseDown(e) {
+        if (wrapRef.current && wrapRef.current.contains(e.target)) return;
+        if (e.target.closest && e.target.closest("[data-contact-dd]")) return;
+        finishEditing();
+      }
+      document.addEventListener("mousedown", onDocMouseDown);
+      return () => document.removeEventListener("mousedown", onDocMouseDown);
+    }, [query, chips]);
+    function onKeyDown(e) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        if (warn) {
+          setWarn(null);
+          lastPrefixWarnedFor.current = null;
+          return;
+        }
+        if (query) {
+          setQuery("");
+          return;
+        }
+        closeEditor();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlight((h) => Math.min(h + 1, totalItems - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlight((h) => Math.max(h - 1, -1));
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        const el = inputRef.current;
+        const atEnd = el && el.selectionStart === query.length && el.selectionEnd === query.length;
+        if (ghostText && atEnd) {
+          e.preventDefault();
+          acceptGhost();
+        }
+        return;
+      }
+      if (e.key === "Backspace" && !query && chips.length) {
+        e.preventDefault();
+        removeChip(chips.length - 1);
+        return;
+      }
+      if (e.key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (trimmed) {
+          if (highlight >= 0 && highlight < totalItems) selectItem(highlight);
+          else attemptCreate(trimmed);
+        }
+        return;
+      }
+      if (e.key === "Tab") {
+        e.stopPropagation();
+        finishEditing();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.stopPropagation();
+        e.preventDefault();
+        if (!trimmed) {
+          finishEditing();
+          return;
+        }
+        if (highlight >= 0 && highlight < totalItems) {
+          selectItem(highlight);
+          return;
+        }
+        if (ghostText && prediction && isNewName) {
+          addChip(prediction.name);
+          return;
+        }
+        const existing = contacts.find((c) => ownerKey(c.name) === ownerKey(trimmed));
+        if (existing) {
+          addChip(existing.name);
+          return;
+        }
+        attemptCreate(trimmed);
+        return;
+      }
+    }
+    const masterInputStyle = {
+      display: "block",
+      width: "100%",
+      height: "18px",
+      border: "none",
+      borderBottom: "1.5px solid var(--blue)",
+      outline: "none",
+      background: "transparent",
+      color: "var(--txt)",
+      fontSize: 12,
+      fontFamily: "inherit",
+      padding: "0 2px"
+    };
+    const popup = pos ? ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement("div", { "data-contact-dd": true, "data-owner-popup": true, ...MENU_STOPS_GRID, style: {
+        position: "fixed",
+        left: pos.left,
+        top: pos.top,
+        width: pos.width,
+        zIndex: 1e5,
+        background: "var(--bg)",
+        border: "1px solid var(--bd2)",
+        borderRadius: 7,
+        boxShadow: "0 6px 20px rgba(0,0,0,.13)",
+        display: "flex",
+        flexDirection: pos.above ? "column-reverse" : "column",
+        overflow: "hidden",
+        maxHeight: 280
+      } }, chips.length > 0 && /* @__PURE__ */ React.createElement("div", { "data-owner-chips": true, style: { display: "flex", flexWrap: "wrap", gap: 5, padding: "8px 9px", borderBottom: "1px solid var(--bd)" } }, chips.map((name, i) => /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          key: name + i,
+          "data-owner-chip": true,
+          draggable: true,
+          onDragStart: (e) => {
+            e.dataTransfer.effectAllowed = "move";
+            setDragIdx(i);
+          },
+          onDragOver: (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+          },
+          onDrop: (e) => {
+            e.preventDefault();
+            reorderChips(dragIdx, i);
+            setDragIdx(null);
+          },
+          onDragEnd: () => setDragIdx(null),
+          title: i === 0 ? "Accountable owner — drag another chip here to change" : "Drag to reorder",
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "2px 4px 2px 8px",
+            borderRadius: 12,
+            background: i === 0 ? "#eef2ff" : "#f3f4f6",
+            border: i === 0 ? "1px solid #c7d2fe" : "1px solid var(--bd2)",
+            fontSize: 11.5,
+            color: "var(--txt)",
+            cursor: "grab",
+            opacity: dragIdx === i ? 0.4 : 1
+          }
+        },
+        name,
+        /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            "data-owner-chip-remove": true,
+            onMouseDown: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              removeChip(i);
+            },
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 14,
+              height: 14,
+              borderRadius: "50%",
+              color: "var(--mut)",
+              cursor: "pointer",
+              fontSize: 11,
+              lineHeight: 1
+            }
+          },
+          "×"
+        )
+      ))), warn && /* @__PURE__ */ React.createElement("div", { "data-owner-warn": true, style: {
+        fontSize: 11,
+        color: warn.kind === "cap" ? "var(--mut)" : "#b45309",
+        background: warn.kind === "cap" ? "var(--surf)" : "#fffbeb",
+        padding: "7px 10px",
+        lineHeight: 1.4,
+        borderBottom: "1px solid var(--bd)"
+      } }, warn.text), (suggestions.length > 0 || isNewName) && /* @__PURE__ */ React.createElement("div", { style: { overflowY: "auto", maxHeight: 220 } }, suggestions.map((c, i) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: c.id,
+          onMouseEnter: () => setHighlight(i),
+          onMouseDown: (e) => {
+            e.preventDefault();
+            addChip(c.name);
+          },
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "7px 10px",
+            cursor: "pointer",
+            background: highlight === i ? "#f0f2ff" : "transparent"
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { style: {
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background: avatarColor(c.name),
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 9,
+          fontWeight: 700,
+          color: "#fff",
+          flexShrink: 0
+        } }, getInitials(c.name)),
+        /* @__PURE__ */ React.createElement("div", { style: { minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, c.name), c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, c.email))
+      )), isNewName && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          "data-owner-add-new": true,
+          onMouseEnter: () => setHighlight(suggestions.length),
+          onMouseDown: (e) => {
+            e.preventDefault();
+            attemptCreate(trimmed);
+          },
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "7px 10px",
+            cursor: "pointer",
+            borderTop: suggestions.length ? "1px solid var(--bd)" : "none",
+            color: "var(--blue)",
+            fontSize: 11,
+            fontWeight: 500,
+            background: highlight === suggestions.length ? "#f0f5ff" : "transparent"
+          }
+        },
+        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, lineHeight: 1 } }, "+"),
+        /* @__PURE__ */ React.createElement("span", { style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, 'Add "', /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, trimmed), '" as new contact')
+      ))),
+      document.body
+    ) : null;
+    return /* @__PURE__ */ React.createElement("div", { ref: wrapRef, style: { position: "relative", width: "100%" } }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ...NO_AUTOFILL,
+        ref: inputRef,
+        value: query,
+        className: isGrid ? "ei" : void 0,
+        style: isGrid ? void 0 : masterInputStyle,
+        onChange: (e) => {
+          setQuery(e.target.value);
+        },
+        onKeyDown,
+        placeholder: chips.length ? "Add another…" : "Type a name…"
+      }
+    ), ghostText && ghost && /* @__PURE__ */ React.createElement("span", { "aria-hidden": true, style: {
+      position: "absolute",
+      left: ghost.left,
+      top: 0,
+      height: "100%",
+      display: "flex",
+      alignItems: "center",
+      pointerEvents: "none",
+      whiteSpace: "pre",
+      fontSize: ghost.fontSize,
+      fontFamily: ghost.fontFamily,
+      fontWeight: ghost.fontWeight,
+      color: "var(--mut)",
+      opacity: 0.5,
+      overflow: "hidden",
+      maxWidth: `calc(100% - ${ghost.left}px - 4px)`
+    } }, ghostText), popup);
+  }
+  function measuredColWidth(headerLabel, cellValues, floor) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = "bold 10px Inter, system-ui, sans-serif";
+    let maxW = ctx.measureText(String(headerLabel || "").toUpperCase()).width + 24;
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    for (const val of cellValues) {
+      if (val) maxW = Math.max(maxW, ctx.measureText(val).width + 24);
+    }
+    return Math.max(floor, Math.ceil(maxW));
+  }
+  var DEPCELL_FONT_SIZE = 8;
+  var DEPCELL_LINE_H = 10;
+  var DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H * 2;
+  function depCellFullTitle(items, renderLabel, renderName, extraNote) {
+    const list = items.map((item) => `${renderLabel(item)} · ${renderName(item)}`).join("\n");
+    return extraNote ? `${list}
+
+${extraNote}` : list;
+  }
+  var DEPCELL_ONE_LINE_BELOW = 110;
+  var DEPCELL_TWO_LINE_AT = 126;
+  function depCellNarrowNext(prevNarrow, width) {
+    if (!(width > 0)) return prevNarrow;
+    if (width < DEPCELL_ONE_LINE_BELOW) return true;
+    if (width >= DEPCELL_TWO_LINE_AT) return false;
+    return prevNarrow;
+  }
+  function DepCell({ items, renderLabel, renderName, s, title, flagged }) {
+    const [hovered, setHovered] = useState(false);
+    const [narrow, setNarrow] = useState(false);
+    const [cellEl, setCellEl] = useState(null);
+    const ref = useRef(null);
+    const setRef = useCallback((el) => {
+      ref.current = el;
+      setCellEl(el);
+    }, []);
+    React.useLayoutEffect(() => {
+      if (!cellEl) return;
+      const measure = () => setNarrow((prev) => depCellNarrowNext(prev, cellEl.offsetWidth));
+      measure();
+      if (typeof ResizeObserver === "undefined") return;
+      const ro = new ResizeObserver(measure);
+      ro.observe(cellEl);
+      return () => ro.disconnect();
+    }, [cellEl]);
+    const canTwoLine = (s.height || 0) >= DEPCELL_TWO_LINE_MIN_H;
+    const visibleCount = canTwoLine && !narrow ? 2 : 1;
+    const extra = items.length - visibleCount;
+    const pos = useAnchoredPopover(hovered && extra > 0, ref, (r) => ({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 220) }), () => setHovered(false));
+    const onEnter = () => {
+      if (!ref.current || items.length <= visibleCount) return;
+      setHovered(true);
+    };
+    if (!items.length) return /* @__PURE__ */ React.createElement("span", { ref: setRef, style: { ...s } });
+    const fullTitle = depCellFullTitle(items, renderLabel, renderName, title);
+    if (items.length === 1 && canTwoLine && !narrow) {
+      const item = items[0];
+      const prefixText = (flagged && flagged(item) ? "⚠ " : "") + renderLabel(item);
+      const indent = _cpMeasure(prefixText, `500 ${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`) + _cpMeasure(" · ", `${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`);
+      return /* @__PURE__ */ React.createElement("div", { ref: setRef, "data-dep-lines": "2", title: fullTitle, style: { ...s, alignItems: "flex-start", padding: "0 8px", whiteSpace: "normal" } }, /* @__PURE__ */ React.createElement("span", { style: {
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+        maxHeight: DEPCELL_LINE_H * 2,
+        lineHeight: `${DEPCELL_LINE_H}px`,
+        fontSize: DEPCELL_FONT_SIZE,
+        fontFamily: "'Inter',system-ui,sans-serif",
+        whiteSpace: "normal",
+        width: "100%",
+        minWidth: 0,
+        wordBreak: "break-word",
+        paddingLeft: indent,
+        textIndent: -indent
+      } }, /* @__PURE__ */ React.createElement("span", { style: { color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight: 500 } }, flagged && flagged(item) ? "⚠ " : "", renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, " · ", renderName(item))));
+    }
+    const slots = Array.from({ length: visibleCount }, (_, i) => items[i] ?? null);
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref: setRef,
+        title: fullTitle,
+        "data-dep-lines": narrow ? "1" : "2",
+        style: { ...s, flexDirection: "column", alignItems: "flex-start", justifyContent: narrow ? "center" : "flex-start", gap: 0, padding: "0 8px" },
+        onMouseEnter: onEnter,
+        onMouseLeave: () => setHovered(false)
+      },
+      slots.map((item, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", alignItems: "baseline", gap: 3, overflow: "hidden", width: "100%", lineHeight: `${DEPCELL_LINE_H}px`, minHeight: DEPCELL_LINE_H } }, item != null && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 500, flexShrink: 0 } }, flagged && flagged(item) ? "⚠ " : "", renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, "· ", renderName(item)), i === visibleCount - 1 && extra > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: "#94a3b8", flexShrink: 0, marginLeft: 3, fontFamily: "'Inter',system-ui,sans-serif" } }, "+", extra))))
+    ), hovered && extra > 0 && pos && ReactDOM.createPortal(
+      /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          ...MENU_STOPS_GRID,
+          style: { position: "fixed", top: pos.top, left: pos.left, minWidth: pos.width, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 6, padding: "8px 10px", zIndex: 9999, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", flexDirection: "column", gap: 5 },
+          onMouseEnter: () => setHovered(true),
+          onMouseLeave: () => setHovered(false)
+        },
+        items.map((item, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", alignItems: "baseline", gap: 5 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#1d4ed8", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 500, flexShrink: 0 } }, renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", whiteSpace: "nowrap" } }, "· ", renderName(item))))
+      ),
+      document.body
+    ));
+  }
+  exposeToHarness({
+    NO_AUTOFILL: [() => NO_AUTOFILL],
+    CONTACT_TOKENS: [() => CONTACT_TOKENS],
+    contactField: [() => contactField],
+    MENU_STOPS_GRID: [() => MENU_STOPS_GRID],
+    anchorHidden: [() => anchorHidden],
+    anchorSurroundings: [() => anchorSurroundings],
+    useAnchoredPopover: [() => useAnchoredPopover],
+    BASE_HEALTH: [() => BASE_HEALTH],
+    BASE_HK: [() => BASE_HK],
+    BASE_HDARK: [() => BASE_HDARK],
+    HEALTH: [() => HEALTH, (v) => {
+      HEALTH = v;
+    }],
+    HK: [() => HK, (v) => {
+      HK = v;
+    }],
+    HDARK: [() => HDARK, (v) => {
+      HDARK = v;
+    }],
+    rebuildHEALTH: [() => rebuildHEALTH],
+    showToast: [() => showToast],
+    getInitials: [() => getInitials],
+    AVATAR_COLORS: [() => AVATAR_COLORS],
+    avatarColor: [() => avatarColor],
+    _cpCanvas: [() => _cpCanvas],
+    _cpCtx: [() => _cpCtx],
+    _cpMeasure: [() => _cpMeasure],
+    ContactPicker: [() => ContactPicker],
+    measuredColWidth: [() => measuredColWidth],
+    DEPCELL_FONT_SIZE: [() => DEPCELL_FONT_SIZE],
+    DEPCELL_LINE_H: [() => DEPCELL_LINE_H],
+    DEPCELL_TWO_LINE_MIN_H: [() => DEPCELL_TWO_LINE_MIN_H],
+    depCellFullTitle: [() => depCellFullTitle],
+    DEPCELL_ONE_LINE_BELOW: [() => DEPCELL_ONE_LINE_BELOW],
+    DEPCELL_TWO_LINE_AT: [() => DEPCELL_TWO_LINE_AT],
+    depCellNarrowNext: [() => depCellNarrowNext],
+    DepCell: [() => DepCell]
+  });
+
+  // src/workspaces/scheduler/page/taskReport/TaskReport.jsx
+  var { useState: useState2, useEffect, useRef: useRef2, useMemo } = React;
+  function HealthDropMenu({ value, onSelect, onClose }) {
+    const [idx, setIdx] = React.useState(() => Math.max(0, HK.indexOf(value)));
+    React.useEffect(() => {
+      const h = (e) => {
+        if (e.key === "ArrowDown") {
+          e.stopPropagation();
+          e.preventDefault();
+          setIdx((i) => Math.min(HK.length - 1, i + 1));
+        } else if (e.key === "ArrowUp") {
+          e.stopPropagation();
+          e.preventDefault();
+          setIdx((i) => Math.max(0, i - 1));
+        } else if (e.key === "Enter") {
+          e.stopPropagation();
+          e.preventDefault();
+          onSelect(HK[idx]);
+          onClose();
+        } else if (e.key === "Escape" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.stopPropagation();
+          e.preventDefault();
+          onClose();
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          onClose();
+        }
+      };
+      document.addEventListener("keydown", h, true);
+      const outside = (e) => {
+        if (!e.target.closest("[data-hmenu]")) onClose();
+      };
+      document.addEventListener("mousedown", outside);
+      return () => {
+        document.removeEventListener("keydown", h, true);
+        document.removeEventListener("mousedown", outside);
+      };
+    }, [idx, onSelect, onClose]);
+    return /* @__PURE__ */ React.createElement("div", { "data-hmenu": "1", style: {
+      position: "absolute",
+      top: "calc(100% + 2px)",
+      left: 0,
+      width: "max-content",
+      background: "var(--bg)",
+      border: "1px solid var(--bd2)",
+      borderRadius: 6,
+      boxShadow: "0 4px 20px rgba(0,0,0,.15)",
+      zIndex: 9999,
+      padding: "4px 0",
+      userSelect: "none"
+    } }, HK.map((hk, i) => {
+      const hh = HEALTH[hk];
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: hk,
+          "data-hmenu": "1",
+          onMouseEnter: () => setIdx(i),
+          onMouseDown: (e) => {
+            e.preventDefault();
+            onSelect(hk);
+            onClose();
+          },
+          style: {
+            padding: "5px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: "pointer",
+            background: i === idx ? "var(--surf)" : "transparent",
+            transition: "background .1s"
+          }
+        },
+        /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: hh.dot, border: hh.border, flexShrink: 0 } }),
+        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)", fontFamily: "'Inter',system-ui,sans-serif", whiteSpace: "nowrap" } }, hh.label)
+      );
+    }));
+  }
+  var MASTER_COL_DEFS = [
+    { k: "project", label: "Project", editable: false },
+    { k: "id", label: "ID", editable: false },
+    { k: "parent", label: "Parent Task", editable: false },
+    { k: "name", label: "Task", editable: true },
+    { k: "start", label: "Start", editable: false },
+    { k: "end", label: "End", editable: false },
+    { k: "duration", label: "Dur", editable: true },
+    { k: "health", label: "Status", editable: true },
+    { k: "percentComplete", label: "% Done", editable: true },
+    { k: "responsibleParty", label: "Owner", editable: true },
+    { k: "predecessors", label: "Predecessors", editable: false },
+    { k: "successors", label: "Successors", editable: false },
+    { k: "notes", label: "Notes", editable: false }
+  ];
+  var DEFAULT_MASTER_COLS = ["project", "id", "name", "parent", "start", "end", "duration", "health", "responsibleParty", "notes"];
+  var DEFAULT_MASTER_WIDTHS = {
+    // B1873360 — 140 sized for a bare schedule name ("Master Schedule"); the Project column and the
+    // "Group by project" header now show the qualified crossScheduleLabel ("Goose Creek / Master
+    // Schedule"), which needs more room. Only the DEFAULT changes — a saved masterColWidths.project
+    // still wins (see colWidths' init below), so nobody who already sized this column gets clobbered.
+    project: 200,
+    id: 36,
+    parent: 140,
+    name: 220,
+    start: 72,
+    end: 72,
+    duration: 52,
+    health: 110,
+    percentComplete: 60,
+    responsibleParty: 100,
+    predecessors: 180,
+    successors: 180,
+    notes: 80
+  };
+  var REPORT_STATUS_BASE = [
+    { k: "gray", label: "Not Started" },
+    { k: "yellow", label: "In Progress" },
+    { k: "red", label: "Needs Attention" },
+    { k: "paused", label: "Paused" },
+    { k: "green", label: "Complete" }
+  ];
+  var REPORT_STATUS_DEFAULT = ["yellow", "red"];
+  function reportStatusOptions(customHealth) {
+    const custom = (Array.isArray(customHealth) ? customHealth : []).filter((c) => c && typeof c === "object" && c.k != null && !REPORT_STATUS_BASE.some((o) => o.k === c.k)).map((c) => ({ k: c.k, label: c.label != null && String(c.label).trim() ? String(c.label) : String(c.k) }));
+    return [...REPORT_STATUS_BASE, ...custom];
+  }
+  function reportStatusKeys(v, options) {
+    const opts = options || REPORT_STATUS_BASE;
+    if (v === false) return [];
+    if (!Array.isArray(v)) return REPORT_STATUS_DEFAULT.slice();
+    return opts.map((o) => o.k).filter((k) => v.includes(k));
+  }
+  function reportStatusToggle(keys, k, options) {
+    const opts = options || REPORT_STATUS_BASE, has = keys.includes(k);
+    return opts.map((o) => o.k).filter((x) => x === k ? !has : keys.includes(x));
+  }
+  function reportStatusPasses(keys, disp) {
+    return keys.length === 0 || keys.includes(disp);
+  }
+  function reportProjectKeys(v, validIds) {
+    if (!Array.isArray(v)) return [];
+    const want = new Set(v.map(String));
+    return (validIds || []).map(String).filter((id) => want.has(id));
+  }
+  function reportProjectToggle(keys, id, validIds) {
+    const has = keys.includes(String(id));
+    return (validIds || []).map(String).filter((x) => x === String(id) ? !has : keys.includes(x));
+  }
+  function reportProjectPasses(keys, projId) {
+    return keys.length === 0 || keys.includes(String(projId));
+  }
+  function reportFilterCount(statusKeys, projectKeys) {
+    return (statusKeys.length > 0 ? 1 : 0) + (projectKeys.length > 0 ? 1 : 0);
+  }
+  function reportFacetCounts(rows, statusKeys, projectKeys) {
+    const status = {}, project = {};
+    rows.forEach((r) => {
+      if (reportProjectPasses(projectKeys, r.projId)) status[r._disp] = (status[r._disp] || 0) + 1;
+      if (reportStatusPasses(statusKeys, r._disp)) project[String(r.projId)] = (project[String(r.projId)] || 0) + 1;
+    });
+    return { status, project };
+  }
+  function reportFilterPhrase(statusNames, projectNames) {
+    const some = (names) => names.length > 2 ? names.slice(0, 2).join(", ") + ", +" + (names.length - 2) + " more" : names.join(" or ");
+    const parts = [];
+    if (statusNames.length) parts.push(some(statusNames));
+    if (projectNames.length) parts.push(some(projectNames));
+    return parts.join(" · ");
+  }
+  var _projectOrder = { ids: null, canOrder: false, error: null };
+  var _projectOrderSubs = /* @__PURE__ */ new Set();
+  function installProjectOrderListener() {
+    if (typeof window !== "undefined") {
+      window.addEventListener("message", (e) => {
+        if (e.origin !== window.location.origin) return;
+        const m = e.data;
+        if (!m || m.source !== "planar-shell" || m.type !== "planar:project-order") return;
+        _projectOrder = {
+          ids: Array.isArray(m.ids) ? m.ids.filter((x) => typeof x === "string") : null,
+          canOrder: !!m.canOrder,
+          error: m.error ? String(m.error) : null
+        };
+        _projectOrderSubs.forEach((f) => f());
+      });
+    }
+  }
+  function postToShell(msg) {
+    try {
+      if (window.parent && window.parent !== window) window.parent.postMessage({ source: "planar-seq", ...msg }, window.location.origin);
+    } catch (_) {
+    }
+  }
+  function useProjectOrder() {
+    const [, tick] = React.useState(0);
+    React.useEffect(() => {
+      const f = () => tick((n) => n + 1);
+      _projectOrderSubs.add(f);
+      postToShell({ type: "planar:project-order-request" });
+      return () => {
+        _projectOrderSubs.delete(f);
+      };
+    }, []);
+    return _projectOrder;
+  }
+  function GroupOrderMenu({ label, isFirst, isLast, onPick }) {
+    const [pos, setPos] = React.useState(null);
+    const btnRef = useRef2(null);
+    useEffect(() => {
+      if (!pos) return;
+      const close = (e) => {
+        if (e && e.type === "keydown" && e.key !== "Escape") return;
+        setPos(null);
+      };
+      const down = (e) => {
+        if (!e.target.closest || !e.target.closest("[data-grp-menu]")) setPos(null);
+      };
+      window.addEventListener("pointerdown", down, true);
+      window.addEventListener("keydown", close, true);
+      window.addEventListener("resize", close);
+      document.addEventListener("scroll", close, true);
+      return () => {
+        window.removeEventListener("pointerdown", down, true);
+        window.removeEventListener("keydown", close, true);
+        window.removeEventListener("resize", close);
+        document.removeEventListener("scroll", close, true);
+      };
+    }, [pos]);
+    const open = (e) => {
+      e.stopPropagation();
+      if (pos) {
+        setPos(null);
+        return;
+      }
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    };
+    const item = (txt, to, disabled) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        role: "menuitem",
+        disabled,
+        onClick: () => {
+          setPos(null);
+          onPick(to);
+        },
+        style: {
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          padding: "9px 14px",
+          border: "none",
+          background: "transparent",
+          fontFamily: "inherit",
+          fontSize: 13,
+          color: disabled ? "var(--bd2)" : "var(--txt)",
+          cursor: disabled ? "default" : "pointer"
+        }
+      },
+      txt
+    );
+    return /* @__PURE__ */ React.createElement("span", { "data-grp-menu": "1", style: { display: "inline-flex" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        ref: btnRef,
+        type: "button",
+        "data-grp-menu-btn": "1",
+        onClick: open,
+        "aria-haspopup": "menu",
+        "aria-expanded": !!pos,
+        title: `Order options for ${label}`,
+        "aria-label": `Order options for ${label}`,
+        style: {
+          width: 30,
+          height: 30,
+          borderRadius: 6,
+          border: "1px solid var(--bd2)",
+          background: "var(--surf)",
+          color: "var(--txt)",
+          fontSize: 16,
+          lineHeight: 1,
+          cursor: "pointer",
+          fontFamily: "inherit"
+        }
+      },
+      "⋯"
+    ), pos && /* @__PURE__ */ React.createElement("div", { role: "menu", style: {
+      position: "fixed",
+      top: pos.top,
+      right: pos.right,
+      zIndex: 1e3,
+      minWidth: 170,
+      padding: "4px 0",
+      background: "var(--surf)",
+      border: "1px solid var(--bd2)",
+      borderRadius: 8,
+      boxShadow: "0 6px 20px rgba(27,31,36,.18)"
+    } }, item("Move to top", "top", isFirst), item("Move up", "up", isFirst), item("Move down", "down", isLast), item("Move to bottom", "bottom", isLast)));
+  }
+  var REPORT_MENU_SECTION = { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "6px 10px 4px" };
+  var REPORT_MENU_ROW = { display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer", borderRadius: 4, transition: "background .1s" };
+  var REPORT_MENU_COUNT = { fontSize: 11, color: "var(--mut)", fontVariantNumeric: "tabular-nums", marginLeft: "auto", paddingLeft: 10, flexShrink: 0 };
+  function ReportMenu({ id, openMenu, setOpenMenu, label, active, minWidth, footer, children }) {
+    const open = openMenu === id;
+    const btnRef = useRef2(null);
+    const panelRef = useRef2(null);
+    const pos = useAnchoredPopover(open, btnRef, (r) => {
+      const bar = btnRef.current && btnRef.current.closest("[data-report-toolbar]");
+      const p = panelRef.current, vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
+      const w = p ? p.offsetWidth : minWidth;
+      const top = (bar ? bar.getBoundingClientRect().bottom : r.bottom) + 4;
+      return { left: Math.max(pad, Math.min(r.left, vw - pad - w)), top, maxH: Math.max(140, vh - top - pad) };
+    }, () => setOpenMenu((cur) => cur === id ? null : cur));
+    return /* @__PURE__ */ React.createElement("div", { "data-tr-menu": id, style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        ref: btnRef,
+        type: "button",
+        className: "btn" + (open || active ? " act" : ""),
+        "data-tr-btn": id,
+        "data-active": active ? "1" : void 0,
+        "aria-haspopup": "true",
+        "aria-expanded": open,
+        onClick: () => setOpenMenu(open ? null : id),
+        style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }
+      },
+      label,
+      " ",
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, opacity: 0.7 } }, "▾")
+    ), open && /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref: panelRef,
+        "data-tr-panel": id,
+        style: {
+          position: "fixed",
+          left: pos ? pos.left : 0,
+          top: pos ? pos.top : 0,
+          visibility: pos ? "visible" : "hidden",
+          zIndex: 99,
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: pos ? pos.maxH : "60vh",
+          minWidth,
+          maxWidth: "calc(100vw - 16px)",
+          boxSizing: "border-box",
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 7,
+          boxShadow: "0 4px 16px rgba(0,0,0,.12)"
+        }
+      },
+      /* @__PURE__ */ React.createElement("div", { "data-tr-panel-body": true, style: { overflowY: "auto", minHeight: 0, padding: "8px 4px" } }, children),
+      footer && /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", padding: "6px 14px", flexShrink: 0 } }, footer)
+    ));
+  }
+  function MasterView({ data, setData, updateTask, setNotesCtx, goToTask }) {
+    const [localEdit, setLocalEdit] = useState2(null);
+    const [selCell, setSelCell] = useState2(null);
+    const tableWrapRef = useRef2(null);
+    const cellFocusTimer = useRef2(null);
+    const openEdit = (payload) => {
+      clearTimeout(cellFocusTimer.current);
+      setLocalEdit(payload);
+    };
+    const [openMenu, setOpenMenu] = useState2(null);
+    useEffect(() => {
+      if (!openMenu) return;
+      const down = (e) => {
+        if (!(e.target && e.target.closest && e.target.closest("[data-tr-menu]"))) setOpenMenu(null);
+      };
+      const key = (e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          setOpenMenu(null);
+        }
+      };
+      const away = () => setOpenMenu(null);
+      document.addEventListener("pointerdown", down, true);
+      document.addEventListener("keydown", key, true);
+      window.addEventListener("blur", away);
+      return () => {
+        document.removeEventListener("pointerdown", down, true);
+        document.removeEventListener("keydown", key, true);
+        window.removeEventListener("blur", away);
+      };
+    }, [openMenu]);
+    const masterSort = data.masterSort || { col: "health", dir: "asc" };
+    const setSort = (col) => {
+      if (masterSort.col === col) {
+        if (masterSort.dir === "asc") setData((d) => ({ ...d, masterSort: { col, dir: "desc" } }));
+        else setData((d) => ({ ...d, masterSort: { col: null, dir: "asc" } }));
+      } else {
+        setData((d) => ({ ...d, masterSort: { col, dir: "asc" } }));
+      }
+    };
+    const visCols = data.masterCols || DEFAULT_MASTER_COLS;
+    const setVisCols = (cols) => setData((d) => ({ ...d, masterCols: cols }));
+    useEffect(() => {
+      if (!visCols.includes("parent") || !visCols.includes("name")) return;
+      const ni = visCols.indexOf("name"), pi = visCols.indexOf("parent");
+      if (pi === ni + 1) return;
+      const next = visCols.filter((k) => k !== "parent");
+      next.splice(ni + 1, 0, "parent");
+      setVisCols(next);
+    }, []);
+    const [dragMCol, setDragMCol] = useState2(null);
+    const [dragMOver, setDragMOver] = useState2(null);
+    const reorderMCols = (fromKey, toKey) => {
+      if (fromKey === toKey) return;
+      const next = [...visCols];
+      const fi = next.indexOf(fromKey), ti = next.indexOf(toKey);
+      if (fi < 0 || ti < 0) return;
+      next.splice(fi, 1);
+      next.splice(ti, 0, fromKey);
+      setVisCols(next);
+    };
+    const DEFAULT_LVL = { leafOnly: false, depths: [0, 1, 2, 3] };
+    const lvlFilter = data.masterLevelFilter || DEFAULT_LVL;
+    const setLvlFilter = (f) => setData((d) => ({ ...d, masterLevelFilter: f }));
+    const lvlActive = lvlFilter.leafOnly || lvlFilter.depths.length < 4;
+    const statusOptions = useMemo(() => reportStatusOptions(data.settings?.customHealth), [data.settings?.customHealth]);
+    const statusKeys = useMemo(() => reportStatusKeys(data.masterHealthFilter, statusOptions), [data.masterHealthFilter, statusOptions]);
+    const setStatusKeys = (keys) => setData((d) => ({ ...d, masterHealthFilter: keys }));
+    const projectIds = useMemo(() => Object.values(data.projects).map((p) => String(p.id)), [data.projects]);
+    const projectKeys = useMemo(() => reportProjectKeys(data.masterProjectFilter, projectIds), [data.masterProjectFilter, projectIds]);
+    const setProjectKeys = (keys) => setData((d) => ({ ...d, masterProjectFilter: keys }));
+    const clearFilters = () => setData((d) => ({ ...d, masterHealthFilter: [], masterProjectFilter: [] }));
+    const filterCount = reportFilterCount(statusKeys, projectKeys);
+    const statusName = (o) => data.settings?.healthLabelOverrides?.[o.k] || o.label;
+    const totalTaskCount = useMemo(() => Object.values(data.projects).reduce((s, p) => s + p.tasks.length, 0), [data.projects]);
+    const rows = useMemo(() => {
+      const dispOf = (t, isParent, rolled, byId) => isParent ? rolled[t.id] || t.health : computeDisplayHealth(t, data.settings, byId);
+      return Object.values(data.projects).flatMap((p) => {
+        const childIds = new Set(p.tasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
+        const rolled = computeRolledHealth(p.tasks, data.settings);
+        const byId = {};
+        p.tasks.forEach((t) => byId[t.id] = t);
+        const { ownerLabel } = scheduleLabelParts(p);
+        const projLabel = crossScheduleLabel(p);
+        const _own = ownerOf(p);
+        const projSiteId = _own.kind === OWNER_KIND_SITE ? _own.siteId : null;
+        return p.tasks.map((t) => {
+          let depth = 0, cur = t;
+          while (cur && cur.parentId !== null) {
+            depth++;
+            cur = p.tasks.find((x) => x.id === cur.parentId) || null;
+          }
+          const isLeaf = !childIds.has(t.id);
+          return { ...t, projName: p.name, projId: p.id, projSiteId, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks) };
+        });
+      });
+    }, [data.projects, data.settings, NOW]);
+    const levelRows = useMemo(() => {
+      if (lvlFilter.leafOnly) return rows.filter((r) => r.isLeaf);
+      return rows.filter((r) => lvlFilter.depths.includes(Math.min(r.depth, 3)));
+    }, [rows, lvlFilter]);
+    const facets = useMemo(() => reportFacetCounts(levelRows, statusKeys, projectKeys), [levelRows, statusKeys, projectKeys]);
+    const filteredRows = useMemo(
+      () => levelRows.filter((r) => reportStatusPasses(statusKeys, r._disp) && reportProjectPasses(projectKeys, r.projId)),
+      [levelRows, statusKeys, projectKeys]
+    );
+    const projOrder = useProjectOrder();
+    const projectChoices = useMemo(() => groupRowsByProject(
+      Object.values(data.projects).map((p) => ({ projId: String(p.id), projSiteId: ownerOf(p).kind === OWNER_KIND_SITE ? ownerOf(p).siteId : null, projOwnerLabel: scheduleLabelParts(p).ownerLabel, projName: p.name, projLabel: crossScheduleLabel(p) })),
+      projOrder.ids
+    ), [data.projects, projOrder.ids]);
+    const getParentName = (t) => {
+      if (!t.parentId) return "—";
+      const proj = data.projects[t.projId];
+      return proj?.tasks.find((x) => x.id === t.parentId)?.name || "—";
+    };
+    const _getPredStr = (t) => {
+      const proj = data.projects[t.projId];
+      if (!proj) return "";
+      return normPreds(t.predecessors).map((p) => {
+        const pt = proj.tasks.find((x) => x.id === p.id);
+        return pt ? `${p.id} – ${pt.name}` : "";
+      }).filter(Boolean).join("; ");
+    };
+    const _getSuccStr = (t) => {
+      const proj = data.projects[t.projId];
+      if (!proj) return "";
+      return proj.tasks.filter(
+        (x) => normPreds(x.predecessors).some((p) => p.id === t.id)
+      ).map((x) => `${x.id} – ${x.name}`).join("; ");
+    };
+    const applyCommit = (t, col, val) => {
+      if (col === "duration") {
+        const parsed = parseDurationInput(val);
+        if (parsed.error) {
+          showToast(parsed.error);
+          return;
+        }
+        if (parsed.value !== taskDurValue(t) || parsed.unit !== taskDurUnit(t)) updateTask(t.id, { durValue: parsed.value, durUnit: parsed.unit }, t.projId);
+      } else if (col === "health") {
+        if (val !== t.health) updateTask(t.id, { health: val }, t.projId);
+      } else if (col === "percentComplete") {
+        const nv = Math.max(0, Math.min(100, parseInt(val) || 0));
+        if (nv !== (t.percentComplete || 0)) updateTask(t.id, { percentComplete: nv }, t.projId);
+      } else if (col === "name") {
+        if (val.trim() && val.trim() !== t.name) updateTask(t.id, { name: val.trim() }, t.projId);
+      } else if (col === "responsibleParty") {
+        const next = Array.isArray(val) ? val : ownerListOf({ responsibleParty: val });
+        const cur = ownerListOf(t);
+        if (next.length !== cur.length || next.some((n, i) => n !== cur[i])) updateTask(t.id, { responsibleParty: next }, t.projId);
+      }
+    };
+    const closeEdit = () => {
+      setLocalEdit(null);
+      setTimeout(() => tableWrapRef.current?.focus({ preventScroll: true }), 0);
+    };
+    const commit = (t, col, val) => {
+      applyCommit(t, col, val);
+      closeEdit();
+    };
+    const isE = (t, col) => localEdit?.id === t.id && localEdit?.projId === t.projId && localEdit?.col === col;
+    const fmtDate = (s) => {
+      if (!s) return "";
+      const [y, m, d] = s.split("-");
+      if (!y || !m || !d) return "";
+      return String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
+    };
+    const masterGroupBy = data.masterGroupBy || null;
+    const setGroupBy = (v) => setData((d) => ({ ...d, masterGroupBy: v }));
+    const HEALTH_ORDER = { red: 0, yellow: 1, paused: 2, gray: 3, green: 4 };
+    const sortedRows = useMemo(() => {
+      if (!masterSort.col) return filteredRows;
+      const { col, dir } = masterSort;
+      const mult = dir === "asc" ? 1 : -1;
+      return [...filteredRows].sort((a, b) => {
+        let av, bv;
+        switch (col) {
+          case "health":
+            av = HEALTH_ORDER[a._disp] ?? 5;
+            bv = HEALTH_ORDER[b._disp] ?? 5;
+            break;
+          case "id":
+            av = a.id;
+            bv = b.id;
+            break;
+          case "duration":
+            av = a.duration;
+            bv = b.duration;
+            break;
+          case "percentComplete":
+            av = a._pct ?? effectivePercentComplete(a);
+            bv = b._pct ?? effectivePercentComplete(b);
+            break;
+          case "start":
+            av = a.start;
+            bv = b.start;
+            break;
+          case "end":
+            av = a.end;
+            bv = b.end;
+            break;
+          case "project":
+            av = `${(a.projLabel || "").toLowerCase()}\0${String(a.projId)}`;
+            bv = `${(b.projLabel || "").toLowerCase()}\0${String(b.projId)}`;
+            break;
+          case "name":
+            av = (a.name || "").toLowerCase();
+            bv = (b.name || "").toLowerCase();
+            break;
+          case "responsibleParty":
+            av = (ownerListOf(a)[0] || "").toLowerCase();
+            bv = (ownerListOf(b)[0] || "").toLowerCase();
+            break;
+          case "notes":
+            av = (a.notes || []).length;
+            bv = (b.notes || []).length;
+            break;
+          default:
+            av = 0;
+            bv = 0;
+        }
+        if (av < bv) return -1 * mult;
+        if (av > bv) return 1 * mult;
+        return 0;
+      });
+    }, [filteredRows, masterSort]);
+    const groupedRows = useMemo(
+      () => masterGroupBy === "project" ? groupRowsByProject(sortedRows, projOrder.ids) : null,
+      [masterGroupBy, sortedRows, projOrder.ids]
+    );
+    const movableIds = useMemo(() => {
+      const out = [];
+      (groupedRows || []).forEach((g2) => {
+        if (g2.siteId != null && g2.rank !== Infinity && !out.includes(g2.siteId)) out.push(g2.siteId);
+      });
+      return out;
+    }, [groupedRows]);
+    const canReorderGroups = !!projOrder.canOrder && movableIds.length > 1;
+    const [grpDrag, setGrpDrag] = useState2(null);
+    const grpStopRef = useRef2(null);
+    useEffect(() => () => {
+      if (grpStopRef.current) grpStopRef.current();
+    }, []);
+    const requestGroupMove = (siteId, dest) => postToShell({ type: "planar:project-order-move", groupId: siteId, dest, visibleIds: movableIds });
+    const pickGroupMenu = (siteId, to) => {
+      const pos = movableIds.indexOf(siteId);
+      if (pos < 0) return;
+      if (to === "top" || to === "bottom") requestGroupMove(siteId, { to });
+      else requestGroupMove(siteId, { index: to === "up" ? pos - 1 : pos + 1 });
+    };
+    const startGroupDrag = (e, siteId) => {
+      if (e.button != null && e.button !== 0) return;
+      const wrap = tableWrapRef.current;
+      if (!wrap) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const others = movableIds.filter((x) => x !== siteId);
+      const firstHeaders = () => {
+        const m = /* @__PURE__ */ new Map();
+        wrap.querySelectorAll("tr[data-grp-site]").forEach((tr) => {
+          const k = tr.getAttribute("data-grp-site");
+          if (k && !m.has(k)) m.set(k, tr);
+        });
+        return m;
+      };
+      const atFor = (y2) => {
+        const hs = firstHeaders();
+        let at = 0;
+        for (const id of others) {
+          const tr = hs.get(id);
+          if (!tr) continue;
+          const b = tr.getBoundingClientRect();
+          if (y2 > b.top + b.height / 2) at++;
+        }
+        return at;
+      };
+      let y = e.clientY, raf = 0, last = atFor(y);
+      setGrpDrag({ siteId, at: last });
+      const tick = () => {
+        const b = wrap.getBoundingClientRect();
+        const zone = 28;
+        if (y < b.top + zone) wrap.scrollTop -= 8;
+        else if (y > b.bottom - zone) wrap.scrollTop += 8;
+        const at = atFor(y);
+        if (at !== last) {
+          last = at;
+          setGrpDrag({ siteId, at });
+        }
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+      const move = (ev) => {
+        y = ev.clientY;
+      };
+      const releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => end(false) });
+      const end = (commit2) => {
+        releaseCursor();
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+        window.removeEventListener("keydown", key, true);
+        cancelAnimationFrame(raf);
+        grpStopRef.current = null;
+        setGrpDrag(null);
+        if (commit2) requestGroupMove(siteId, { index: last });
+      };
+      const up = () => end(true);
+      const cancel = () => end(false);
+      const key = (ev) => {
+        if (ev.key === "Escape") {
+          ev.stopPropagation();
+          end(false);
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
+      window.addEventListener("keydown", key, true);
+      grpStopRef.current = () => end(false);
+    };
+    const dragOthers = grpDrag ? movableIds.filter((x) => x !== grpDrag.siteId) : [];
+    const lineAboveSite = grpDrag && grpDrag.at < dragOthers.length ? dragOthers[grpDrag.at] : null;
+    const lineBelowSite = grpDrag && grpDrag.at >= dragOthers.length && dragOthers.length ? dragOthers[dragOthers.length - 1] : null;
+    const lastGroupOfSite = (sid) => {
+      let idx = -1;
+      (groupedRows || []).forEach((g2, i) => {
+        if (g2.siteId === sid) idx = i;
+      });
+      return idx;
+    };
+    const [colWidths, setColWidths] = useState2(() => {
+      const saved = data.masterColWidths || {};
+      return Object.fromEntries(Object.entries(DEFAULT_MASTER_WIDTHS).map(([k, v]) => [k, saved[k] ?? v]));
+    });
+    const startResize = (colKey, e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX, startW = colWidths[colKey];
+      let latestW = startW;
+      const move = (ev) => {
+        latestW = Math.max(40, startW + ev.clientX - startX);
+        setColWidths((w) => ({ ...w, [colKey]: latestW }));
+      };
+      const release = window.pinSchedCursor("col-resize", { onExit: () => up() });
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        release();
+        setData((d) => ({ ...d, masterColWidths: { ...colWidths, [colKey]: latestW } }));
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    };
+    const autoSizeMCol = (colKey) => {
+      const colDef = MASTER_COL_DEFS.find((c) => c.k === colKey);
+      if (!colDef) return;
+      const fmtD2 = (s) => {
+        if (!s) return "";
+        const [y, m, d] = s.split("-");
+        return `${String(+m).padStart(2, "0")}/${String(+d).padStart(2, "0")}/${(y || "").slice(2)}`;
+      };
+      const values = sortedRows.map((t) => {
+        let val = "";
+        switch (colKey) {
+          case "project":
+            val = t.projLabel || "";
+            break;
+          case "id":
+            val = String(t.id);
+            break;
+          case "name":
+            val = t.name || "";
+            break;
+          case "start":
+            val = fmtD2(t.start);
+            break;
+          case "end":
+            val = fmtD2(t.end);
+            break;
+          case "duration":
+            val = fmtTaskDuration(t, !t.isLeaf) || `${t.duration}d`;
+            break;
+          case "health":
+            val = HEALTH[t.health]?.label || "";
+            break;
+          case "percentComplete":
+            val = `${t._pct ?? effectivePercentComplete(t)}%`;
+            break;
+          case "responsibleParty":
+            val = ownerDisplayParts(ownerListOf(t)).label;
+            break;
+          case "notes":
+            val = t.notes?.length > 0 ? `${t.notes.length} entr` : "+ Add";
+            break;
+          case "parent": {
+            const p = data.projects[t.projId]?.tasks.find((x) => x.id === t.parentId);
+            val = p ? p.name : "—";
+            break;
+          }
+          default:
+            val = String(t[colKey] || "");
+        }
+        return val;
+      });
+      const n = { ...colWidths, [colKey]: measuredColWidth(colDef.label, values, 40) };
+      setColWidths(n);
+      setData((d) => ({ ...d, masterColWidths: n }));
+    };
+    const activeCols = visCols.map((k) => MASTER_COL_DEFS.find((c) => c.k === k)).filter(Boolean);
+    const displayCols = masterGroupBy === "project" ? activeCols.filter((c) => c.k !== "project") : activeCols;
+    const renderJumpCell = (t) => /* @__PURE__ */ React.createElement("td", { key: "__jump", style: {
+      width: 30,
+      minWidth: 30,
+      maxWidth: 30,
+      padding: 0,
+      textAlign: "center",
+      borderBottom: "1px solid var(--bd)",
+      borderRight: "1px solid var(--bd)"
+    } }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        title: `Open row in ${t.projLabel}`,
+        onClick: (e) => {
+          e.stopPropagation();
+          if (goToTask) goToTask(t.projId, t.id);
+        },
+        onMouseEnter: (e) => {
+          e.currentTarget.style.color = "var(--blue)";
+          e.currentTarget.style.background = "rgba(9,105,218,0.08)";
+        },
+        onMouseLeave: (e) => {
+          e.currentTarget.style.color = "var(--mut)";
+          e.currentTarget.style.background = "transparent";
+        },
+        style: {
+          width: 20,
+          height: 20,
+          padding: 0,
+          border: "none",
+          borderRadius: 4,
+          background: "transparent",
+          color: "var(--mut)",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          verticalAlign: "middle",
+          transition: "color .12s, background .12s"
+        }
+      },
+      /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M5 2 H2.5 A.5 .5 0 0 0 2 2.5 V9.5 A.5 .5 0 0 0 2.5 10 H9.5 A.5 .5 0 0 0 10 9.5 V7" }), /* @__PURE__ */ React.createElement("path", { d: "M7.2 2 H10 V4.8" }), /* @__PURE__ */ React.createElement("path", { d: "M10 2 L5.8 6.2" }))
+    ));
+    const EDITABLE_KEYS = /* @__PURE__ */ new Set(["name", "duration", "health", "percentComplete", "responsibleParty", "notes"]);
+    const handleTableKey = (e) => {
+      if (localEdit) return;
+      if (!selCell) return;
+      const { ri, ci } = selCell;
+      if (e.altKey && e.key === "ArrowDown") {
+        const col = displayCols[ci];
+        const t = sortedRows[ri];
+        if (col?.k === "health" && t) {
+          e.preventDefault();
+          setLocalEdit({ id: t.id, projId: t.projId, col: "health" });
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelCell({ ri: Math.min(sortedRows.length - 1, ri + 1), ci });
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelCell({ ri: Math.max(0, ri - 1), ci });
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setSelCell({ ri, ci: Math.min(displayCols.length - 1, ci + 1) });
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setSelCell({ ri, ci: Math.max(0, ci - 1) });
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelCell(null);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "F2") {
+        const col = displayCols[ci];
+        const t = sortedRows[ri];
+        if (col && t && EDITABLE_KEYS.has(col.k)) {
+          e.preventDefault();
+          if (col.k === "notes") {
+            setNotesCtx({ taskId: t.id, projectId: t.projId, initChar: null });
+            return;
+          }
+          if (col.k === "duration" && !t.isLeaf) return;
+          setLocalEdit({ id: t.id, projId: t.projId, col: col.k });
+        }
+        return;
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const col = displayCols[ci];
+        const t = sortedRows[ri];
+        if (!col || !t || !EDITABLE_KEYS.has(col.k)) return;
+        if (col.k === "health") return;
+        if (col.k === "notes") {
+          e.preventDefault();
+          setNotesCtx({ taskId: t.id, projectId: t.projId, initChar: e.key });
+          return;
+        }
+        const isNum = col.k === "duration" || col.k === "percentComplete";
+        if (isNum && !/\d/.test(e.key)) return;
+        if (col.k === "duration" && !t.isLeaf) return;
+        e.preventDefault();
+        setLocalEdit({ id: t.id, projId: t.projId, col: col.k, initChar: e.key });
+      }
+    };
+    const renderCell = (t, col, ri) => {
+      const dispHealth = t._disp ?? computeDisplayHealth(t, data.settings, null);
+      const h = HEALTH[dispHealth];
+      const ci = displayCols.indexOf(col);
+      const isSel = selCell && selCell.ri === ri && selCell.ci === ci;
+      const selStyle = isSel ? { outline: "2px solid #2563eb", outlineOffset: "-2px" } : {};
+      const onCellClick = (e) => {
+        setSelCell({ ri, ci });
+        if (e && e.detail > 1) return;
+        clearTimeout(cellFocusTimer.current);
+        cellFocusTimer.current = setTimeout(() => tableWrapRef.current?.focus({ preventScroll: true }), 0);
+      };
+      const isFirstCol = displayCols[0] === col;
+      const stripeColor = h.dot === "#ffffff" ? "#d1d5db" : h.dot;
+      const tdBase = {
+        padding: "6px 10px",
+        borderBottom: "1px solid var(--bd)",
+        borderRight: "1px solid var(--bd)",
+        borderLeft: isFirstCol ? `3px solid ${stripeColor}` : "none",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        width: colWidths[col.k],
+        minWidth: colWidths[col.k],
+        maxWidth: colWidths[col.k],
+        cursor: "default",
+        ...selStyle
+      };
+      switch (col.k) {
+        case "project":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, title: t.projLabel, style: { ...tdBase, color: "#1d4ed8", fontSize: 11 } }, t.projLabel);
+        case "id":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, color: "var(--mut)", fontSize: 11 } }, t.id);
+        case "parent":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, color: "var(--mut)", fontSize: 11 } }, getParentName(t));
+        case "name":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "name" }) }, isE(t, "name") ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              ...NO_AUTOFILL,
+              autoFocus: true,
+              style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" },
+              defaultValue: localEdit?.initChar ?? t.name,
+              onBlur: (e) => commit(t, "name", e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") commit(t, "name", e.target.value);
+                if (e.key === "Escape") setLocalEdit(null);
+              }
+            }
+          ) : /* @__PURE__ */ React.createElement("span", { style: { color: "#1f2328", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", display: "block" } }, t.name));
+        case "start":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, fontSize: 11, color: "var(--mut)" } }, fmtDate(t.start));
+        case "end":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, fontSize: 11, color: "var(--mut)" } }, fmtDate(t.end));
+        case "duration":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => {
+            if (!t.isLeaf) return;
+            openEdit({ id: t.id, projId: t.projId, col: "duration" });
+          } }, isE(t, "duration") ? /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, autoFocus: true, style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" }, defaultValue: localEdit?.initChar ?? fmtTaskDuration(t), onBlur: (e) => commit(t, "duration", e.target.value), onKeyDown: (e) => {
+            if (e.key === "Enter") commit(t, "duration", e.target.value);
+            if (e.key === "Escape") setLocalEdit(null);
+          } }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" }, title: t.isLeaf ? durTooltip(t) || void 0 : "Computed from subtasks" }, fmtTaskDuration(t, !t.isLeaf) || "0d"));
+        case "health":
+          return /* @__PURE__ */ React.createElement(
+            "td",
+            {
+              key: col.k,
+              "data-hmenu": "1",
+              onClick: onCellClick,
+              onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "health" }),
+              style: {
+                ...tdBase,
+                cursor: "default",
+                position: "relative",
+                overflow: isE(t, "health") ? "visible" : "hidden",
+                zIndex: isE(t, "health") ? 50 : "auto"
+              }
+            },
+            isE(t, "health") && /* @__PURE__ */ React.createElement(
+              HealthDropMenu,
+              {
+                value: t.health,
+                onSelect: (val) => commit(t, "health", val),
+                onClose: () => setLocalEdit(null)
+              }
+            ),
+            /* @__PURE__ */ React.createElement("span", { style: {
+              background: h.bar,
+              borderRadius: 999,
+              padding: "3px 8px",
+              fontSize: 11,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              color: HDARK[dispHealth] || "#374151",
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+              maxWidth: "100%"
+            } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: h.dot === "#ffffff" ? "#d1d5db" : h.dot, flexShrink: 0 } }), h.label)
+          );
+        case "percentComplete":
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "percentComplete" }) }, isE(t, "percentComplete") ? /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, autoFocus: true, style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" }, defaultValue: localEdit?.initChar ?? (t.percentComplete || 0), onBlur: (e) => commit(t, "percentComplete", e.target.value), onKeyDown: (e) => {
+            if (e.key === "Enter") commit(t, "percentComplete", e.target.value);
+            if (e.key === "Escape") setLocalEdit(null);
+          } }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, t._pct ?? effectivePercentComplete(t), "%"));
+        case "responsibleParty": {
+          const { label, title } = ownerDisplayParts(ownerListOf(t));
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "responsibleParty" }) }, isE(t, "responsibleParty") ? /* @__PURE__ */ React.createElement(
+            ContactPicker,
+            {
+              owners: ownerListOf(t),
+              seedText: localEdit?.initChar != null ? localEdit.initChar : "",
+              contacts: data.settings?.contacts || [],
+              onOwnersChange: (names, newContacts) => {
+                if (newContacts && newContacts.length) {
+                  setData((d) => ({ ...d, settings: { ...d.settings, contacts: [...d.settings?.contacts || [], ...newContacts.map((nc) => ({ id: Date.now() + Math.random(), ...nc }))] } }));
+                }
+                applyCommit(t, "responsibleParty", names);
+              },
+              onClose: closeEdit
+            }
+          ) : /* @__PURE__ */ React.createElement("span", { title: title || void 0, style: { color: "var(--mut)" } }, label || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—")));
+        }
+        case "predecessors": {
+          const _proj = data.projects[t.projId];
+          const _preds = normPreds(t.predecessors);
+          const _getName = (id) => _proj?.tasks.find((x) => x.id === id)?.name ?? `#${id}`;
+          const _ds = { fontSize: 12, display: "flex", alignItems: "center", overflow: "hidden", padding: 0, minHeight: 18 };
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: { ...tdBase, padding: "3px 6px" } }, _preds.length ? /* @__PURE__ */ React.createElement(DepCell, { items: _preds, renderLabel: (p) => fmtPreds([p]), renderName: (p) => _getName(p.id), s: _ds }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—"));
+        }
+        case "successors": {
+          const _proj = data.projects[t.projId];
+          const _succs = _proj ? _proj.tasks.filter((x) => normPreds(x.predecessors).some((p) => p.id === t.id)) : [];
+          const _ds = { fontSize: 12, display: "flex", alignItems: "center", overflow: "hidden", padding: 0, minHeight: 18 };
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: { ...tdBase, padding: "3px 6px" } }, _succs.length ? /* @__PURE__ */ React.createElement(DepCell, { items: _succs, renderLabel: (x) => String(x.id), renderName: (x) => x.name, s: _ds }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—"));
+        }
+        case "notes": {
+          const noteList = [...t.notes || []].reverse();
+          const visible = noteList.slice(0, 2);
+          const extra = noteList.length - 2;
+          const fmtNoteDate = (s) => {
+            try {
+              const [y, m, d] = (s || "").split("-");
+              return d ? `${+m}/${+d}/${(y || "").slice(2)}` : s;
+            } catch {
+              return s;
+            }
+          };
+          return /* @__PURE__ */ React.createElement(
+            "td",
+            {
+              key: col.k,
+              style: { ...tdBase, whiteSpace: "normal", verticalAlign: "top", cursor: "pointer", minWidth: colWidths[col.k] },
+              onClick: (e) => {
+                onCellClick();
+                setNotesCtx({ taskId: t.id, projectId: t.projId });
+              }
+            },
+            noteList.length === 0 ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)", fontSize: 11 } }, "+ Add") : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, visible.map((n) => /* @__PURE__ */ React.createElement("div", { key: n.id, style: { display: "flex", alignItems: "baseline", gap: 5, lineHeight: 1.4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", fontFamily: "inherit", flexShrink: 0 } }, fmtNoteDate(n.date)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", flexShrink: 0 } }, "|"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#374151" } }, n.text))), extra > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#1d4ed8", fontWeight: 500 } }, "+", extra, " more…"))
+          );
+        }
+        default:
+          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase });
+      }
+    };
+    return /* @__PURE__ */ React.createElement("div", { style: {
+      flex: 1,
+      minHeight: 0,
+      display: "flex",
+      flexDirection: "column",
+      overflow: "hidden",
+      padding: "12px 14px 14px",
+      background: "var(--surf)"
+    } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexShrink: 0, flexWrap: "wrap", rowGap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--amber)", fontWeight: 600, fontSize: 13, letterSpacing: ".08em" } }, "TASK REPORT"), /* @__PURE__ */ React.createElement("span", { style: { background: "#dbeafe", color: "#1d4ed8", borderRadius: 8, padding: "1px 8px", fontSize: 10 } }, filteredRows.length), /* @__PURE__ */ React.createElement("div", { "data-report-toolbar": true, style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement(
+      ReportMenu,
+      {
+        id: "filter",
+        openMenu,
+        setOpenMenu,
+        active: filterCount > 0,
+        minWidth: 250,
+        label: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 16 16", "aria-hidden": "true", style: { flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M1.5 2.5h13L9.5 8.6v4.6l-3 1.5V8.6z", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinejoin: "round" })), "Filter", filterCount > 0 && /* @__PURE__ */ React.createElement("span", { "data-filter-badge": true, style: { background: "var(--amber)", color: "#fff", borderRadius: 8, minWidth: 15, height: 15, padding: "0 4px", fontSize: 10, fontWeight: 700, lineHeight: "15px", textAlign: "center", boxSizing: "border-box" } }, filterCount)),
+        footer: /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            role: "button",
+            tabIndex: 0,
+            "data-filter-clear": true,
+            style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
+            onClick: clearFilters,
+            onKeyDown: (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                clearFilters();
+              }
+            }
+          },
+          "Clear all"
+        )
+      },
+      /* @__PURE__ */ React.createElement("div", { style: REPORT_MENU_SECTION }, "Status"),
+      statusOptions.map((o) => {
+        const on = statusKeys.includes(o.k), h = HEALTH[o.k] || {};
+        return /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            key: o.k,
+            "data-filter-row": "status",
+            style: REPORT_MENU_ROW,
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              "data-filter-status": o.k,
+              checked: on,
+              onChange: () => setStatusKeys(reportStatusToggle(statusKeys, o.k, statusOptions)),
+              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: h.dot || "#d1d5db", border: h.border && h.border !== "none" ? h.border : "none", boxSizing: "border-box" } }),
+          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", flex: 1, minWidth: 0 } }, statusName(o)),
+          /* @__PURE__ */ React.createElement("span", { "data-filter-count": true, style: REPORT_MENU_COUNT }, facets.status[o.k] || 0)
+        );
+      }),
+      /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "6px 0 2px" } }),
+      /* @__PURE__ */ React.createElement("div", { style: REPORT_MENU_SECTION }, "Project"),
+      projectChoices.map((g2) => {
+        const on = projectKeys.includes(String(g2.projId));
+        return /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            key: g2.projId,
+            "data-filter-row": "project",
+            style: REPORT_MENU_ROW,
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              "data-filter-project": g2.projId,
+              checked: on,
+              onChange: () => setProjectKeys(reportProjectToggle(projectKeys, g2.projId, projectIds)),
+              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", flex: 1, minWidth: 0, overflowWrap: "anywhere" } }, g2.label),
+          /* @__PURE__ */ React.createElement("span", { "data-filter-count": true, style: REPORT_MENU_COUNT }, facets.project[String(g2.projId)] || 0)
+        );
+      })
+    ), /* @__PURE__ */ React.createElement(
+      ReportMenu,
+      {
+        id: "group",
+        openMenu,
+        setOpenMenu,
+        minWidth: 150,
+        label: /* @__PURE__ */ React.createElement(React.Fragment, null, "Group by: ", /* @__PURE__ */ React.createElement("span", { "data-group-current": true }, masterGroupBy === "project" ? "Project" : "None"))
+      },
+      [{ v: null, l: "None" }, { v: "project", l: "Project" }].map((opt) => {
+        const on = masterGroupBy === opt.v;
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: String(opt.v),
+            type: "button",
+            role: "menuitemradio",
+            "aria-checked": on,
+            "data-group-opt": opt.v || "none",
+            onClick: () => {
+              setGroupBy(opt.v);
+              setOpenMenu(null);
+            },
+            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+            onMouseLeave: (e) => e.currentTarget.style.background = on ? "#eef2ff" : "transparent",
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+              padding: "6px 10px",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              textAlign: "left",
+              background: on ? "#eef2ff" : "transparent",
+              fontFamily: "inherit",
+              fontSize: 12,
+              color: "var(--txt)",
+              fontWeight: on ? 600 : 400
+            }
+          },
+          /* @__PURE__ */ React.createElement("span", { style: { width: 12, flexShrink: 0, color: "var(--amber)", fontSize: 11 } }, on ? "✓" : ""),
+          opt.l
+        );
+      })
+    ), /* @__PURE__ */ React.createElement(
+      ReportMenu,
+      {
+        id: "show",
+        openMenu,
+        setOpenMenu,
+        active: lvlActive,
+        minWidth: 176,
+        label: /* @__PURE__ */ React.createElement(React.Fragment, null, "Show ", lvlActive && /* @__PURE__ */ React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "var(--amber)", flexShrink: 0 } }))
+      },
+      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "0 10px 6px", borderBottom: "1px solid var(--bd)", marginBottom: 4 } }, "Which tasks to show"),
+      /* @__PURE__ */ React.createElement(
+        "label",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            cursor: "pointer",
+            borderRadius: 4,
+            background: lvlFilter.leafOnly ? "#eef2ff" : "transparent",
+            transition: "background .1s"
+          },
+          onMouseEnter: (e) => {
+            if (!lvlFilter.leafOnly) e.currentTarget.style.background = "var(--surf)";
+          },
+          onMouseLeave: (e) => {
+            if (!lvlFilter.leafOnly) e.currentTarget.style.background = "transparent";
+          }
+        },
+        /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: lvlFilter.leafOnly,
+            onChange: (e) => setLvlFilter({ ...lvlFilter, leafOnly: e.target.checked }),
+            style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
+          }
+        ),
+        /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "Action items only"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, "Hide phases and section headers"))
+      ),
+      /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }),
+      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", padding: "4px 10px 2px", letterSpacing: ".04em" } }, "OR BY OUTLINE LEVEL"),
+      [
+        { d: 0, label: "Top-level phases", sub: "Outline level 1" },
+        { d: 1, label: "Subtasks", sub: "Outline level 2" },
+        { d: 2, label: "Sub-subtasks", sub: "Outline level 3" },
+        { d: 3, label: "Deeper nesting", sub: "Level 4 and below" }
+      ].map(({ d, label, sub }) => {
+        const on = lvlFilter.depths.includes(d);
+        return /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            key: d,
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "5px 10px",
+              cursor: "pointer",
+              borderRadius: 4,
+              opacity: lvlFilter.leafOnly ? 0.4 : 1,
+              transition: "background .1s"
+            },
+            onMouseEnter: (e) => {
+              if (!lvlFilter.leafOnly) e.currentTarget.style.background = "var(--surf)";
+            },
+            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+          },
+          /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              checked: on,
+              disabled: lvlFilter.leafOnly,
+              onChange: (e) => setLvlFilter({ ...lvlFilter, depths: e.target.checked ? [...lvlFilter.depths, d] : lvlFilter.depths.filter((x) => x !== d) }),
+              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)" } }, label), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, sub))
+        );
+      }),
+      /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", marginTop: 4, padding: "6px 10px 2px" } }, /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
+          onClick: () => setLvlFilter({ ...DEFAULT_LVL })
+        },
+        "Show all"
+      ))
+    ), /* @__PURE__ */ React.createElement(ReportMenu, { id: "columns", openMenu, setOpenMenu, minWidth: 168, label: "Columns" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "0 10px 6px", borderBottom: "1px solid var(--bd)", marginBottom: 4 } }, "Show / Hide Columns"), MASTER_COL_DEFS.map((col) => {
+      const on = visCols.includes(col.k);
+      return /* @__PURE__ */ React.createElement(
+        "label",
+        {
+          key: col.k,
+          style: { display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer", borderRadius: 4, transition: "background .1s" },
+          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
+          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+        },
+        /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: on,
+            onChange: (e) => setVisCols(e.target.checked ? [...visCols, col.k] : visCols.filter((k) => k !== col.k)),
+            style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
+          }
+        ),
+        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, col.label)
+      );
+    }), /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", marginTop: 4, paddingTop: 6, padding: "6px 10px 2px" } }, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
+        onClick: () => setVisCols([...DEFAULT_MASTER_COLS])
+      },
+      "Reset to default"
+    ))))), masterGroupBy === "project" && projOrder.error && /* @__PURE__ */ React.createElement("div", { role: "alert", style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      flexShrink: 0,
+      marginBottom: 10,
+      padding: "6px 12px",
+      borderRadius: 8,
+      border: "1px solid var(--red, #dc2626)",
+      color: "var(--red, #dc2626)",
+      fontSize: 12,
+      fontWeight: 600
+    } }, /* @__PURE__ */ React.createElement("span", null, "Couldn't save your project order. It's kept on screen for now."), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => postToShell({ type: "planar:project-order-retry" }),
+        style: { fontSize: 12, fontWeight: 700, color: "var(--red, #dc2626)", background: "none", border: "1px solid var(--red, #dc2626)", borderRadius: 6, padding: "2px 10px", cursor: "pointer", fontFamily: "inherit" }
+      },
+      "Retry"
+    )), /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        ref: tableWrapRef,
+        "data-scroll-bounds": true,
+        tabIndex: 0,
+        onKeyDown: handleTableKey,
+        style: {
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          outline: "none",
+          overscrollBehavior: "contain",
+          paddingBottom: "var(--fab-dock, 0px)",
+          background: "var(--bg)",
+          border: "1px solid var(--bd2)",
+          borderRadius: 10,
+          boxShadow: "0 1px 2px rgba(27,31,36,.05), 0 3px 12px rgba(27,31,36,.04)"
+        },
+        onBlur: (e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setSelCell(null);
+        }
+      },
+      /* @__PURE__ */ React.createElement("table", { style: {
+        borderCollapse: "collapse",
+        tableLayout: "fixed",
+        minWidth: "100%",
+        width: 30 + activeCols.reduce((s, c) => s + (colWidths[c.k] || 100), 0),
+        fontSize: 12
+      } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { key: "__jump", "data-grid-header": "1", style: {
+        width: 30,
+        minWidth: 30,
+        maxWidth: 30,
+        padding: 0,
+        position: "sticky",
+        top: 0,
+        zIndex: 3,
+        background: "#fafbfc",
+        boxShadow: "inset -1px 0 0 var(--bd), inset 0 -1px 0 var(--bd2)"
+      } }), displayCols.map((col) => {
+        const isActive = masterSort.col === col.k;
+        const sortable = ["project", "id", "name", "start", "end", "duration", "health", "percentComplete", "responsibleParty", "notes"].includes(col.k);
+        return /* @__PURE__ */ React.createElement(
+          "th",
+          {
+            key: col.k,
+            draggable: true,
+            onDragStart: (e) => {
+              e.dataTransfer.effectAllowed = "move";
+              setDragMCol(col.k);
+            },
+            onDragOver: (e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragMOver(col.k);
+            },
+            onDragLeave: () => setDragMOver(null),
+            onDrop: (e) => {
+              e.preventDefault();
+              reorderMCols(dragMCol, col.k);
+              setDragMCol(null);
+              setDragMOver(null);
+            },
+            onDragEnd: () => {
+              setDragMCol(null);
+              setDragMOver(null);
+            },
+            onClick: sortable && dragMCol === null ? () => setSort(col.k) : void 0,
+            style: {
+              padding: "6px 10px",
+              textAlign: "left",
+              color: "var(--mut)",
+              fontSize: 10,
+              textTransform: "uppercase",
+              fontWeight: 600,
+              letterSpacing: ".06em",
+              position: "sticky",
+              top: 0,
+              zIndex: 3,
+              boxShadow: (dragMOver === col.k && dragMCol !== col.k ? "inset 2px 0 0 var(--blue), " : "") + "inset -1px 0 0 var(--bd), inset 0 -1px 0 var(--bd2)",
+              whiteSpace: "nowrap",
+              width: colWidths[col.k],
+              minWidth: colWidths[col.k],
+              maxWidth: colWidths[col.k],
+              userSelect: "none",
+              overflow: "hidden",
+              cursor: sortable ? "pointer" : "grab",
+              opacity: dragMCol === col.k ? 0.4 : 1,
+              background: "#fafbfc",
+              transition: "opacity .1s"
+            }
+          },
+          /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4 } }, col.label, sortable && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: isActive ? "var(--txt)" : "var(--bd2)", lineHeight: 1, flexShrink: 0 } }, isActive ? masterSort.dir === "asc" ? "↑" : "↓" : "↕")),
+          /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              onMouseDown: (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                startResize(col.k, e);
+              },
+              onClick: (e) => e.stopPropagation(),
+              onDoubleClick: (e) => {
+                e.stopPropagation();
+                autoSizeMCol(col.k);
+              },
+              style: {
+                position: "absolute",
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 6,
+                cursor: "col-resize",
+                zIndex: 2,
+                background: "transparent",
+                transition: "background .12s"
+              },
+              onMouseEnter: (e) => e.currentTarget.style.background = "rgba(79,70,229,0.25)",
+              onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
+            }
+          )
+        );
+      }), /* @__PURE__ */ React.createElement("th", { key: "__fill", "aria-hidden": "true", style: {
+        width: "auto",
+        minWidth: 0,
+        padding: 0,
+        position: "sticky",
+        top: 0,
+        zIndex: 3,
+        background: "#fafbfc",
+        boxShadow: "inset 0 -1px 0 var(--bd2)"
+      } }))), /* @__PURE__ */ React.createElement("tbody", null, masterGroupBy === "project" ? (() => {
+        return groupedRows.flatMap(({ projId, gRows, label, siteId, rank }, gi) => {
+          const movable = canReorderGroups && siteId != null && rank !== Infinity;
+          const pos = movable ? movableIds.indexOf(siteId) : -1;
+          const dragging = grpDrag && grpDrag.siteId === siteId;
+          const first = siteId != null && groupedRows.findIndex((g2) => g2.siteId === siteId) === gi;
+          const showCtl = movable && first;
+          const line = !grpDrag ? null : siteId === lineAboveSite && first ? "inset 0 3px 0 var(--blue)" : siteId === lineBelowSite && gi === lastGroupOfSite(siteId) ? "inset 0 -3px 0 var(--blue)" : null;
+          return [
+            /* @__PURE__ */ React.createElement("tr", { key: `grp-${projId}`, "data-grp-site": siteId != null ? siteId : "", style: { opacity: dragging ? 0.45 : 1 } }, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: {
+              padding: "10px 12px 8px",
+              borderBottom: "1px solid var(--bd)",
+              background: "#f0f0f5",
+              borderLeft: "4px solid var(--amber)",
+              boxShadow: line || "none"
+            } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } }, showCtl && /* @__PURE__ */ React.createElement(
+              "span",
+              {
+                "data-grp-grip": siteId,
+                role: "button",
+                tabIndex: 0,
+                title: "Drag to reorder",
+                "aria-label": `Drag to reorder ${label}`,
+                onPointerDown: (e) => startGroupDrag(e, siteId),
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 26,
+                  height: 30,
+                  color: "var(--mut)",
+                  fontSize: 16,
+                  lineHeight: 1,
+                  cursor: grpDrag ? "grabbing" : "grab",
+                  touchAction: "none",
+                  userSelect: "none"
+                }
+              },
+              "⠿"
+            ), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 15, fontWeight: 700, color: "var(--txt)", letterSpacing: "-.01em" } }, label), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, background: "#dbeafe", color: "#1d4ed8", borderRadius: 8, padding: "1px 7px", verticalAlign: "middle" } }, gRows.length), showCtl && /* @__PURE__ */ React.createElement(GroupOrderMenu, { label, isFirst: pos === 0, isLast: pos === movableIds.length - 1, onPick: (to) => pickGroupMenu(siteId, to) })))),
+            ...gRows.map((t, gri) => {
+              const ri = sortedRows.indexOf(t);
+              return /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (gri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }));
+            })
+          ];
+        });
+      })() : sortedRows.map((t, ri) => /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (ri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }))), sortedRows.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: { padding: 40, textAlign: "center", color: "var(--mut)", fontSize: 12, borderBottom: "1px solid var(--bd)" } }, totalTaskCount === 0 ? "No tasks in this project yet." : levelRows.length > 0 && filterCount > 0 ? /* @__PURE__ */ React.createElement("span", { "data-filter-empty": true }, "No tasks match the filter (", reportFilterPhrase(statusKeys.map((k) => statusName(statusOptions.find((o) => o.k === k))), projectKeys.map((id) => (projectChoices.find((g2) => String(g2.projId) === id) || {}).label || id)), "). ", /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          "data-filter-empty-clear": true,
+          onClick: clearFilters,
+          style: { border: "none", background: "none", padding: 0, font: "inherit", color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }
+        },
+        "Clear filter"
+      )) : /* @__PURE__ */ React.createElement("span", { "data-show-empty": true }, "No tasks match the Show setting. ", /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => setLvlFilter({ ...DEFAULT_LVL }),
+          style: { border: "none", background: "none", padding: 0, font: "inherit", color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }
+        },
+        "Show all"
+      ))))))
+    ));
+  }
+  exposeToHarness({
+    HealthDropMenu: [() => HealthDropMenu],
+    MASTER_COL_DEFS: [() => MASTER_COL_DEFS],
+    DEFAULT_MASTER_COLS: [() => DEFAULT_MASTER_COLS],
+    DEFAULT_MASTER_WIDTHS: [() => DEFAULT_MASTER_WIDTHS],
+    REPORT_STATUS_BASE: [() => REPORT_STATUS_BASE],
+    REPORT_STATUS_DEFAULT: [() => REPORT_STATUS_DEFAULT],
+    reportStatusOptions: [() => reportStatusOptions],
+    reportStatusKeys: [() => reportStatusKeys],
+    reportStatusToggle: [() => reportStatusToggle],
+    reportStatusPasses: [() => reportStatusPasses],
+    reportProjectKeys: [() => reportProjectKeys],
+    reportProjectToggle: [() => reportProjectToggle],
+    reportProjectPasses: [() => reportProjectPasses],
+    reportFilterCount: [() => reportFilterCount],
+    reportFacetCounts: [() => reportFacetCounts],
+    reportFilterPhrase: [() => reportFilterPhrase],
+    _projectOrder: [() => _projectOrder, (v) => {
+      _projectOrder = v;
+    }],
+    _projectOrderSubs: [() => _projectOrderSubs],
+    installProjectOrderListener: [() => installProjectOrderListener],
+    postToShell: [() => postToShell],
+    useProjectOrder: [() => useProjectOrder],
+    GroupOrderMenu: [() => GroupOrderMenu],
+    REPORT_MENU_SECTION: [() => REPORT_MENU_SECTION],
+    REPORT_MENU_ROW: [() => REPORT_MENU_ROW],
+    REPORT_MENU_COUNT: [() => REPORT_MENU_COUNT],
+    ReportMenu: [() => ReportMenu],
+    MasterView: [() => MasterView]
+  });
+
+  // src/workspaces/scheduler/page/main.jsx
+  var { useState: useState3, useEffect: useEffect2, useRef: useRef3, useMemo: useMemo2, useCallback: useCallback2 } = React;
+  function removeScheduleFromDoc(d, id) {
+    if (!d || !d.projects || !d.projects[id]) return d;
+    const newProjects = { ...d.projects };
+    delete newProjects[id];
+    const remaining = Object.keys(newProjects).map(Number);
+    const newAPid = d.aPid === id ? remaining.length ? remaining[0] : null : d.aPid;
+    return pruneScheduleRefs({ ...d, aPid: newAPid, projects: newProjects });
+  }
+  function logMergeToastEvent(changedRows, changedPids, projects) {
+    try {
+      if (!window.__sb) return;
+      const names = (changedPids || []).map((pid) => crossScheduleLabel(projects && projects[pid] || {}));
+      const msg = `merge toast fired — ${changedRows} task${changedRows === 1 ? "" : "s"} updated across ${names.length} schedule${names.length === 1 ? "" : "s"}` + (names.length ? `: ${names.join(", ")}` : "");
+      window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2e3) }).then(() => {
+      }, () => {
+      });
+    } catch (e) {
+    }
+  }
+  var ROW_H = 24;
+  var GRID_LINE = "1px solid var(--bd)";
+  var GRID_LINE_RANGE = "1px solid #93c5fd";
+  var PPD = 22;
+  var TL_H = 30;
+  var BUF = 6;
+  var WIN_CHUNK = 8;
+  var WIN_OVER = 12;
+  var rowWindowTop = (st) => Math.floor(Math.max(0, st) / ROW_H / WIN_CHUNK) * WIN_CHUNK;
+  var rowWindow = (winTop, viewH, total) => ({
+    startIdx: Math.max(0, winTop - WIN_OVER),
+    endIdx: Math.min(total, winTop + WIN_CHUNK + Math.ceil(viewH / ROW_H) + 1 + WIN_OVER)
+  });
+  var GRID_SCROLL_MEMO = /* @__PURE__ */ new Map();
+  var GANTT_SCROLL_MEMO = /* @__PURE__ */ new Map();
+  var ROW_COLORS = [
+    { color: "#fef3c7", label: "Yellow tint" },
+    { color: "#ffedd5", label: "Orange tint" },
+    { color: "#fee2e2", label: "Red tint" },
+    { color: "#fce7f3", label: "Pink tint" },
+    { color: "#f3e8ff", label: "Purple tint" },
+    { color: "#fde68a", label: "Yellow" },
+    { color: "#fed7aa", label: "Orange" },
+    { color: "#fecaca", label: "Red" },
+    { color: "#fbcfe8", label: "Pink" },
+    { color: "#e9d5ff", label: "Purple" },
+    { color: "#d9f99d", label: "Lime" },
+    { color: "#bbf7d0", label: "Green" },
+    { color: "#a5f3fc", label: "Cyan" },
+    { color: "#bfdbfe", label: "Blue" },
+    { color: "#c7d2fe", label: "Indigo" },
+    { color: "#ecfccb", label: "Lime tint" },
+    { color: "#d1fae5", label: "Green tint" },
+    { color: "#cffafe", label: "Cyan tint" },
+    { color: "#dbeafe", label: "Blue tint" },
+    { color: "#e0e7ff", label: "Indigo tint" }
+  ];
+  var escapeHtml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  var pinnedFillLayers = (fills) => [...fills.filter(Boolean)].reverse().map((f) => `linear-gradient(${f},${f})`).join(",");
+  var SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
+  var isValidColor = (v) => v == null || SAFE_COLOR_RE.test(v);
+  var FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
+  var FONT_SIZE_MIN = FONT_SIZE_STEPS[0];
+  var FONT_SIZE_MAX = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
+  var isValidFontSize = (n) => typeof n === "number" && Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX;
+  var stepFontSize = (cur, dir) => {
+    const base = typeof cur === "number" ? cur : 12;
+    if (dir > 0) {
+      const next = FONT_SIZE_STEPS.find((v) => v > base);
+      return next != null ? next : FONT_SIZE_MAX;
+    }
+    const prev = FONT_SIZE_STEPS.filter((v) => v < base);
+    return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
+  };
+  var fmtBarDate = (s, withYear) => {
+    if (!s) return "";
+    const d = /* @__PURE__ */ new Date(s + "T12:00:00");
+    return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()}` + (withYear === false ? "" : `/${String(d.getFullYear()).slice(2)}`);
+  };
+  var barLabelText = (t, field, withYear) => {
+    if (!field || field === "none") return "";
+    if (field === "start") return fmtBarDate(t.start, withYear);
+    if (field === "end") return fmtBarDate(t.end, withYear);
+    if (field === "owner") return ownerDisplayParts(ownerListOf(t)).label;
+    if (field === "pct") return `${t.percentComplete || 0}%`;
+    return "";
+  };
+  setHolidaySet(buildHolidaySet(DEFAULT_HOLIDAYS));
   var askConfirm = /* @__PURE__ */ (() => {
     let _open = null;
     return ({ title, body = "", confirmLabel = "Continue", danger = false } = {}) => new Promise((resolve) => {
@@ -7006,440 +9128,6 @@
       )
     );
   }
-  function getInitials(name) {
-    if (!name) return "?";
-    const parts = name.trim().split(/\s+/);
-    return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
-  }
-  var AVATAR_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
-  function avatarColor(name) {
-    if (!name) return "#94a3b8";
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = h * 31 + name.charCodeAt(i) >>> 0;
-    return AVATAR_COLORS[h % AVATAR_COLORS.length];
-  }
-  var _cpCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
-  var _cpCtx = _cpCanvas ? _cpCanvas.getContext("2d") : null;
-  function _cpMeasure(text, font) {
-    if (!_cpCtx) return 0;
-    _cpCtx.font = font;
-    return _cpCtx.measureText(text).width;
-  }
-  function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, variant = "master" }) {
-    const isGrid = variant === "grid";
-    const initialOwners = React.useMemo(() => Array.isArray(owners) ? owners : owners ? [owners] : [], []);
-    const [chips, setChips] = React.useState(initialOwners);
-    const [query, setQuery] = React.useState(seedText || "");
-    const [highlight, setHighlight] = React.useState(-1);
-    const [ghost, setGhost] = React.useState(null);
-    const [warn, setWarn] = React.useState(null);
-    const [dragIdx, setDragIdx] = React.useState(null);
-    const lastPrefixWarnedFor = React.useRef(null);
-    const newContactsRef = React.useRef([]);
-    const inputRef = React.useRef(null);
-    const wrapRef = React.useRef(null);
-    const closedRef = React.useRef(false);
-    const lastWrittenRef = React.useRef(initialOwners);
-    const chipsRef = React.useRef(initialOwners);
-    const queryRef = React.useRef(seedText || "");
-    React.useEffect(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      const n = el.value.length;
-      el.setSelectionRange(n, n);
-    }, []);
-    const chipSet = React.useMemo(() => new Set(chips.map((c) => c.toLowerCase())), [chips]);
-    chipsRef.current = chips;
-    queryRef.current = query;
-    const q = query.trim().toLowerCase();
-    const suggestions = (q ? contacts.filter((c) => !chipSet.has(c.name.toLowerCase()) && (c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q))) : contacts.filter((c) => !chipSet.has(c.name.toLowerCase()))).slice(0, 6);
-    const trimmed = query.trim();
-    const isNewName = trimmed.length > 0 && !contacts.some((c) => ownerKey(c.name) === ownerKey(trimmed));
-    const atCap = chips.length >= OWNER_CAP;
-    const totalItems = suggestions.length + (isNewName ? 1 : 0);
-    const prediction = query ? contacts.find((c) => c.name.toLowerCase().startsWith(query.toLowerCase()) && c.name.length > query.length && !chipSet.has(c.name.toLowerCase())) : null;
-    const ghostText = prediction ? prediction.name.slice(query.length) : "";
-    React.useEffect(() => {
-      setHighlight((h) => h >= totalItems ? -1 : h);
-    }, [totalItems]);
-    React.useEffect(() => {
-      lastPrefixWarnedFor.current = null;
-      setWarn((w) => w && w.kind === "prefix" ? null : w);
-    }, [query]);
-    React.useLayoutEffect(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      const cs = window.getComputedStyle(el);
-      const fontFamily = cs.fontFamily, fontSize = cs.fontSize, fontWeight = cs.fontWeight || "400";
-      const padL = parseFloat(cs.paddingLeft) || 0;
-      const bordL = parseFloat(cs.borderLeftWidth) || 0;
-      const w = _cpMeasure(query, `${fontWeight} ${fontSize} ${fontFamily}`);
-      setGhost({ left: padL + bordL + w, fontSize, fontFamily, fontWeight });
-    }, [query]);
-    const pos = useAnchoredPopover(true, inputRef, (r) => {
-      const popupH = Math.min(260, 40 + totalItems * 40);
-      const roomBelow = window.innerHeight - r.bottom;
-      const above = roomBelow < popupH + 8 && r.top > popupH + 8;
-      return {
-        left: Math.round(r.left),
-        top: above ? Math.round(r.top - popupH - 2) : Math.round(r.bottom + 2),
-        width: Math.max(240, r.width),
-        above
-      };
-    }, () => finishEditing());
-    function writeThrough(next, newContact) {
-      const news = newContact ? [newContact] : [];
-      if (news.length) newContactsRef.current = [...newContactsRef.current, ...news];
-      const prev = lastWrittenRef.current;
-      const same = prev.length === next.length && prev.every((n, i) => n === next[i]);
-      if (same && !news.length) return;
-      lastWrittenRef.current = next;
-      onOwnersChange(next, news);
-    }
-    function closeEditor() {
-      if (closedRef.current) return;
-      closedRef.current = true;
-      onClose();
-    }
-    function finishEditing() {
-      if (closedRef.current) return;
-      const liveChips = chipsRef.current;
-      const liveTrimmed = String(queryRef.current || "").trim();
-      if (liveTrimmed) {
-        const lower = liveTrimmed.toLowerCase();
-        const existing = contacts.find((c) => ownerKey(c.name) === lower);
-        const already = liveChips.some((n) => ownerKey(n) === lower);
-        if (existing && !already) writeThrough([...liveChips, existing.name]);
-      }
-      closeEditor();
-    }
-    function addChip(name, newContact) {
-      const n = String(name || "").trim();
-      if (!n) return;
-      if (chipSet.has(n.toLowerCase())) {
-        setQuery("");
-        setWarn(null);
-        return;
-      }
-      if (atCap) {
-        setWarn({ kind: "cap", text: `Owner is capped at ${OWNER_CAP} people — remove one to add another.` });
-        return;
-      }
-      const next = [...chips, n];
-      setChips(next);
-      writeThrough(next, newContact);
-      setQuery("");
-      setWarn(null);
-      setHighlight(-1);
-      requestAnimationFrame(() => inputRef.current && inputRef.current.focus());
-    }
-    function removeChip(i) {
-      const next = chips.filter((_, idx) => idx !== i);
-      setChips(next);
-      writeThrough(next);
-    }
-    function reorderChips(from, to) {
-      if (from === to || from == null || to == null) return;
-      const next = [...chips];
-      const [m] = next.splice(from, 1);
-      next.splice(to, 0, m);
-      setChips(next);
-      writeThrough(next);
-    }
-    function attemptCreate(name) {
-      if (name.includes(",")) {
-        setWarn({ kind: "comma", text: `A contact name can't contain a comma — that's how two people become one. Use comma or Enter to add each person separately.` });
-        return;
-      }
-      const prefixHit = contacts.find((c) => c.name.toLowerCase().startsWith(name.toLowerCase()) && c.name.length > name.length);
-      if (prefixHit && lastPrefixWarnedFor.current !== name.toLowerCase()) {
-        lastPrefixWarnedFor.current = name.toLowerCase();
-        setWarn({ kind: "prefix", text: `"${prefixHit.name}" already exists — press Enter again to add "${name}" anyway, or → to use that instead.` });
-        return;
-      }
-      addChip(name, { name, email: "" });
-    }
-    function selectItem(i) {
-      if (i < suggestions.length) addChip(suggestions[i].name);
-      else attemptCreate(trimmed);
-    }
-    function acceptGhost() {
-      if (!prediction) return;
-      addChip(prediction.name);
-    }
-    React.useEffect(() => {
-      function onDocMouseDown(e) {
-        if (wrapRef.current && wrapRef.current.contains(e.target)) return;
-        if (e.target.closest && e.target.closest("[data-contact-dd]")) return;
-        finishEditing();
-      }
-      document.addEventListener("mousedown", onDocMouseDown);
-      return () => document.removeEventListener("mousedown", onDocMouseDown);
-    }, [query, chips]);
-    function onKeyDown(e) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        if (warn) {
-          setWarn(null);
-          lastPrefixWarnedFor.current = null;
-          return;
-        }
-        if (query) {
-          setQuery("");
-          return;
-        }
-        closeEditor();
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setHighlight((h) => Math.min(h + 1, totalItems - 1));
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setHighlight((h) => Math.max(h - 1, -1));
-        return;
-      }
-      if (e.key === "ArrowRight") {
-        const el = inputRef.current;
-        const atEnd = el && el.selectionStart === query.length && el.selectionEnd === query.length;
-        if (ghostText && atEnd) {
-          e.preventDefault();
-          acceptGhost();
-        }
-        return;
-      }
-      if (e.key === "Backspace" && !query && chips.length) {
-        e.preventDefault();
-        removeChip(chips.length - 1);
-        return;
-      }
-      if (e.key === ",") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (trimmed) {
-          if (highlight >= 0 && highlight < totalItems) selectItem(highlight);
-          else attemptCreate(trimmed);
-        }
-        return;
-      }
-      if (e.key === "Tab") {
-        e.stopPropagation();
-        finishEditing();
-        return;
-      }
-      if (e.key === "Enter") {
-        e.stopPropagation();
-        e.preventDefault();
-        if (!trimmed) {
-          finishEditing();
-          return;
-        }
-        if (highlight >= 0 && highlight < totalItems) {
-          selectItem(highlight);
-          return;
-        }
-        if (ghostText && prediction && isNewName) {
-          addChip(prediction.name);
-          return;
-        }
-        const existing = contacts.find((c) => ownerKey(c.name) === ownerKey(trimmed));
-        if (existing) {
-          addChip(existing.name);
-          return;
-        }
-        attemptCreate(trimmed);
-        return;
-      }
-    }
-    const masterInputStyle = {
-      display: "block",
-      width: "100%",
-      height: "18px",
-      border: "none",
-      borderBottom: "1.5px solid var(--blue)",
-      outline: "none",
-      background: "transparent",
-      color: "var(--txt)",
-      fontSize: 12,
-      fontFamily: "inherit",
-      padding: "0 2px"
-    };
-    const popup = pos ? ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement("div", { "data-contact-dd": true, "data-owner-popup": true, ...MENU_STOPS_GRID, style: {
-        position: "fixed",
-        left: pos.left,
-        top: pos.top,
-        width: pos.width,
-        zIndex: 1e5,
-        background: "var(--bg)",
-        border: "1px solid var(--bd2)",
-        borderRadius: 7,
-        boxShadow: "0 6px 20px rgba(0,0,0,.13)",
-        display: "flex",
-        flexDirection: pos.above ? "column-reverse" : "column",
-        overflow: "hidden",
-        maxHeight: 280
-      } }, chips.length > 0 && /* @__PURE__ */ React.createElement("div", { "data-owner-chips": true, style: { display: "flex", flexWrap: "wrap", gap: 5, padding: "8px 9px", borderBottom: "1px solid var(--bd)" } }, chips.map((name, i) => /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          key: name + i,
-          "data-owner-chip": true,
-          draggable: true,
-          onDragStart: (e) => {
-            e.dataTransfer.effectAllowed = "move";
-            setDragIdx(i);
-          },
-          onDragOver: (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-          },
-          onDrop: (e) => {
-            e.preventDefault();
-            reorderChips(dragIdx, i);
-            setDragIdx(null);
-          },
-          onDragEnd: () => setDragIdx(null),
-          title: i === 0 ? "Accountable owner — drag another chip here to change" : "Drag to reorder",
-          style: {
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            padding: "2px 4px 2px 8px",
-            borderRadius: 12,
-            background: i === 0 ? "#eef2ff" : "#f3f4f6",
-            border: i === 0 ? "1px solid #c7d2fe" : "1px solid var(--bd2)",
-            fontSize: 11.5,
-            color: "var(--txt)",
-            cursor: "grab",
-            opacity: dragIdx === i ? 0.4 : 1
-          }
-        },
-        name,
-        /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            "data-owner-chip-remove": true,
-            onMouseDown: (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              removeChip(i);
-            },
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 14,
-              height: 14,
-              borderRadius: "50%",
-              color: "var(--mut)",
-              cursor: "pointer",
-              fontSize: 11,
-              lineHeight: 1
-            }
-          },
-          "×"
-        )
-      ))), warn && /* @__PURE__ */ React.createElement("div", { "data-owner-warn": true, style: {
-        fontSize: 11,
-        color: warn.kind === "cap" ? "var(--mut)" : "#b45309",
-        background: warn.kind === "cap" ? "var(--surf)" : "#fffbeb",
-        padding: "7px 10px",
-        lineHeight: 1.4,
-        borderBottom: "1px solid var(--bd)"
-      } }, warn.text), (suggestions.length > 0 || isNewName) && /* @__PURE__ */ React.createElement("div", { style: { overflowY: "auto", maxHeight: 220 } }, suggestions.map((c, i) => /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          key: c.id,
-          onMouseEnter: () => setHighlight(i),
-          onMouseDown: (e) => {
-            e.preventDefault();
-            addChip(c.name);
-          },
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "7px 10px",
-            cursor: "pointer",
-            background: highlight === i ? "#f0f2ff" : "transparent"
-          }
-        },
-        /* @__PURE__ */ React.createElement("div", { style: {
-          width: 24,
-          height: 24,
-          borderRadius: "50%",
-          background: avatarColor(c.name),
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 9,
-          fontWeight: 700,
-          color: "#fff",
-          flexShrink: 0
-        } }, getInitials(c.name)),
-        /* @__PURE__ */ React.createElement("div", { style: { minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, c.name), c.email && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, c.email))
-      )), isNewName && /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          "data-owner-add-new": true,
-          onMouseEnter: () => setHighlight(suggestions.length),
-          onMouseDown: (e) => {
-            e.preventDefault();
-            attemptCreate(trimmed);
-          },
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "7px 10px",
-            cursor: "pointer",
-            borderTop: suggestions.length ? "1px solid var(--bd)" : "none",
-            color: "var(--blue)",
-            fontSize: 11,
-            fontWeight: 500,
-            background: highlight === suggestions.length ? "#f0f5ff" : "transparent"
-          }
-        },
-        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, lineHeight: 1 } }, "+"),
-        /* @__PURE__ */ React.createElement("span", { style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, 'Add "', /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, trimmed), '" as new contact')
-      ))),
-      document.body
-    ) : null;
-    return /* @__PURE__ */ React.createElement("div", { ref: wrapRef, style: { position: "relative", width: "100%" } }, /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        ...NO_AUTOFILL,
-        ref: inputRef,
-        value: query,
-        className: isGrid ? "ei" : void 0,
-        style: isGrid ? void 0 : masterInputStyle,
-        onChange: (e) => {
-          setQuery(e.target.value);
-        },
-        onKeyDown,
-        placeholder: chips.length ? "Add another…" : "Type a name…"
-      }
-    ), ghostText && ghost && /* @__PURE__ */ React.createElement("span", { "aria-hidden": true, style: {
-      position: "absolute",
-      left: ghost.left,
-      top: 0,
-      height: "100%",
-      display: "flex",
-      alignItems: "center",
-      pointerEvents: "none",
-      whiteSpace: "pre",
-      fontSize: ghost.fontSize,
-      fontFamily: ghost.fontFamily,
-      fontWeight: ghost.fontWeight,
-      color: "var(--mut)",
-      opacity: 0.5,
-      overflow: "hidden",
-      maxWidth: `calc(100% - ${ghost.left}px - 4px)`
-    } }, ghostText), popup);
-  }
   function ContactsPanel({ data, setData, onClose }) {
     const contacts = data.settings?.contacts || [];
     const [editId, setEditId] = React.useState(null);
@@ -7669,11 +9357,11 @@
     ))))));
   }
   function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
-    const [rows, setRows] = useState(null);
-    const [previewRow, setPreviewRow] = useState(null);
-    const [previewData, setPreviewData] = useState(null);
-    const [busy, setBusy] = useState(false);
-    useEffect(() => {
+    const [rows, setRows] = useState3(null);
+    const [previewRow, setPreviewRow] = useState3(null);
+    const [previewData, setPreviewData] = useState3(null);
+    const [busy, setBusy] = useState3(false);
+    useEffect2(() => {
       let alive = true;
       (async () => {
         const list = await window.storage.getHistory("hs-v1", 100);
@@ -8076,8 +9764,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
   }
   function InlineDate({ value, onCommit }) {
     const disp = value ? toShortDate(value) : "";
-    const [txt, setTxt] = useState(disp);
-    useEffect(() => {
+    const [txt, setTxt] = useState3(disp);
+    useEffect2(() => {
       setTxt(disp);
     }, [disp]);
     const commit = () => {
@@ -8128,21 +9816,21 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     return { body: tidy(head), quoted: qtext, hasQuoted: qtext.length > 0 };
   }
   function SuggestionsView({ data, updateTask, setData, rows, setRows, loading, onClose, gridProps, activeIdx, setActiveIdx }) {
-    const [edits, setEdits] = useState({});
-    const [view, setView] = useState("grid");
-    const [split, setSplit] = useState(50);
-    const [toast, setToast] = useState(null);
-    const [showPicker, setShowPicker] = useState(false);
-    const [showQuoted, setShowQuoted] = useState(false);
-    const bodyRef = useRef(null), targetRef = useRef(null), canvasRef = useRef(null);
-    const toastTimer = useRef(null), undoRef = useRef(null);
-    const [mailReaderOpen, setMailReaderOpen] = useState(false);
-    const [mailOverflow, setMailOverflow] = useState(false);
-    const mailBodyRef = useRef(null);
-    useEffect(() => {
+    const [edits, setEdits] = useState3({});
+    const [view, setView] = useState3("grid");
+    const [split, setSplit] = useState3(50);
+    const [toast, setToast] = useState3(null);
+    const [showPicker, setShowPicker] = useState3(false);
+    const [showQuoted, setShowQuoted] = useState3(false);
+    const bodyRef = useRef3(null), targetRef = useRef3(null), canvasRef = useRef3(null);
+    const toastTimer = useRef3(null), undoRef = useRef3(null);
+    const [mailReaderOpen, setMailReaderOpen] = useState3(false);
+    const [mailOverflow, setMailOverflow] = useState3(false);
+    const mailBodyRef = useRef3(null);
+    useEffect2(() => {
       setActiveIdx((i) => Math.max(0, Math.min(i, rows.length - 1)));
     }, [rows.length]);
-    useEffect(() => {
+    useEffect2(() => {
       setShowPicker(false);
       setShowQuoted(false);
       setMailReaderOpen(false);
@@ -8477,7 +10165,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     };
     const prev = () => setActiveIdx((i) => Math.max(0, i - 1));
     const next = () => setActiveIdx((i) => Math.min(rows.length - 1, i + 1));
-    useEffect(() => {
+    useEffect2(() => {
       const h = (e) => {
         const t = e.target;
         if (mailReaderOpen) {
@@ -8521,7 +10209,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("keydown", h);
       return () => window.removeEventListener("keydown", h);
     });
-    useEffect(() => {
+    useEffect2(() => {
       if (!matched) return;
       const id = setTimeout(() => {
         if (view === "grid" && targetRef.current) targetRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -8532,7 +10220,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }, 60);
       return () => clearTimeout(id);
     }, [activeIdx, view, matched, targetId]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!(matched && gridProps && gridProps.setSelectedId && targetId != null)) return;
       const id = setTimeout(() => gridProps.setSelectedId(targetId), 60);
       return () => clearTimeout(id);
@@ -9042,13 +10730,13 @@ The current state is saved as a 'pre-restore' snapshot first.`,
     return applyTaskFocus({ ...d, ...patch });
   }
   function App() {
-    const [data, setData] = useState(null);
-    const dataRef = useRef(null);
-    useEffect(() => {
+    const [data, setData] = useState3(null);
+    const dataRef = useRef3(null);
+    useEffect2(() => {
       dataRef.current = data;
     }, [data]);
-    const rollToastRef = useRef(null);
-    useEffect(() => {
+    const rollToastRef = useRef3(null);
+    useEffect2(() => {
       if (rollToastRef.current) {
         showToast(rollToastRef.current);
         rollToastRef.current = null;
@@ -9066,55 +10754,55 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       return idxs;
     };
     const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
-    const [successorPrompt, setSuccessorPrompt] = useState(null);
-    const [successorPromptQueue, setSuccessorPromptQueue] = useState([]);
-    useEffect(() => {
+    const [successorPrompt, setSuccessorPrompt] = useState3(null);
+    const [successorPromptQueue, setSuccessorPromptQueue] = useState3([]);
+    useEffect2(() => {
       if (!successorPrompt && successorPromptQueue.length > 0) {
         setSuccessorPrompt(successorPromptQueue[0]);
         setSuccessorPromptQueue((q) => q.slice(1));
       }
     }, [successorPrompt, successorPromptQueue]);
-    const [notesCtx, setNotesCtx] = useState(null);
-    const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
-    const [mobMenuOpen, setMobMenuOpen] = useState(false);
-    useEffect(() => {
+    const [notesCtx, setNotesCtx] = useState3(null);
+    const [isMobile, setIsMobile] = useState3(() => typeof window !== "undefined" && window.innerWidth < 768);
+    const [mobMenuOpen, setMobMenuOpen] = useState3(false);
+    useEffect2(() => {
       const h = () => setIsMobile(window.innerWidth < 768);
       window.addEventListener("resize", h);
       return () => window.removeEventListener("resize", h);
     }, []);
-    const [coarsePointer, setCoarsePointer] = useState(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-    useEffect(() => {
+    const [coarsePointer, setCoarsePointer] = useState3(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    useEffect2(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
       const mq = window.matchMedia("(pointer: coarse)");
       const h = () => setCoarsePointer(mq.matches);
       mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
       return () => mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h);
     }, []);
-    const [pdfExportOpen, setPdfExportOpen] = useState(false);
-    const [projCtx, setProjCtx] = useState(null);
-    const [taskCtx, setTaskCtx] = useState(null);
-    const [iconPickerCtx, setIconPickerCtx] = useState(null);
-    const clipboardRef = useRef(null);
-    const pasteSelectRef = useRef(null);
-    const [, setClipboardTick] = useState(0);
-    const [renameModal, setRenameModal] = useState(null);
-    const [deleteChoice, setDeleteChoice] = useState(null);
-    const [moveToCtx, setMoveToCtx] = useState(null);
-    const moveSelectRef = useRef(null);
-    const [edit, setEdit] = useState(null);
-    const editLiveRef = useRef(null);
-    useEffect(() => {
+    const [pdfExportOpen, setPdfExportOpen] = useState3(false);
+    const [projCtx, setProjCtx] = useState3(null);
+    const [taskCtx, setTaskCtx] = useState3(null);
+    const [iconPickerCtx, setIconPickerCtx] = useState3(null);
+    const clipboardRef = useRef3(null);
+    const pasteSelectRef = useRef3(null);
+    const [, setClipboardTick] = useState3(0);
+    const [renameModal, setRenameModal] = useState3(null);
+    const [deleteChoice, setDeleteChoice] = useState3(null);
+    const [moveToCtx, setMoveToCtx] = useState3(null);
+    const moveSelectRef = useRef3(null);
+    const [edit, setEdit] = useState3(null);
+    const editLiveRef = useRef3(null);
+    useEffect2(() => {
       editLiveRef.current = edit;
     }, [edit]);
-    const focusReselectRef = useRef(null);
-    const [editStartChar, setEditStartChar] = useState(null);
-    const [selectedId, setSelectedId] = useState(null);
-    const [selRange, setSelRange] = useState(null);
-    const [focusPins, setFocusPins] = useState(() => /* @__PURE__ */ new Set());
-    const [selectedColIdx, setSelectedColIdx] = useState(0);
-    const [, setTodayTick] = useState(0);
-    const [, setHealthTick] = useState(0);
-    useEffect(() => {
+    const focusReselectRef = useRef3(null);
+    const [editStartChar, setEditStartChar] = useState3(null);
+    const [selectedId, setSelectedId] = useState3(null);
+    const [selRange, setSelRange] = useState3(null);
+    const [focusPins, setFocusPins] = useState3(() => /* @__PURE__ */ new Set());
+    const [selectedColIdx, setSelectedColIdx] = useState3(0);
+    const [, setTodayTick] = useState3(0);
+    const [, setHealthTick] = useState3(0);
+    useEffect2(() => {
       const refresh = () => {
         const t = fdLocal(/* @__PURE__ */ new Date());
         if (t !== NOW) {
@@ -9140,26 +10828,26 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearInterval(iv);
       };
     }, []);
-    const [goToFocus, setGoToFocus] = useState(null);
-    const [offlineFallback, setOfflineFallback] = useState(false);
-    const [authRequired, setAuthRequired] = useState(false);
-    const [driftNotice, setDriftNotice] = useState(null);
-    const [ancestorPredNotice, setAncestorPredNotice] = useState(null);
-    const [staleNotice, setStaleNotice] = useState(false);
-    const didInitialLoad = useRef(false);
-    const prevCoreRef = useRef(null);
-    const [formatOpen, setFormatOpen] = useState(false);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const [settingsSection, setSettingsSection] = useState(null);
-    const [meetingCalOpen, setMeetingCalOpen] = useState(false);
-    const [automationOpen, setAutomationOpen] = useState(false);
-    const [contactsOpen, setContactsOpen] = useState(false);
-    const [historyOpen, setHistoryOpen] = useState(false);
-    const [reviewOpen, setReviewOpen] = useState(false);
-    const [reviewRows, setReviewRows] = useState([]);
-    const [reviewLoading, setReviewLoading] = useState(true);
-    const [reviewIdx, setReviewIdx] = useState(0);
-    useEffect(() => {
+    const [goToFocus, setGoToFocus] = useState3(null);
+    const [offlineFallback, setOfflineFallback] = useState3(false);
+    const [authRequired, setAuthRequired] = useState3(false);
+    const [driftNotice, setDriftNotice] = useState3(null);
+    const [ancestorPredNotice, setAncestorPredNotice] = useState3(null);
+    const [staleNotice, setStaleNotice] = useState3(false);
+    const didInitialLoad = useRef3(false);
+    const prevCoreRef = useRef3(null);
+    const [formatOpen, setFormatOpen] = useState3(false);
+    const [settingsOpen, setSettingsOpen] = useState3(false);
+    const [settingsSection, setSettingsSection] = useState3(null);
+    const [meetingCalOpen, setMeetingCalOpen] = useState3(false);
+    const [automationOpen, setAutomationOpen] = useState3(false);
+    const [contactsOpen, setContactsOpen] = useState3(false);
+    const [historyOpen, setHistoryOpen] = useState3(false);
+    const [reviewOpen, setReviewOpen] = useState3(false);
+    const [reviewRows, setReviewRows] = useState3([]);
+    const [reviewLoading, setReviewLoading] = useState3(true);
+    const [reviewIdx, setReviewIdx] = useState3(0);
+    useEffect2(() => {
       const openTo = (e) => {
         if ((e?.detail || null) === "meetings") {
           setMeetingCalOpen(true);
@@ -9175,18 +10863,18 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       document.addEventListener("planar-open-settings", openTo);
       return () => document.removeEventListener("planar-open-settings", openTo);
     }, []);
-    const [ganttPPD, setGanttPPD] = useState(() => {
+    const [ganttPPD, setGanttPPD] = useState3(() => {
       const ganttW = window.innerWidth * 0.46;
       return Math.max(1, Math.floor(ganttW / 365));
     });
-    const [gridZoom, setGridZoom] = useState(() => data?.gridZoom ?? 1);
-    useEffect(() => {
+    const [gridZoom, setGridZoom] = useState3(() => data?.gridZoom ?? 1);
+    useEffect2(() => {
       if (data && typeof data.gridZoom === "number") setGridZoom(data.gridZoom);
     }, [data?.gridZoom]);
-    const hoverZoneRef = useRef("gantt");
-    const fileHandleRef = useRef(null);
-    const fileHtmlRef = useRef(null);
-    useEffect(() => {
+    const hoverZoneRef = useRef3("gantt");
+    const fileHandleRef = useRef3(null);
+    const fileHtmlRef = useRef3(null);
+    useEffect2(() => {
       const sb = window.__sb;
       if (!sb) {
         setReviewLoading(false);
@@ -9226,19 +10914,19 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }
       };
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!reviewOpen || !data) return;
       const a = reviewRows[reviewIdx];
       if (a && a.project_id != null && data.aPid !== a.project_id && data.projects && data.projects[a.project_id]) setData((d) => ({ ...d, aPid: a.project_id }));
     }, [reviewOpen, reviewIdx, reviewRows, data?.aPid]);
-    const fileSaveTimer = useRef(null);
-    const [fileLinked, setFileLinked] = useState(false);
-    const [savePulse, setSavePulse] = useState(false);
-    const [saveStatus, setSaveStatus] = useState("saved");
-    const saveSeq = useRef(0);
-    const latestData = useRef(null);
-    const saveStatusRef = useRef("saved");
-    useEffect(() => {
+    const fileSaveTimer = useRef3(null);
+    const [fileLinked, setFileLinked] = useState3(false);
+    const [savePulse, setSavePulse] = useState3(false);
+    const [saveStatus, setSaveStatus] = useState3("saved");
+    const saveSeq = useRef3(0);
+    const latestData = useRef3(null);
+    const saveStatusRef = useRef3("saved");
+    useEffect2(() => {
       saveStatusRef.current = saveStatus;
     }, [saveStatus]);
     const attemptCloudSave = (d) => {
@@ -9250,14 +10938,14 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         if (saveSeq.current === seq) setSaveStatus("error");
       });
     };
-    const [dlOpen, setDlOpen] = useState(false);
-    const history = useRef([]);
-    const future = useRef([]);
-    const prevData = useRef(null);
-    const isUndoing = useRef(false);
-    const isDerivedUpdate = useRef(false);
-    const flatTasksRef = useRef([]);
-    const lastSelIdxRef = useRef(null);
+    const [dlOpen, setDlOpen] = useState3(false);
+    const history = useRef3([]);
+    const future = useRef3([]);
+    const prevData = useRef3(null);
+    const isUndoing = useRef3(false);
+    const isDerivedUpdate = useRef3(false);
+    const flatTasksRef = useRef3([]);
+    const lastSelIdxRef = useRef3(null);
     const viewportTopFlatIdx = (tasks) => {
       const g2 = document.querySelector('[data-grid-scroll="1"]');
       if (!g2) return null;
@@ -9272,11 +10960,11 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       return null;
     };
-    const projIdRef = useRef(null);
-    const prevHolKey = useRef(null);
-    const skipHolRecasc = useRef(false);
-    const prevHealthKey = useRef(null);
-    useEffect(() => {
+    const projIdRef = useRef3(null);
+    const prevHolKey = useRef3(null);
+    const skipHolRecasc = useRef3(false);
+    const prevHealthKey = useRef3(null);
+    useEffect2(() => {
       if (!data) return;
       if (isUndoing.current) {
         isUndoing.current = false;
@@ -9294,10 +10982,10 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       prevData.current = data;
     }, [data]);
-    const applyLoadedDataRef = useRef(null);
-    const [loadTick, setLoadTick] = useState(0);
-    const loadAttemptRef = useRef(0);
-    useEffect(() => {
+    const applyLoadedDataRef = useRef3(null);
+    const [loadTick, setLoadTick] = useState3(0);
+    const loadAttemptRef = useRef3(0);
+    useEffect2(() => {
       let cancelled = false, retryTimer = null;
       (async () => {
         applyLoadedDataRef.current = (parsed) => {
@@ -9416,7 +11104,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(retryTimer);
       };
     }, [loadTick]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!data) return;
       latestData.current = data;
       persistViewState(prevCoreRef.current, data);
@@ -9482,7 +11170,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }, 700);
       }
     }, [data]);
-    useEffect(() => {
+    useEffect2(() => {
       let t;
       const onSaved = () => {
         setSavePulse(true);
@@ -9496,7 +11184,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         clearTimeout(t);
       };
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (saveStatus !== "error") return;
       const retry = () => {
         if (latestData.current) attemptCloudSave(latestData.current);
@@ -9508,7 +11196,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         window.removeEventListener("online", retry);
       };
     }, [saveStatus]);
-    useEffect(() => {
+    useEffect2(() => {
       let stopped = false;
       const check = async () => {
         if (stopped || !window.storage || !window.storage.checkRemote) return;
@@ -9547,12 +11235,12 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         document.removeEventListener("visibilitychange", check);
       };
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const onStale = () => setStaleNotice(true);
       window.addEventListener("planar:stale", onStale);
       return () => window.removeEventListener("planar:stale", onStale);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const onMerged = (e) => {
         const merged = e && e.detail && e.detail.value;
         const anc = e && e.detail && e.detail.base;
@@ -9579,7 +11267,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("planar:merged", onMerged);
       return () => window.removeEventListener("planar:merged", onMerged);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const onBeforeUnload = (e) => {
         if (saveStatusRef.current === "saved") return;
         e.preventDefault();
@@ -9588,8 +11276,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       window.addEventListener("beforeunload", onBeforeUnload);
       return () => window.removeEventListener("beforeunload", onBeforeUnload);
     }, []);
-    const overlayOpenRef = useRef(false);
-    useEffect(() => {
+    const overlayOpenRef = useRef3(false);
+    useEffect2(() => {
       overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal || deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen || reviewOpen || meetingCalOpen);
     }, [
       successorPrompt,
@@ -9607,15 +11295,15 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       reviewOpen,
       meetingCalOpen
     ]);
-    const overlayAtKeyStartRef = useRef(false);
-    useEffect(() => {
+    const overlayAtKeyStartRef = useRef3(false);
+    useEffect2(() => {
       const latch = () => {
         overlayAtKeyStartRef.current = overlayOpenRef.current;
       };
       window.addEventListener("keydown", latch, true);
       return () => window.removeEventListener("keydown", latch, true);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const onKey = (e) => {
         if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
         const tag = document.activeElement.tagName;
@@ -9926,9 +11614,9 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       if (!(row && row.isExpanded && row.hideableCount > 0))
         showToast(`Focus ${g2.focused ? "off" : "on"} for "${g2.name || "Untitled"}"` + (g2.isExpanded ? " — nothing to hide in it yet" : " — expand the group to see it"), { type: "success", duration: 2500 });
     };
-    const zoomRafRef = useRef(null);
-    const zoomAccRef = useRef(0);
-    useEffect(() => {
+    const zoomRafRef = useRef3(null);
+    const zoomAccRef = useRef3(0);
+    useEffect2(() => {
       let armed = false;
       const arm = (on) => {
         if (on === armed) return;
@@ -9986,7 +11674,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
       };
     }, []);
-    const updateTask = useCallback((taskId, updates, projId = null) => {
+    const updateTask = useCallback2((taskId, updates, projId = null) => {
       const updatesIn = updates;
       setData((d) => {
         const pid = projId ?? d.aPid;
@@ -10114,7 +11802,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }
       }
     }, []);
-    const deleteTasks = useCallback((taskIds) => {
+    const deleteTasks = useCallback2((taskIds) => {
       if (!taskIds || taskIds.length === 0) return;
       const pid = dataRef.current?.aPid;
       const all = dataRef.current?.projects?.[pid]?.tasks || [];
@@ -10157,7 +11845,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       return structuralTargets(anchorId);
     };
-    const requestDelete = useCallback((taskIds) => {
+    const requestDelete = useCallback2((taskIds) => {
       if (!taskIds || taskIds.length === 0) return;
       const pid = dataRef.current?.aPid;
       const all = dataRef.current?.projects?.[pid]?.tasks || [];
@@ -10176,7 +11864,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       taskIds.forEach(mark);
       setDeleteChoice({ ids: taskIds, rowCount: taskIds.length, totalCount: del.size });
     }, [deleteTasks]);
-    const promoteAndDeleteTasks = useCallback((taskIds) => {
+    const promoteAndDeleteTasks = useCallback2((taskIds) => {
       setData((d) => {
         const pid = d.aPid;
         const proj2 = d.projects[pid];
@@ -10340,8 +12028,8 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : "Cell"
       };
     };
-    const rowJumpRef = useRef(false);
-    const goToTask = useCallback((pid, taskId) => {
+    const rowJumpRef = useRef3(false);
+    const goToTask = useCallback2((pid, taskId) => {
       rowJumpRef.current = true;
       setData((d) => {
         const proj2 = d.projects[pid];
@@ -10371,9 +12059,9 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       setSelRange(null);
       setGoToFocus({ taskId, n: Date.now() });
     }, []);
-    const revealRef = useRef(null);
-    const openNameEditOnReveal = useRef(false);
-    const revealInserted = useCallback(() => {
+    const revealRef = useRef3(null);
+    const openNameEditOnReveal = useRef3(false);
+    const revealInserted = useCallback2(() => {
       const shouldOpenEdit = openNameEditOnReveal.current;
       openNameEditOnReveal.current = false;
       requestAnimationFrame(() => {
@@ -10389,7 +12077,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         }
       });
     }, []);
-    const addTask = useCallback(() => {
+    const addTask = useCallback2(() => {
       setData((d) => {
         const pid = d.aPid;
         const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
@@ -10415,7 +12103,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       });
       revealInserted();
     }, []);
-    const deleteTask = useCallback((taskId) => {
+    const deleteTask = useCallback2((taskId) => {
       setData((d) => {
         const pid = d.aPid;
         const del = /* @__PURE__ */ new Set();
@@ -10428,7 +12116,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       });
       if (selectedId === taskId) setSelectedId(null);
     }, [selectedId]);
-    const insertAboveAnchor = useCallback((anchorId) => {
+    const insertAboveAnchor = useCallback2((anchorId) => {
       const visibleIds = (flatTasksRef.current || []).map((t) => t.id);
       const sid = _mintTaskSid();
       setData((d) => {
@@ -10446,7 +12134,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       });
       revealInserted();
     }, []);
-    const insertTask = useCallback(() => {
+    const insertTask = useCallback2(() => {
       const flat = flatTasksRef.current || [];
       let anchorId = selectedId;
       if (isMulti(selRange)) {
@@ -10459,7 +12147,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       }
       insertAboveAnchor(anchorId);
     }, [selectedId, selRange]);
-    const insertTaskBelow = useCallback((taskId) => {
+    const insertTaskBelow = useCallback2((taskId) => {
       setData((d) => {
         const pid = d.aPid;
         const rawTasks = d.projects[pid].tasks;
@@ -10497,10 +12185,10 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       });
       revealInserted();
     }, []);
-    const insertTaskAbove = useCallback((taskId) => {
+    const insertTaskAbove = useCallback2((taskId) => {
       insertAboveAnchor(taskId);
     }, []);
-    const addDeadlineTask = useCallback((anchorId, projId = null) => {
+    const addDeadlineTask = useCallback2((anchorId, projId = null) => {
       setData((d) => {
         const pid = projId ?? d.aPid;
         const proj2 = d.projects[pid];
@@ -10517,7 +12205,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(tasks)) } } };
       });
     }, []);
-    const addSubtask = useCallback((taskId) => {
+    const addSubtask = useCallback2((taskId) => {
       setData((d) => {
         const pid = d.aPid;
         const maxId = Math.max(0, ...d.projects[pid].tasks.map((t) => t.id));
@@ -10539,7 +12227,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       });
       revealInserted();
     }, []);
-    const duplicateTask = useCallback((taskId) => {
+    const duplicateTask = useCallback2((taskId) => {
       setData((d) => {
         const pid = d.aPid;
         const tasks = d.projects[pid].tasks;
@@ -10581,7 +12269,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       const byId = new Map(allTasks.map((t) => [t.id, t]));
       return taskIds.filter((id) => byId.has(id) && !idSet.has(byId.get(id).parentId));
     };
-    const copyTaskById = useCallback((taskIds) => {
+    const copyTaskById = useCallback2((taskIds) => {
       const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
       const pid = dataRef.current?.aPid;
       const tasks = dataRef.current?.projects?.[pid]?.tasks;
@@ -10595,7 +12283,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
       showToast(`Copied ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""}`, { duration: 1800 });
     }, []);
-    const cutTaskById = useCallback((taskIds) => {
+    const cutTaskById = useCallback2((taskIds) => {
       const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
       const pid = dataRef.current?.aPid;
       const tasks = dataRef.current?.projects?.[pid]?.tasks;
@@ -10609,7 +12297,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
       showToast(`Cut ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""} — paste to move`, { duration: 1800 });
     }, []);
-    const pasteTaskAfter = useCallback((targetId) => {
+    const pasteTaskAfter = useCallback2((targetId) => {
       const cb = clipboardRef.current;
       if (!cb || targetId == null) return;
       const pastedOldIds = new Set(cb.tasks.map((t) => t.id));
@@ -10669,7 +12357,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         setClipboardTick((t) => t + 1);
       }
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (pasteSelectRef.current == null) return;
       const id = pasteSelectRef.current;
       pasteSelectRef.current = null;
@@ -10677,7 +12365,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       setSelRange(null);
       setSelectedColIdx(1);
     }, [data]);
-    const indentSelectionByIds = useCallback((taskIds) => {
+    const indentSelectionByIds = useCallback2((taskIds) => {
       setData((d) => {
         const pid = d.aPid;
         const newTasks = indentSelection(d.projects[pid].tasks, taskIds);
@@ -10685,7 +12373,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
       });
     }, []);
-    const outdentSelectionByIds = useCallback((taskIds) => {
+    const outdentSelectionByIds = useCallback2((taskIds) => {
       setData((d) => {
         const pid = d.aPid;
         const newTasks = outdentSelection(d.projects[pid].tasks, taskIds);
@@ -10693,7 +12381,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks))) } } };
       });
     }, []);
-    const moveSelectionByIds = useCallback((taskIds, destParentId, insertAfterId) => {
+    const moveSelectionByIds = useCallback2((taskIds, destParentId, insertAfterId) => {
       setData((d) => {
         const pid = d.aPid;
         const proj2 = d.projects[pid];
@@ -10708,7 +12396,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return { ...d, projects: { ...d.projects, [pid]: { ...proj2, tasks: renumberTasks(recomputeAfterStructureChange(sorted)) } } };
       });
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (moveSelectRef.current == null) return;
       const id = moveSelectRef.current;
       moveSelectRef.current = null;
@@ -10716,7 +12404,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
       setSelRange(null);
       setSelectedColIdx(1);
     }, [data]);
-    const addProject = useCallback(async (opts) => {
+    const addProject = useCallback2(async (opts) => {
       const o = opts && typeof opts === "object" && !("nativeEvent" in opts) ? opts : {};
       const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
       if (window.storage && window.storage.scheduleRowsAuthoritative) {
@@ -10766,7 +12454,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
       });
     }, []);
-    const renameProject = useCallback((id, name) => {
+    const renameProject = useCallback2((id, name) => {
       setData((d) => d && d.projects && d.projects[id] ? { ...d, editProjId: null, projects: { ...d.projects, [id]: { ...d.projects[id], name } } } : d);
     }, []);
     const buildDuplicateProject = (src, newId) => {
@@ -10792,7 +12480,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         meetingBodies: copiedBodies
       };
     };
-    const duplicateProject = useCallback(async (id) => {
+    const duplicateProject = useCallback2(async (id) => {
       if (window.storage && window.storage.scheduleRowsAuthoritative) {
         const src = dataRef.current && dataRef.current.projects && dataRef.current.projects[id];
         if (!src) return;
@@ -10840,7 +12528,7 @@ The current state is saved as a 'pre-restore' snapshot first.`,
         return src.linkedSiteId != null ? withLastActiveSite(nd, src.linkedSiteId, newId) : nd;
       });
     }, []);
-    const deleteProject = useCallback(async (id, { skipConfirm = false } = {}) => {
+    const deleteProject = useCallback2(async (id, { skipConfirm = false } = {}) => {
       if (!skipConfirm) {
         const d0 = latestData.current;
         const proj0 = d0?.projects?.[id];
@@ -10866,13 +12554,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       });
     }, []);
     const inShell = typeof window !== "undefined" && window.self !== window.top;
-    useEffect(() => {
+    useEffect2(() => {
       if (!data) return;
       const pid = pickActivePid(data.projects, data.aPid);
       if (pid != null && pid !== data.aPid) setData((d) => d && d.aPid !== pid ? { ...d, aPid: pid } : d);
     }, [data && data.aPid, data && data.projects]);
-    const navSigRef = useRef("");
-    useEffect(() => {
+    const navSigRef = useRef3("");
+    useEffect2(() => {
       if (!inShell || !data) return;
       const rowLink = rowJumpRef.current;
       rowJumpRef.current = false;
@@ -10893,7 +12581,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       }
     }, [data, inShell]);
     const [, setSiteNamesTick] = React.useState(0);
-    useEffect(() => {
+    useEffect2(() => {
       const onNames = (e) => {
         if (!e || e.origin !== window.location.origin) return;
         const m = e && e.data;
@@ -10905,7 +12593,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onNames);
       return () => window.removeEventListener("message", onNames);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!inShell) return;
       const onLoadMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -10920,7 +12608,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onLoadMsg);
       return () => window.removeEventListener("message", onLoadMsg);
     }, [inShell]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!inShell) return;
       const onMsg = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -11028,8 +12716,8 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       window.addEventListener("message", onMsg);
       return () => window.removeEventListener("message", onMsg);
     }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
-    const tbSigRef = useRef("");
-    useEffect(() => {
+    const tbSigRef = useRef3("");
+    useEffect2(() => {
       if (!inShell || !data) return;
       const sec = data.section ?? "projects";
       const section2 = sec === "suggestions" ? "projects" : sec;
@@ -11079,7 +12767,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       formatOpen,
       historyOpen
     ]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!inShell) return;
       const onCmd = (e) => {
         if (e.origin !== window.location.origin) return;
@@ -11150,7 +12838,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       return () => window.removeEventListener("message", onCmd);
     }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
     const proj = activeProjectOf(data);
-    const flatTasks = useMemo(() => {
+    const flatTasks = useMemo2(() => {
       if (!proj) return [];
       const settings = data?.settings;
       const childSet = focusGroupIds(proj.tasks);
@@ -11251,13 +12939,13 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       const i = flatTasks.findIndex((t) => t.id === selectedId);
       if (i >= 0) lastSelIdxRef.current = i;
     }, [selectedId, flatTasks]);
-    useEffect(() => {
+    useEffect2(() => {
       projIdRef.current = data?.aPid ?? null;
     }, [data]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!edit) setEditStartChar(null);
     }, [edit]);
-    const succMap = useMemo(() => {
+    const succMap = useMemo2(() => {
       if (!proj) return {};
       const m = {};
       proj.tasks.forEach((t) => normPreds(t.predecessors).forEach((p) => {
@@ -11265,7 +12953,7 @@ A backup snapshot will be saved — you can restore it from Version History.`,
       }));
       return m;
     }, [proj]);
-    const getTaskName = useCallback((id) => proj?.tasks.find((t) => t.id === id)?.name ?? `#${id}`, [proj]);
+    const getTaskName = useCallback2((id) => proj?.tasks.find((t) => t.id === id)?.name ?? `#${id}`, [proj]);
     const liveNotesTask = notesCtx ? data?.projects[notesCtx.projectId]?.tasks.find((t) => t.id === notesCtx.taskId) : null;
     const dl = (content, name, type) => {
       const a = document.createElement("a");
@@ -11350,7 +13038,7 @@ A backup snapshot of the current state is saved first.`,
         "text/html"
       );
     };
-    const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
+    const rolledHealthMap = useMemo2(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
     if (!data) return /* @__PURE__ */ React.createElement("div", { style: { height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", color: "#e6a817", fontFamily: "'Inter',system-ui,sans-serif", fontSize: 14, letterSpacing: ".1em" } }, "LOADING...");
     if (!proj) return /* @__PURE__ */ React.createElement("div", { "data-schedule-empty": "1", style: { height: "100vh", background: "var(--bg)", color: "var(--txt)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "'Inter',system-ui,sans-serif", textAlign: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "No schedules yet"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, maxWidth: 360, lineHeight: 1.5 } }, "This account has no schedule to show. Create one to start planning — nothing has been removed."), /* @__PURE__ */ React.createElement("button", { onClick: () => addProject(), style: { cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, background: "var(--accent)", color: "var(--on-accent,#fff)", border: "none", borderRadius: 6, padding: "8px 16px" } }, "New schedule"));
     const setHoverZone = (zone) => {
@@ -12122,12 +13810,12 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function ProjDropdown({ data, setData, addProject, setProjCtx, breadcrumb = false }) {
-    const [open, setOpen] = useState(false);
-    const [editingId, setEditingId] = useState(null);
-    const [editVal, setEditVal] = useState("");
-    const editRef = useRef(null);
-    const btnRef = useRef(null);
-    const menuRef = useRef(null);
+    const [open, setOpen] = useState3(false);
+    const [editingId, setEditingId] = useState3(null);
+    const [editVal, setEditVal] = useState3("");
+    const editRef = useRef3(null);
+    const btnRef = useRef3(null);
+    const menuRef = useRef3(null);
     const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
     const projHealth = (p) => {
       if (!p.tasks.length) return "gray";
@@ -12137,7 +13825,7 @@ A backup snapshot of the current state is saved first.`,
       return "gray";
     };
     const toggle = () => setOpen((o) => !o);
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) {
         setEditingId(null);
         return;
@@ -12148,7 +13836,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", down);
       return () => document.removeEventListener("mousedown", down);
     }, [open]);
-    useEffect(() => {
+    useEffect2(() => {
       if (editingId !== null) setTimeout(() => editRef.current?.focus(), 0);
     }, [editingId]);
     const cur = activeProjectOf(data);
@@ -12378,9 +14066,9 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function RenameModal({ name, onConfirm, onClose }) {
-    const [val, setVal] = useState(name);
-    const inputRef = useRef(null);
-    useEffect(() => {
+    const [val, setVal] = useState3(name);
+    const inputRef = useRef3(null);
+    useEffect2(() => {
       inputRef.current?.select();
     }, []);
     const confirm = () => {
@@ -12428,8 +14116,8 @@ A backup snapshot of the current state is saved first.`,
     );
   }
   function ProjContextMenu({ x, y, projId, canDelete, onRename, onDuplicate, onDelete, onClose }) {
-    const menuRef = useRef(null);
-    useEffect(() => {
+    const menuRef = useRef3(null);
+    useEffect2(() => {
       const down = (e) => {
         if (!menuRef.current?.contains(e.target)) onClose();
       };
@@ -12549,9 +14237,9 @@ A backup snapshot of the current state is saved first.`,
   );
   var FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar2({ fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth }, ref) {
     const fb = fmt;
-    const [openCaret, setOpenCaret] = useState(null);
-    const popRef = useRef(null);
-    useEffect(() => {
+    const [openCaret, setOpenCaret] = useState3(null);
+    const popRef = useRef3(null);
+    useEffect2(() => {
       if (!openCaret) return;
       const down = (e) => {
         if (popRef.current?.contains(e.target)) return;
@@ -12562,8 +14250,8 @@ A backup snapshot of the current state is saved first.`,
       return () => document.removeEventListener("mousedown", down, true);
     }, [openCaret]);
     const sizeDisplay = fb.size === "mixed" ? "" : fb.size != null ? String(fb.size) : "";
-    const [sizeText, setSizeText] = useState(sizeDisplay);
-    useEffect(() => {
+    const [sizeText, setSizeText] = useState3(sizeDisplay);
+    useEffect2(() => {
       setSizeText(sizeDisplay);
     }, [sizeDisplay]);
     const commitSize = (raw) => {
@@ -12728,9 +14416,9 @@ A backup snapshot of the current state is saved first.`,
     );
   });
   function TaskContextMenu({ x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, hasIcons = false, onSetIcon, onRemoveIcon, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose }) {
-    const menuRef = useRef(null);
-    const toolbarRef = useRef(null);
-    useEffect(() => {
+    const menuRef = useRef3(null);
+    const toolbarRef = useRef3(null);
+    useEffect2(() => {
       const down = (e) => {
         if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose();
       };
@@ -12800,7 +14488,7 @@ A backup snapshot of the current state is saved first.`,
       scopeLabel: null
     };
     const Header = () => /* @__PURE__ */ React.createElement("div", { style: { padding: "5px 11px 4px", borderBottom: "1px solid var(--bd)", marginBottom: 2 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", fontFamily: "'Inter',system-ui,sans-serif", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 1 } }, "Task ", task.id), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: task.bold ? 700 : 500, fontStyle: task.italic ? "italic" : "normal", color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 } }, task.name || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)", fontStyle: "italic" } }, "New task")));
-    const [subMeet, setSubMeet] = useState(false);
+    const [subMeet, setSubMeet] = useState3(false);
     const localBody = task.meetingBound ? meetingBodies.find((b) => b.id === task.meetingBodyId) : null;
     const foreignMatch = task.meetingBound && !localBody ? otherBodies.find((ob) => ob.body.id === task.meetingBodyId) : null;
     const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
@@ -12891,11 +14579,11 @@ A backup snapshot of the current state is saved first.`,
     return null;
   }
   function HealthColHeader({ current, onChange }) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-    const anchorRef = useRef(null);
+    const [open, setOpen] = useState3(false);
+    const ref = useRef3(null);
+    const anchorRef = useRef3(null);
     const pos = useAnchoredPopover(open, anchorRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const down = (e) => {
         if (!ref.current?.contains(e.target)) setOpen(false);
@@ -12979,13 +14667,13 @@ A backup snapshot of the current state is saved first.`,
     { dot: "#4f46e5", bar: "#e0e7ff", dark: "#3730a3" }
   ];
   function StatusHeaderDropdown({ data, setData }) {
-    const [open, setOpen] = useState(false);
-    const [adding, setAdding] = useState(false);
-    const [newLabel, setNewLabel] = useState("");
-    const [newColor, setNewColor] = useState(STATUS_PALETTE[0].dot);
-    const [editing, setEditing] = useState(null);
-    const ref = useRef(null);
-    const menuRef = useRef(null);
+    const [open, setOpen] = useState3(false);
+    const [adding, setAdding] = useState3(false);
+    const [newLabel, setNewLabel] = useState3("");
+    const [newColor, setNewColor] = useState3(STATUS_PALETTE[0].dot);
+    const [editing, setEditing] = useState3(null);
+    const ref = useRef3(null);
+    const menuRef = useRef3(null);
     const menuPos = useAnchoredPopover(
       open,
       ref,
@@ -12997,7 +14685,7 @@ A backup snapshot of the current state is saved first.`,
         setNewLabel("");
       }
     );
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const down = (e) => {
         if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target)) {
@@ -13269,23 +14957,23 @@ A backup snapshot of the current state is saved first.`,
   }
   var NOTE_SIZES = [{ k: "sm", l: "Small", px: 11 }, { k: "md", l: "Medium", px: 13 }, { k: "lg", l: "Large", px: 15 }];
   function NotesColHeader({ data, setData }) {
-    const [open, setOpen] = useState(false);
-    const [confirm, setConfirm] = useState(null);
-    const [size, setSize] = useState(() => {
+    const [open, setOpen] = useState3(false);
+    const [confirm, setConfirm] = useState3(null);
+    const [size, setSize] = useState3(() => {
       try {
         return localStorage.getItem("planar_noteSize") || "sm";
       } catch {
         return "sm";
       }
     });
-    const ref = useRef(null);
-    const menuRef = useRef(null);
+    const ref = useRef3(null);
+    const menuRef = useRef3(null);
     const menuPos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => {
       setOpen(false);
       setConfirm(null);
     });
     const hasNotes = data ? Object.values(data.projects || {}).some((p) => (p.tasks || []).some((t) => (t.notes || []).length > 0)) : false;
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) {
         setConfirm(null);
         return;
@@ -13504,11 +15192,11 @@ A backup snapshot of the current state is saved first.`,
   }
   function FormulaColumnEditor({ mode, initLabel, initFormula, columnNames, existingLabels, preview, onSave, onDelete, onClose }) {
     const PF = window.PlanyrFormula;
-    const [label, setLabel] = useState(initLabel || "");
-    const [formula, setFormula] = useState(initFormula || "");
-    const [caret, setCaret] = useState((initFormula || "").length);
-    const [sugIdx, setSugIdx] = useState(0);
-    const taRef = useRef(null);
+    const [label, setLabel] = useState3(initLabel || "");
+    const [formula, setFormula] = useState3(initFormula || "");
+    const [caret, setCaret] = useState3((initFormula || "").length);
+    const [sugIdx, setSugIdx] = useState3(0);
+    const taRef = useRef3(null);
     const FNS = PF && PF.FUNCTION_NAMES || [];
     const FN_HELP = PF && PF.FUNCTION_HELP || {};
     const ctxAt = (() => {
@@ -13701,40 +15389,30 @@ A backup snapshot of the current state is saved first.`,
       document.body
     );
   }
-  function measuredColWidth(headerLabel, cellValues, floor) {
-    const ctx = document.createElement("canvas").getContext("2d");
-    ctx.font = "bold 10px Inter, system-ui, sans-serif";
-    let maxW = ctx.measureText(String(headerLabel || "").toUpperCase()).width + 24;
-    ctx.font = "12px Inter, system-ui, sans-serif";
-    for (const val of cellValues) {
-      if (val) maxW = Math.max(maxW, ctx.measureText(val).width + 24);
-    }
-    return Math.max(floor, Math.ceil(maxW));
-  }
   function GridView({ tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom = 1, setHoverZone, onColWidths, review, moveRows }) {
-    const taskById = useMemo(() => {
+    const taskById = useMemo2(() => {
       const m = {};
       (proj?.tasks || []).forEach((t) => m[t.id] = t);
       return m;
     }, [proj?.tasks]);
-    const [winTop, setWinTop] = useState(0);
-    const localRef = useRef(null);
+    const [winTop, setWinTop] = useState3(0);
+    const localRef = useRef3(null);
     const ref = scrollRef || localRef;
     const vh = (ref.current?.clientHeight || window.innerHeight) - 80;
     const emptyPad = Math.max(100, Math.ceil(vh / ROW_H) + 40);
     const totalRows = tasks.length + emptyPad;
     const { startIdx, endIdx } = rowWindow(winTop, ref.current?.clientHeight || window.innerHeight, totalRows);
-    const isDraggingCells = useRef(false);
-    const cellDragPin = useRef(null);
-    const _healthClickSel = useRef(null);
-    const colBtnRef = useRef(null);
-    const rowDragRef = useRef(null);
-    const rowDragCancelRef = useRef(null);
-    useEffect(() => () => {
+    const isDraggingCells = useRef3(false);
+    const cellDragPin = useRef3(null);
+    const _healthClickSel = useRef3(null);
+    const colBtnRef = useRef3(null);
+    const rowDragRef = useRef3(null);
+    const rowDragCancelRef = useRef3(null);
+    useEffect2(() => () => {
       rowDragCancelRef.current?.();
     }, []);
-    const dragLineRef = useRef(null);
-    const dragNestRef = useRef(null);
+    const dragLineRef = useRef3(null);
+    const dragNestRef = useRef3(null);
     const dragTargetIds = (anchorId) => {
       if (!selRange) return [anchorId];
       const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
@@ -13918,7 +15596,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("keydown", onKey, true);
       window.addEventListener("blur", cancel);
     };
-    useEffect(() => {
+    useEffect2(() => {
       const up = () => {
         isDraggingCells.current = false;
         if (cellDragPin.current) {
@@ -13929,7 +15607,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mouseup", up);
       return () => document.removeEventListener("mouseup", up);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const NAV = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "PageUp", "PageDown", "Home", "End", "Enter"]);
       const ptr = { x: null, y: null }, at = { x: null, y: null };
       const onKey = (e) => {
@@ -13966,9 +15644,9 @@ A backup snapshot of the current state is saved first.`,
       if (ed.right && !(stripJoinsRange && ci === stripCi)) s.push("inset -2px 0 0 0 #2563eb");
       return s.join(",");
     };
-    const cellSessionRef = useRef(null);
-    const skipColClickRef = useRef(false);
-    const liveGridRef = useRef({ tasks, allCols: [], gridZoom, stripCi: -1 });
+    const cellSessionRef = useRef3(null);
+    const skipColClickRef = useRef3(false);
+    const liveGridRef = useRef3({ tasks, allCols: [], gridZoom, stripCi: -1 });
     const beginCellDrag = (startEvent, { rowMode, apply, onEnd }) => {
       cellSessionRef.current?.stop("cancel");
       const el = ref.current;
@@ -14061,7 +15739,7 @@ A backup snapshot of the current state is saved first.`,
       window.addEventListener("blur", onCancel);
       raf = requestAnimationFrame(tick);
     };
-    useEffect(() => () => cellSessionRef.current?.stop("cancel"), []);
+    useEffect2(() => () => cellSessionRef.current?.stop("cancel"), []);
     const currentSelection = () => {
       if (selRange) return selRange;
       const ri0 = selectedId != null ? tasks.findIndex((t) => t.id === selectedId) : -1;
@@ -14169,12 +15847,12 @@ A backup snapshot of the current state is saved first.`,
       if (setTaskCtx) setTaskCtx({ task, projId: proj?.id, x: e.clientX, y: e.clientY });
     };
     const hasRange = selIsRange(selRange);
-    const colWidthsRef = useRef(null);
-    const pinRef = useRef({ lw: 0, rw: 0, l: [], r: [], w: {} });
-    const expandAnchorRef = useRef(null);
-    const suppressSelChaseRef = useRef(false);
-    const heldListRef = useRef(tasks);
-    const selChaseAllowedRef = useRef(false);
+    const colWidthsRef = useRef3(null);
+    const pinRef = useRef3({ lw: 0, rw: 0, l: [], r: [], w: {} });
+    const expandAnchorRef = useRef3(null);
+    const suppressSelChaseRef = useRef3(false);
+    const heldListRef = useRef3(tasks);
+    const selChaseAllowedRef = useRef3(false);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prev = heldListRef.current;
@@ -14214,7 +15892,7 @@ A backup snapshot of the current state is saved first.`,
       const delta = (now - anchorIdx) * ROW_H;
       if (delta) el.scrollTop = Math.max(0, st + delta);
     }, [tasks]);
-    const heldRowHRef = useRef(ROW_H);
+    const heldRowHRef = useRef3(ROW_H);
     React.useLayoutEffect(() => {
       const el = ref.current;
       const prevRH = heldRowHRef.current;
@@ -14254,12 +15932,12 @@ A backup snapshot of the current state is saved first.`,
         }
       }
     };
-    const revealCellRef = useRef(null);
+    const revealCellRef = useRef3(null);
     revealCellRef.current = (row, masterCol) => {
       revealRowIdx(row);
       revealColKey(allCols[masterCol]?.k);
     };
-    useEffect(() => {
+    useEffect2(() => {
       const on = (e) => {
         const d = e.detail || {};
         if (revealCellRef.current) revealCellRef.current(d.row, d.col);
@@ -14267,8 +15945,8 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("planar-reveal-cell", on);
       return () => document.removeEventListener("planar-reveal-cell", on);
     }, []);
-    const chasedSelRef = useRef({ id: selectedId, col: selectedColIdx });
-    useEffect(() => {
+    const chasedSelRef = useRef3({ id: selectedId, col: selectedColIdx });
+    useEffect2(() => {
       const suppressSelChase = suppressSelChaseRef.current;
       suppressSelChaseRef.current = false;
       const prevSel = chasedSelRef.current;
@@ -14285,11 +15963,11 @@ A backup snapshot of the current state is saved first.`,
       revealColKey(allCols[selectedColIdx]?.k);
     }, [selectedId, selectedColIdx, tasks]);
     const rvAnchorId = review ? tasks.find((t) => t.__rvTarget)?.id ?? tasks.find((t) => t.__rvProposed)?.id ?? null : null;
-    const [rvEdit, setRvEdit] = useState(null);
-    useEffect(() => {
+    const [rvEdit, setRvEdit] = useState3(null);
+    useEffect2(() => {
       setRvEdit(null);
     }, [rvAnchorId]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!review || rvAnchorId == null) return;
       const el = ref.current;
       if (!el) return;
@@ -14300,7 +15978,7 @@ A backup snapshot of the current state is saved first.`,
       }, 50);
       return () => clearTimeout(id);
     }, [rvAnchorId]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!goToFocus) return;
       const el = ref.current;
       if (!el) return;
@@ -14429,18 +16107,18 @@ A backup snapshot of the current state is saved first.`,
       if (col === "start" || col === "end" || col === "duration" || col === "predecessors") setSelRange(null);
     };
     const pid = proj?.id;
-    const formulaCols = useMemo(() => formulaColsOf(proj), [proj?.formulaCols]);
-    const allCols = useMemo(() => effectiveColsOf(proj), [proj?.formulaCols]);
-    const colByK = useMemo(() => Object.fromEntries(allCols.map((c) => [c.k, c])), [allCols]);
-    const cfg = useMemo(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, proj?.meetingBodies, proj?.tasks, data.gridColOrder, data.gridColWidths, pid]);
+    const formulaCols = useMemo2(() => formulaColsOf(proj), [proj?.formulaCols]);
+    const allCols = useMemo2(() => effectiveColsOf(proj), [proj?.formulaCols]);
+    const colByK = useMemo2(() => Object.fromEntries(allCols.map((c) => [c.k, c])), [allCols]);
+    const cfg = useMemo2(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, proj?.meetingBodies, proj?.tasks, data.gridColOrder, data.gridColWidths, pid]);
     const colOrder = cfg.visible;
-    const formulaValues = useMemo(
+    const formulaValues = useMemo2(
       () => computeFormulaValues(tasks, formulaCols, proj),
       [tasks, formulaCols, data.settings?.holidays, NOW]
     );
-    const [liveW, setLiveW] = useState(null);
+    const [liveW, setLiveW] = useState3(null);
     const widthOf = (k) => liveW && liveW.k === k ? liveW.w : cfg.widths[k] ?? colByK[k]?.w ?? 100;
-    const colWidths = useMemo(() => {
+    const colWidths = useMemo2(() => {
       const o = {};
       allCols.forEach((c) => {
         o[c.k] = liveW && liveW.k === c.k ? liveW.w : cfg.widths[c.k] ?? c.w;
@@ -14448,13 +16126,13 @@ A backup snapshot of the current state is saved first.`,
       return o;
     }, [cfg, liveW, allCols]);
     colWidthsRef.current = colWidths;
-    useEffect(() => {
+    useEffect2(() => {
       if (onColWidths) onColWidths({ order: colOrder, widths: colWidths });
     }, [colWidths, colOrder]);
     const orderedCols = colOrder.map((k) => colByK[k]).filter(Boolean);
-    const [gridW, setGridW] = useState(0);
-    const [scrollSide, setScrollSide] = useState({ l: false, r: false });
-    useEffect(() => {
+    const [gridW, setGridW] = useState3(0);
+    const [scrollSide, setScrollSide] = useState3({ l: false, r: false });
+    useEffect2(() => {
       const el = ref.current;
       if (!el) return;
       const measure = () => setGridW(Math.floor(el.getBoundingClientRect().width / (gridZoom || 1)));
@@ -14509,7 +16187,7 @@ A backup snapshot of the current state is saved first.`,
       setScrollSide((p) => p.l === l && p.r === r ? p : { l, r });
     };
     const totalW = orderedCols.reduce((s, c) => s + dispW[c.k], 0);
-    useEffect(() => {
+    useEffect2(() => {
       syncScrollSide(ref.current);
     }, [gridW, totalW, pinOn]);
     pinRef.current = { lw: pinLW, rw: pinRW, l: pinL, r: pinR, w: dispW };
@@ -14528,7 +16206,7 @@ A backup snapshot of the current state is saved first.`,
       sh.push("inset -2px 0 0 0 #2563eb");
       return sh.join(",");
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (selectedId === null || !colMasterIdxs.length) return;
       if (colMasterIdxs.includes(selectedColIdx)) return;
       const target = colMasterIdxs.reduce(
@@ -14537,7 +16215,7 @@ A backup snapshot of the current state is saved first.`,
       );
       if (target !== selectedColIdx) setSelectedColIdx(target);
     }, [colOrder, selectedColIdx, selectedId]);
-    const [formulaEditor, setFormulaEditor] = useState(null);
+    const [formulaEditor, setFormulaEditor] = useState3(null);
     const saveFormulaCol = ({ colKey, label, formula }) => setData((d) => {
       const p = d.projects?.[pid];
       if (!p) return d;
@@ -14585,10 +16263,10 @@ A backup snapshot of the current state is saved first.`,
       const res = PF.evaluateFormula(formula, { columns: colMap(sample), rows: aggRows, rowIndex: 0, calendar: formulaCalendar(), today: formulaToday(), formatDate: dateFmt });
       return { ...res, display: res.ok ? PF.formatValue(res.value, { formatDate: dateFmt }) : res.error, sampleName: sample.name || "Task " + sample.id };
     };
-    const [dragColKey, setDragColKey] = useState(null);
-    const [dragOverKey, setDragOverKey] = useState(null);
-    const [colMenuOpen, setColMenuOpen] = useState(false);
-    const [hdrCtx, setHdrCtx] = useState(null);
+    const [dragColKey, setDragColKey] = useState3(null);
+    const [dragOverKey, setDragOverKey] = useState3(null);
+    const [colMenuOpen, setColMenuOpen] = useState3(false);
+    const [hdrCtx, setHdrCtx] = useState3(null);
     const persistVisible = (visible) => writeGridCfg(setData, pid, { visible, widths: cfg.widths });
     const persistWidths = (widths) => writeGridCfg(setData, pid, { visible: colOrder, widths });
     const reorderCols = (fromKey, toKey) => {
@@ -15195,20 +16873,20 @@ A backup snapshot of the current state is saved first.`,
   }
   var PICKER_EVENT = "planar-picker-open";
   function HealthPicker({ value, onChange }) {
-    const [open, setOpen] = useState(false);
-    const [hiIdx, setHiIdx] = useState(-1);
-    const dotRef = useRef(null);
-    const menuRef = useRef(null);
-    const idRef = useRef(`hp-${Math.random()}`);
+    const [open, setOpen] = useState3(false);
+    const [hiIdx, setHiIdx] = useState3(-1);
+    const dotRef = useRef3(null);
+    const menuRef = useRef3(null);
+    const idRef = useRef3(`hp-${Math.random()}`);
     const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.left + r.width / 2 - 10 }), () => setOpen(false));
-    useEffect(() => {
+    useEffect2(() => {
       const onOther = (e) => {
         if (e.detail !== idRef.current) setOpen(false);
       };
       document.addEventListener(PICKER_EVENT, onOther);
       return () => document.removeEventListener(PICKER_EVENT, onOther);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       setHiIdx(-1);
       const handleDown = (e) => {
@@ -15218,7 +16896,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", handleDown);
       return () => document.removeEventListener("mousedown", handleDown);
     }, [open]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const handleKey = (e) => {
         if (e.key === "Tab") {
@@ -15368,20 +17046,20 @@ A backup snapshot of the current state is saved first.`,
     ));
   }
   function StatusPicker({ value, onChange }) {
-    const [open, setOpen] = useState(false);
-    const [hiIdx, setHiIdx] = useState(-1);
-    const ref = useRef(null);
-    const menuRef = useRef(null);
-    const idRef = useRef(`sp-${Math.random()}`);
+    const [open, setOpen] = useState3(false);
+    const [hiIdx, setHiIdx] = useState3(-1);
+    const ref = useRef3(null);
+    const menuRef = useRef3(null);
+    const idRef = useRef3(`sp-${Math.random()}`);
     const pos = useAnchoredPopover(open, ref, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect(() => {
+    useEffect2(() => {
       const onOther = (e) => {
         if (e.detail !== idRef.current) setOpen(false);
       };
       document.addEventListener(PICKER_EVENT, onOther);
       return () => document.removeEventListener(PICKER_EVENT, onOther);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       setHiIdx(-1);
       const handleDown = (e) => {
@@ -15391,7 +17069,7 @@ A backup snapshot of the current state is saved first.`,
       document.addEventListener("mousedown", handleDown);
       return () => document.removeEventListener("mousedown", handleDown);
     }, [open]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const handleKey = (e) => {
         if (e.key === "Tab") {
@@ -15511,98 +17189,6 @@ A backup snapshot of the current state is saved first.`,
       document.body
     ));
   }
-  var DEPCELL_FONT_SIZE = 8;
-  var DEPCELL_LINE_H = 10;
-  var DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H * 2;
-  function depCellFullTitle(items, renderLabel, renderName, extraNote) {
-    const list = items.map((item) => `${renderLabel(item)} · ${renderName(item)}`).join("\n");
-    return extraNote ? `${list}
-
-${extraNote}` : list;
-  }
-  var DEPCELL_ONE_LINE_BELOW = 110;
-  var DEPCELL_TWO_LINE_AT = 126;
-  function depCellNarrowNext(prevNarrow, width) {
-    if (!(width > 0)) return prevNarrow;
-    if (width < DEPCELL_ONE_LINE_BELOW) return true;
-    if (width >= DEPCELL_TWO_LINE_AT) return false;
-    return prevNarrow;
-  }
-  function DepCell({ items, renderLabel, renderName, s, title, flagged }) {
-    const [hovered, setHovered] = useState(false);
-    const [narrow, setNarrow] = useState(false);
-    const [cellEl, setCellEl] = useState(null);
-    const ref = useRef(null);
-    const setRef = useCallback((el) => {
-      ref.current = el;
-      setCellEl(el);
-    }, []);
-    React.useLayoutEffect(() => {
-      if (!cellEl) return;
-      const measure = () => setNarrow((prev) => depCellNarrowNext(prev, cellEl.offsetWidth));
-      measure();
-      if (typeof ResizeObserver === "undefined") return;
-      const ro = new ResizeObserver(measure);
-      ro.observe(cellEl);
-      return () => ro.disconnect();
-    }, [cellEl]);
-    const canTwoLine = (s.height || 0) >= DEPCELL_TWO_LINE_MIN_H;
-    const visibleCount = canTwoLine && !narrow ? 2 : 1;
-    const extra = items.length - visibleCount;
-    const pos = useAnchoredPopover(hovered && extra > 0, ref, (r) => ({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 220) }), () => setHovered(false));
-    const onEnter = () => {
-      if (!ref.current || items.length <= visibleCount) return;
-      setHovered(true);
-    };
-    if (!items.length) return /* @__PURE__ */ React.createElement("span", { ref: setRef, style: { ...s } });
-    const fullTitle = depCellFullTitle(items, renderLabel, renderName, title);
-    if (items.length === 1 && canTwoLine && !narrow) {
-      const item = items[0];
-      const prefixText = (flagged && flagged(item) ? "⚠ " : "") + renderLabel(item);
-      const indent = _cpMeasure(prefixText, `500 ${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`) + _cpMeasure(" · ", `${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`);
-      return /* @__PURE__ */ React.createElement("div", { ref: setRef, "data-dep-lines": "2", title: fullTitle, style: { ...s, alignItems: "flex-start", padding: "0 8px", whiteSpace: "normal" } }, /* @__PURE__ */ React.createElement("span", { style: {
-        display: "-webkit-box",
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: "vertical",
-        overflow: "hidden",
-        maxHeight: DEPCELL_LINE_H * 2,
-        lineHeight: `${DEPCELL_LINE_H}px`,
-        fontSize: DEPCELL_FONT_SIZE,
-        fontFamily: "'Inter',system-ui,sans-serif",
-        whiteSpace: "normal",
-        width: "100%",
-        minWidth: 0,
-        wordBreak: "break-word",
-        paddingLeft: indent,
-        textIndent: -indent
-      } }, /* @__PURE__ */ React.createElement("span", { style: { color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight: 500 } }, flagged && flagged(item) ? "⚠ " : "", renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, " · ", renderName(item))));
-    }
-    const slots = Array.from({ length: visibleCount }, (_, i) => items[i] ?? null);
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref: setRef,
-        title: fullTitle,
-        "data-dep-lines": narrow ? "1" : "2",
-        style: { ...s, flexDirection: "column", alignItems: "flex-start", justifyContent: narrow ? "center" : "flex-start", gap: 0, padding: "0 8px" },
-        onMouseEnter: onEnter,
-        onMouseLeave: () => setHovered(false)
-      },
-      slots.map((item, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", alignItems: "baseline", gap: 3, overflow: "hidden", width: "100%", lineHeight: `${DEPCELL_LINE_H}px`, minHeight: DEPCELL_LINE_H } }, item != null && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 500, flexShrink: 0 } }, flagged && flagged(item) ? "⚠ " : "", renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, "· ", renderName(item)), i === visibleCount - 1 && extra > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: DEPCELL_FONT_SIZE, color: "#94a3b8", flexShrink: 0, marginLeft: 3, fontFamily: "'Inter',system-ui,sans-serif" } }, "+", extra))))
-    ), hovered && extra > 0 && pos && ReactDOM.createPortal(
-      /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          ...MENU_STOPS_GRID,
-          style: { position: "fixed", top: pos.top, left: pos.left, minWidth: pos.width, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 6, padding: "8px 10px", zIndex: 9999, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", flexDirection: "column", gap: 5 },
-          onMouseEnter: () => setHovered(true),
-          onMouseLeave: () => setHovered(false)
-        },
-        items.map((item, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", alignItems: "baseline", gap: 5 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#1d4ed8", fontFamily: "'Inter',system-ui,sans-serif", fontWeight: 500, flexShrink: 0 } }, renderLabel(item)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", whiteSpace: "nowrap" } }, "· ", renderName(item))))
-      ),
-      document.body
-    ));
-  }
   var predLagPlainEnglish = (raw) => {
     const preds = parsePreds(raw);
     if (!preds.length) return "";
@@ -15620,7 +17206,7 @@ ${extraNote}` : list;
     }).join(" · ");
   };
   function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit, tabStep }) {
-    const [hint, setHint] = useState(() => predLagPlainEnglish(seedVal));
+    const [hint, setHint] = useState3(() => predLagPlainEnglish(seedVal));
     return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -16525,21 +18111,21 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     return { x1, y1, x2, y2, down };
   };
   function GanttView({ tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings, rowZoom = 1 }) {
-    const [winTop, setWinTop] = useState(0);
-    const localRef = useRef(null);
+    const [winTop, setWinTop] = useState3(0);
+    const localRef = useRef3(null);
     const ref = scrollRef || localRef;
     const ppd = pxPerDay || 22;
     const vh = (ref.current ? ref.current.clientHeight : window.innerHeight) - 80;
-    const taskById = useMemo(() => {
+    const taskById = useMemo2(() => {
       const m = {};
       (proj?.tasks || tasks).forEach((t) => m[t.id] = t);
       return m;
     }, [proj?.tasks, tasks]);
-    const childParentIds = useMemo(() => {
+    const childParentIds = useMemo2(() => {
       const allTasks = proj?.tasks || tasks;
       return new Set(allTasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
     }, [proj?.tasks, tasks]);
-    const _progressMap = useMemo(() => {
+    const _progressMap = useMemo2(() => {
       const allTasks = proj?.tasks || tasks;
       if (!allTasks.length) return {};
       const getDesc = (id) => {
@@ -16554,7 +18140,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       });
       return map;
     }, [proj?.tasks, tasks, childParentIds]);
-    const { minD, totD } = useMemo(() => {
+    const { minD, totD } = useMemo2(() => {
       const windowStart = addD(NOW, -365 * 5);
       const windowEnd = addD(NOW, 365 * 15);
       if (!tasks.length) return { minD: windowStart, totD: dif(windowStart, windowEnd) };
@@ -16571,7 +18157,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     const totalW = totD * ppd;
     const xOf = (d) => Math.max(0, Math.min(totalW, dif(minD, d) * ppd));
     const todayX = xOf(NOW);
-    const months = useMemo(() => {
+    const months = useMemo2(() => {
       const out = [];
       const endD = addD(minD, totD);
       let cur = new Date(pd(minD).getFullYear(), pd(minD).getMonth(), 1);
@@ -16583,7 +18169,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       }
       return out;
     }, [minD, totD, ppd]);
-    const years = useMemo(() => {
+    const years = useMemo2(() => {
       const out = [];
       const endD = addD(minD, totD);
       let cur = new Date(pd(minD).getFullYear(), 0, 1);
@@ -16617,7 +18203,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       if (!barLabelText(t, bl.left, bl.year)) return null;
       return xOf(t.start) - (t.duration === 0 ? 8 : 4);
     };
-    const depLines = useMemo(() => {
+    const depLines = useMemo2(() => {
       const idxOf = new Map(tasks.map((t, i) => [t.id, i]));
       const raw = [];
       tasks.forEach((task) => normPreds(task.predecessors).forEach((p) => {
@@ -16700,14 +18286,14 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     const _zoom = (dir) => {
       if (onZoomChange) onZoomChange(dir > 0 ? Math.min(80, Math.ceil(ppd * 1.35)) : Math.max(1, Math.floor(ppd / 1.35)));
     };
-    useEffect(() => {
+    useEffect2(() => {
       const el = ref.current;
       if (!el) return;
       const w = el.clientWidth || 800;
       el.scrollLeft = Math.max(0, todayX - w * 0.35);
     }, []);
-    const prevPpdRef = useRef(ppd);
-    useEffect(() => {
+    const prevPpdRef = useRef3(ppd);
+    useEffect2(() => {
       const el = ref.current;
       if (!el || prevPpdRef.current === ppd) return;
       const oldPpd = prevPpdRef.current;
@@ -16715,11 +18301,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       el.scrollLeft = Math.max(0, centerDayOffset * ppd - el.clientWidth / 2);
       prevPpdRef.current = ppd;
     }, [ppd]);
-    const isPanning = useRef(false);
-    const panPin = useRef(null);
-    const panOrigin = useRef({ x: 0, y: 0, sl: 0, st: 0 });
-    const overscrollY = useRef(0);
-    const animFrame = useRef(null);
+    const isPanning = useRef3(false);
+    const panPin = useRef3(null);
+    const panOrigin = useRef3({ x: 0, y: 0, sl: 0, st: 0 });
+    const overscrollY = useRef3(0);
+    const animFrame = useRef3(null);
     const springBack = () => {
       const el = ref.current;
       if (!el) return;
@@ -17014,10 +18600,10 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   };
   var MB_ACTIVE_POPOVER_CLOSE = null;
   function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
-    const [open, setOpen] = useState(false);
-    const btnRef = useRef(null), popRef = useRef(null);
+    const [open, setOpen] = useState3(false);
+    const btnRef = useRef3(null), popRef = useRef3(null);
     const pos = useAnchoredPopover(open, btnRef, (r) => ({ top: r.bottom + 4, left: r.left }), () => setOpen(false));
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const close = () => setOpen(false);
       MB_ACTIVE_POPOVER_CLOSE = close;
@@ -17085,7 +18671,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     ));
   }
   function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
-    const [picked, setPicked] = useState(() => /* @__PURE__ */ new Set());
+    const [picked, setPicked] = useState3(() => /* @__PURE__ */ new Set());
     const toggle = (key) => setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -17117,13 +18703,13 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
     const initial = Array.isArray(bodies) ? bodies : [];
-    const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initial)));
-    const savedRef = useRef(JSON.stringify(initial));
-    const [savedFlash, setSavedFlash] = useState(false);
-    const [confirmClose, setConfirmClose] = useState(false);
+    const [draft, setDraft] = useState3(() => JSON.parse(JSON.stringify(initial)));
+    const savedRef = useRef3(JSON.stringify(initial));
+    const [savedFlash, setSavedFlash] = useState3(false);
+    const [confirmClose, setConfirmClose] = useState3(false);
     const list = draft;
     const dirty = JSON.stringify(draft) !== savedRef.current;
-    const [selId, setSelId] = useState(() => list[0] && list[0].id || null);
+    const [selId, setSelId] = useState3(() => list[0] && list[0].id || null);
     const sel = list.find((b) => b.id === selId) || null;
     const save = () => {
       onChange(JSON.parse(JSON.stringify(draft)));
@@ -17135,9 +18721,9 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       if (dirty) setConfirmClose(true);
       else onClose();
     };
-    const backdropRef = useRef(null);
-    const downOnBackdropRef = useRef(false);
-    useEffect(() => {
+    const backdropRef = useRef3(null);
+    const downOnBackdropRef = useRef3(false);
+    useEffect2(() => {
       const onKey = (e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
@@ -17168,7 +18754,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       setDraft((prev) => prev.filter((b) => b.id !== id));
       if (selId === id) setSelId(rest[0] && rest[0].id || null);
     };
-    const [importOpen, setImportOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState3(false);
     const importBodies = (sourceBodies) => {
       const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
       setDraft(next);
@@ -17300,16 +18886,16 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return { ...d, settings: { ...d.settings, holidays }, projects: newProjects };
     });
     const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter((t) => t.pinnedStart).length, 0);
-    const [open, setOpen] = useState(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
+    const [open, setOpen] = useState3(() => ({ view: true, holidays: false, cf: false, backup: false, ...initialSection ? { [initialSection]: true } : {} }));
     const tog = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
-    useEffect(() => {
+    useEffect2(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
       document.addEventListener("keydown", onKey);
       return () => document.removeEventListener("keydown", onKey);
     }, [onClose]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!initialSection) return;
       const el = document.querySelector(`[data-section="${initialSection}"]`);
       if (el) el.scrollIntoView({ block: "start" });
@@ -17533,7 +19119,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   function FormatPanel({ data, setData, onClose }) {
     const s = data.settings || {};
     const upd = (patch) => setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    useEffect(() => {
+    useEffect2(() => {
       const onKey = (e) => {
         if (e.key === "Escape") onClose();
       };
@@ -17621,11 +19207,11 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     )), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)", marginTop: 6, lineHeight: 1.4 } }, "Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.")));
   }
   function RuleColorPicker({ value, onChange }) {
-    const [open, setOpen] = useState(false);
-    const dotRef = useRef(null);
-    const menuRef = useRef(null);
+    const [open, setOpen] = useState3(false);
+    const dotRef = useRef3(null);
+    const menuRef = useRef3(null);
     const pos = useAnchoredPopover(open, dotRef, (r) => ({ top: r.bottom + 4, left: r.right - 110 }), () => setOpen(false));
-    useEffect(() => {
+    useEffect2(() => {
       if (!open) return;
       const onDown = (e) => {
         if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
@@ -17897,24 +19483,24 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
   }
   function DesktopSplitView(props) {
     const settings = props.data?.settings || DEFAULT_SETTINGS;
-    const gridRef = useRef(null);
-    const ganttRef = useRef(null);
-    const [split, setSplit] = useState(() => settings.defaultSplit || 60);
-    const containerRef = useRef(null);
-    const divDragging = useRef(false);
-    const [snapMode, setSnapMode] = useState(() => settings.snapDefault !== false);
-    const [dragging, setDragging] = useState(false);
-    const [_hintY, setHintY] = useState(0);
-    const snapModeRef = useRef(settings.snapDefault !== false);
-    useEffect(() => {
+    const gridRef = useRef3(null);
+    const ganttRef = useRef3(null);
+    const [split, setSplit] = useState3(() => settings.defaultSplit || 60);
+    const containerRef = useRef3(null);
+    const divDragging = useRef3(false);
+    const [snapMode, setSnapMode] = useState3(() => settings.snapDefault !== false);
+    const [dragging, setDragging] = useState3(false);
+    const [_hintY, setHintY] = useState3(0);
+    const snapModeRef = useRef3(settings.snapDefault !== false);
+    useEffect2(() => {
       snapModeRef.current = snapMode;
     }, [snapMode]);
-    useEffect(() => {
+    useEffect2(() => {
       const v = settings.snapDefault !== false;
       setSnapMode(v);
       snapModeRef.current = v;
     }, [settings.snapDefault]);
-    const echo = useRef({ grid: null, gantt: null });
+    const echo = useRef3({ grid: null, gantt: null });
     const sync = (src) => (e) => {
       const st = e.currentTarget.scrollTop, dst = src === "grid" ? "gantt" : "grid";
       if (echo.current[src] === st) {
@@ -17933,7 +19519,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
         }));
       }
     };
-    const liveColWidths = useRef(null);
+    const liveColWidths = useRef3(null);
     const onDividerDown = (e) => {
       e.preventDefault();
       divDragging.current = true;
@@ -18042,1514 +19628,7 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       )
     ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflow: "hidden", display: "flex" } }, /* @__PURE__ */ React.createElement(GanttView, { tasks: props.tasks, updateTask: props.updateTask, pxPerDay: props.ganttPPD, onZoomChange: props.setGanttPPD, scrollRef: ganttRef, onScroll: sync("gantt"), rolledHealthMap: props.rolledHealthMap, proj: props.proj, onMouseEnter: () => props.setHoverZone?.("gantt"), selectedId: props.selectedId, setSelectedId: props.setSelectedId, settings: props.data?.settings, rowZoom: props.gridZoom || 1 })));
   }
-  function HealthDropMenu({ value, onSelect, onClose }) {
-    const [idx, setIdx] = React.useState(() => Math.max(0, HK.indexOf(value)));
-    React.useEffect(() => {
-      const h = (e) => {
-        if (e.key === "ArrowDown") {
-          e.stopPropagation();
-          e.preventDefault();
-          setIdx((i) => Math.min(HK.length - 1, i + 1));
-        } else if (e.key === "ArrowUp") {
-          e.stopPropagation();
-          e.preventDefault();
-          setIdx((i) => Math.max(0, i - 1));
-        } else if (e.key === "Enter") {
-          e.stopPropagation();
-          e.preventDefault();
-          onSelect(HK[idx]);
-          onClose();
-        } else if (e.key === "Escape" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          e.stopPropagation();
-          e.preventDefault();
-          onClose();
-        } else if (e.key === "Tab") {
-          e.preventDefault();
-          onClose();
-        }
-      };
-      document.addEventListener("keydown", h, true);
-      const outside = (e) => {
-        if (!e.target.closest("[data-hmenu]")) onClose();
-      };
-      document.addEventListener("mousedown", outside);
-      return () => {
-        document.removeEventListener("keydown", h, true);
-        document.removeEventListener("mousedown", outside);
-      };
-    }, [idx, onSelect, onClose]);
-    return /* @__PURE__ */ React.createElement("div", { "data-hmenu": "1", style: {
-      position: "absolute",
-      top: "calc(100% + 2px)",
-      left: 0,
-      width: "max-content",
-      background: "var(--bg)",
-      border: "1px solid var(--bd2)",
-      borderRadius: 6,
-      boxShadow: "0 4px 20px rgba(0,0,0,.15)",
-      zIndex: 9999,
-      padding: "4px 0",
-      userSelect: "none"
-    } }, HK.map((hk, i) => {
-      const hh = HEALTH[hk];
-      return /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          key: hk,
-          "data-hmenu": "1",
-          onMouseEnter: () => setIdx(i),
-          onMouseDown: (e) => {
-            e.preventDefault();
-            onSelect(hk);
-            onClose();
-          },
-          style: {
-            padding: "5px 10px",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
-            background: i === idx ? "var(--surf)" : "transparent",
-            transition: "background .1s"
-          }
-        },
-        /* @__PURE__ */ React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: hh.dot, border: hh.border, flexShrink: 0 } }),
-        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--txt)", fontFamily: "'Inter',system-ui,sans-serif", whiteSpace: "nowrap" } }, hh.label)
-      );
-    }));
-  }
-  var MASTER_COL_DEFS = [
-    { k: "project", label: "Project", editable: false },
-    { k: "id", label: "ID", editable: false },
-    { k: "parent", label: "Parent Task", editable: false },
-    { k: "name", label: "Task", editable: true },
-    { k: "start", label: "Start", editable: false },
-    { k: "end", label: "End", editable: false },
-    { k: "duration", label: "Dur", editable: true },
-    { k: "health", label: "Status", editable: true },
-    { k: "percentComplete", label: "% Done", editable: true },
-    { k: "responsibleParty", label: "Owner", editable: true },
-    { k: "predecessors", label: "Predecessors", editable: false },
-    { k: "successors", label: "Successors", editable: false },
-    { k: "notes", label: "Notes", editable: false }
-  ];
-  var DEFAULT_MASTER_COLS = ["project", "id", "name", "parent", "start", "end", "duration", "health", "responsibleParty", "notes"];
-  var DEFAULT_MASTER_WIDTHS = {
-    // B1873360 — 140 sized for a bare schedule name ("Master Schedule"); the Project column and the
-    // "Group by project" header now show the qualified crossScheduleLabel ("Goose Creek / Master
-    // Schedule"), which needs more room. Only the DEFAULT changes — a saved masterColWidths.project
-    // still wins (see colWidths' init below), so nobody who already sized this column gets clobbered.
-    project: 200,
-    id: 36,
-    parent: 140,
-    name: 220,
-    start: 72,
-    end: 72,
-    duration: 52,
-    health: 110,
-    percentComplete: 60,
-    responsibleParty: 100,
-    predecessors: 180,
-    successors: 180,
-    notes: 80
-  };
-  var REPORT_STATUS_BASE = [
-    { k: "gray", label: "Not Started" },
-    { k: "yellow", label: "In Progress" },
-    { k: "red", label: "Needs Attention" },
-    { k: "paused", label: "Paused" },
-    { k: "green", label: "Complete" }
-  ];
-  var REPORT_STATUS_DEFAULT = ["yellow", "red"];
-  function reportStatusOptions(customHealth) {
-    const custom = (Array.isArray(customHealth) ? customHealth : []).filter((c) => c && typeof c === "object" && c.k != null && !REPORT_STATUS_BASE.some((o) => o.k === c.k)).map((c) => ({ k: c.k, label: c.label != null && String(c.label).trim() ? String(c.label) : String(c.k) }));
-    return [...REPORT_STATUS_BASE, ...custom];
-  }
-  function reportStatusKeys(v, options) {
-    const opts = options || REPORT_STATUS_BASE;
-    if (v === false) return [];
-    if (!Array.isArray(v)) return REPORT_STATUS_DEFAULT.slice();
-    return opts.map((o) => o.k).filter((k) => v.includes(k));
-  }
-  function reportStatusToggle(keys, k, options) {
-    const opts = options || REPORT_STATUS_BASE, has = keys.includes(k);
-    return opts.map((o) => o.k).filter((x) => x === k ? !has : keys.includes(x));
-  }
-  function reportStatusPasses(keys, disp) {
-    return keys.length === 0 || keys.includes(disp);
-  }
-  function reportProjectKeys(v, validIds) {
-    if (!Array.isArray(v)) return [];
-    const want = new Set(v.map(String));
-    return (validIds || []).map(String).filter((id) => want.has(id));
-  }
-  function reportProjectToggle(keys, id, validIds) {
-    const has = keys.includes(String(id));
-    return (validIds || []).map(String).filter((x) => x === String(id) ? !has : keys.includes(x));
-  }
-  function reportProjectPasses(keys, projId) {
-    return keys.length === 0 || keys.includes(String(projId));
-  }
-  function reportFilterCount(statusKeys, projectKeys) {
-    return (statusKeys.length > 0 ? 1 : 0) + (projectKeys.length > 0 ? 1 : 0);
-  }
-  function reportFacetCounts(rows, statusKeys, projectKeys) {
-    const status = {}, project = {};
-    rows.forEach((r) => {
-      if (reportProjectPasses(projectKeys, r.projId)) status[r._disp] = (status[r._disp] || 0) + 1;
-      if (reportStatusPasses(statusKeys, r._disp)) project[String(r.projId)] = (project[String(r.projId)] || 0) + 1;
-    });
-    return { status, project };
-  }
-  function reportFilterPhrase(statusNames, projectNames) {
-    const some = (names) => names.length > 2 ? names.slice(0, 2).join(", ") + ", +" + (names.length - 2) + " more" : names.join(" or ");
-    const parts = [];
-    if (statusNames.length) parts.push(some(statusNames));
-    if (projectNames.length) parts.push(some(projectNames));
-    return parts.join(" · ");
-  }
-  var _projectOrder = { ids: null, canOrder: false, error: null };
-  var _projectOrderSubs = /* @__PURE__ */ new Set();
-  if (typeof window !== "undefined") {
-    window.addEventListener("message", (e) => {
-      if (e.origin !== window.location.origin) return;
-      const m = e.data;
-      if (!m || m.source !== "planar-shell" || m.type !== "planar:project-order") return;
-      _projectOrder = {
-        ids: Array.isArray(m.ids) ? m.ids.filter((x) => typeof x === "string") : null,
-        canOrder: !!m.canOrder,
-        error: m.error ? String(m.error) : null
-      };
-      _projectOrderSubs.forEach((f) => f());
-    });
-  }
-  function postToShell(msg) {
-    try {
-      if (window.parent && window.parent !== window) window.parent.postMessage({ source: "planar-seq", ...msg }, window.location.origin);
-    } catch (_) {
-    }
-  }
-  function useProjectOrder() {
-    const [, tick] = React.useState(0);
-    React.useEffect(() => {
-      const f = () => tick((n) => n + 1);
-      _projectOrderSubs.add(f);
-      postToShell({ type: "planar:project-order-request" });
-      return () => {
-        _projectOrderSubs.delete(f);
-      };
-    }, []);
-    return _projectOrder;
-  }
-  function GroupOrderMenu({ label, isFirst, isLast, onPick }) {
-    const [pos, setPos] = React.useState(null);
-    const btnRef = useRef(null);
-    useEffect(() => {
-      if (!pos) return;
-      const close = (e) => {
-        if (e && e.type === "keydown" && e.key !== "Escape") return;
-        setPos(null);
-      };
-      const down = (e) => {
-        if (!e.target.closest || !e.target.closest("[data-grp-menu]")) setPos(null);
-      };
-      window.addEventListener("pointerdown", down, true);
-      window.addEventListener("keydown", close, true);
-      window.addEventListener("resize", close);
-      document.addEventListener("scroll", close, true);
-      return () => {
-        window.removeEventListener("pointerdown", down, true);
-        window.removeEventListener("keydown", close, true);
-        window.removeEventListener("resize", close);
-        document.removeEventListener("scroll", close, true);
-      };
-    }, [pos]);
-    const open = (e) => {
-      e.stopPropagation();
-      if (pos) {
-        setPos(null);
-        return;
-      }
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
-    };
-    const item = (txt, to, disabled) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        type: "button",
-        role: "menuitem",
-        disabled,
-        onClick: () => {
-          setPos(null);
-          onPick(to);
-        },
-        style: {
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: "9px 14px",
-          border: "none",
-          background: "transparent",
-          fontFamily: "inherit",
-          fontSize: 13,
-          color: disabled ? "var(--bd2)" : "var(--txt)",
-          cursor: disabled ? "default" : "pointer"
-        }
-      },
-      txt
-    );
-    return /* @__PURE__ */ React.createElement("span", { "data-grp-menu": "1", style: { display: "inline-flex" } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        ref: btnRef,
-        type: "button",
-        "data-grp-menu-btn": "1",
-        onClick: open,
-        "aria-haspopup": "menu",
-        "aria-expanded": !!pos,
-        title: `Order options for ${label}`,
-        "aria-label": `Order options for ${label}`,
-        style: {
-          width: 30,
-          height: 30,
-          borderRadius: 6,
-          border: "1px solid var(--bd2)",
-          background: "var(--surf)",
-          color: "var(--txt)",
-          fontSize: 16,
-          lineHeight: 1,
-          cursor: "pointer",
-          fontFamily: "inherit"
-        }
-      },
-      "⋯"
-    ), pos && /* @__PURE__ */ React.createElement("div", { role: "menu", style: {
-      position: "fixed",
-      top: pos.top,
-      right: pos.right,
-      zIndex: 1e3,
-      minWidth: 170,
-      padding: "4px 0",
-      background: "var(--surf)",
-      border: "1px solid var(--bd2)",
-      borderRadius: 8,
-      boxShadow: "0 6px 20px rgba(27,31,36,.18)"
-    } }, item("Move to top", "top", isFirst), item("Move up", "up", isFirst), item("Move down", "down", isLast), item("Move to bottom", "bottom", isLast)));
-  }
-  var REPORT_MENU_SECTION = { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "6px 10px 4px" };
-  var REPORT_MENU_ROW = { display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer", borderRadius: 4, transition: "background .1s" };
-  var REPORT_MENU_COUNT = { fontSize: 11, color: "var(--mut)", fontVariantNumeric: "tabular-nums", marginLeft: "auto", paddingLeft: 10, flexShrink: 0 };
-  function ReportMenu({ id, openMenu, setOpenMenu, label, active, minWidth, footer, children }) {
-    const open = openMenu === id;
-    const btnRef = useRef(null);
-    const panelRef = useRef(null);
-    const pos = useAnchoredPopover(open, btnRef, (r) => {
-      const bar = btnRef.current && btnRef.current.closest("[data-report-toolbar]");
-      const p = panelRef.current, vw = document.documentElement.clientWidth, vh = window.innerHeight, pad = 8;
-      const w = p ? p.offsetWidth : minWidth;
-      const top = (bar ? bar.getBoundingClientRect().bottom : r.bottom) + 4;
-      return { left: Math.max(pad, Math.min(r.left, vw - pad - w)), top, maxH: Math.max(140, vh - top - pad) };
-    }, () => setOpenMenu((cur) => cur === id ? null : cur));
-    return /* @__PURE__ */ React.createElement("div", { "data-tr-menu": id, style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        ref: btnRef,
-        type: "button",
-        className: "btn" + (open || active ? " act" : ""),
-        "data-tr-btn": id,
-        "data-active": active ? "1" : void 0,
-        "aria-haspopup": "true",
-        "aria-expanded": open,
-        onClick: () => setOpenMenu(open ? null : id),
-        style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }
-      },
-      label,
-      " ",
-      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 8, opacity: 0.7 } }, "▾")
-    ), open && /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref: panelRef,
-        "data-tr-panel": id,
-        style: {
-          position: "fixed",
-          left: pos ? pos.left : 0,
-          top: pos ? pos.top : 0,
-          visibility: pos ? "visible" : "hidden",
-          zIndex: 99,
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: pos ? pos.maxH : "60vh",
-          minWidth,
-          maxWidth: "calc(100vw - 16px)",
-          boxSizing: "border-box",
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 7,
-          boxShadow: "0 4px 16px rgba(0,0,0,.12)"
-        }
-      },
-      /* @__PURE__ */ React.createElement("div", { "data-tr-panel-body": true, style: { overflowY: "auto", minHeight: 0, padding: "8px 4px" } }, children),
-      footer && /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", padding: "6px 14px", flexShrink: 0 } }, footer)
-    ));
-  }
-  function MasterView({ data, setData, updateTask, setNotesCtx, goToTask }) {
-    const [localEdit, setLocalEdit] = useState(null);
-    const [selCell, setSelCell] = useState(null);
-    const tableWrapRef = useRef(null);
-    const cellFocusTimer = useRef(null);
-    const openEdit = (payload) => {
-      clearTimeout(cellFocusTimer.current);
-      setLocalEdit(payload);
-    };
-    const [openMenu, setOpenMenu] = useState(null);
-    useEffect(() => {
-      if (!openMenu) return;
-      const down = (e) => {
-        if (!(e.target && e.target.closest && e.target.closest("[data-tr-menu]"))) setOpenMenu(null);
-      };
-      const key = (e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          setOpenMenu(null);
-        }
-      };
-      const away = () => setOpenMenu(null);
-      document.addEventListener("pointerdown", down, true);
-      document.addEventListener("keydown", key, true);
-      window.addEventListener("blur", away);
-      return () => {
-        document.removeEventListener("pointerdown", down, true);
-        document.removeEventListener("keydown", key, true);
-        window.removeEventListener("blur", away);
-      };
-    }, [openMenu]);
-    const masterSort = data.masterSort || { col: "health", dir: "asc" };
-    const setSort = (col) => {
-      if (masterSort.col === col) {
-        if (masterSort.dir === "asc") setData((d) => ({ ...d, masterSort: { col, dir: "desc" } }));
-        else setData((d) => ({ ...d, masterSort: { col: null, dir: "asc" } }));
-      } else {
-        setData((d) => ({ ...d, masterSort: { col, dir: "asc" } }));
-      }
-    };
-    const visCols = data.masterCols || DEFAULT_MASTER_COLS;
-    const setVisCols = (cols) => setData((d) => ({ ...d, masterCols: cols }));
-    useEffect(() => {
-      if (!visCols.includes("parent") || !visCols.includes("name")) return;
-      const ni = visCols.indexOf("name"), pi = visCols.indexOf("parent");
-      if (pi === ni + 1) return;
-      const next = visCols.filter((k) => k !== "parent");
-      next.splice(ni + 1, 0, "parent");
-      setVisCols(next);
-    }, []);
-    const [dragMCol, setDragMCol] = useState(null);
-    const [dragMOver, setDragMOver] = useState(null);
-    const reorderMCols = (fromKey, toKey) => {
-      if (fromKey === toKey) return;
-      const next = [...visCols];
-      const fi = next.indexOf(fromKey), ti = next.indexOf(toKey);
-      if (fi < 0 || ti < 0) return;
-      next.splice(fi, 1);
-      next.splice(ti, 0, fromKey);
-      setVisCols(next);
-    };
-    const DEFAULT_LVL = { leafOnly: false, depths: [0, 1, 2, 3] };
-    const lvlFilter = data.masterLevelFilter || DEFAULT_LVL;
-    const setLvlFilter = (f) => setData((d) => ({ ...d, masterLevelFilter: f }));
-    const lvlActive = lvlFilter.leafOnly || lvlFilter.depths.length < 4;
-    const statusOptions = useMemo(() => reportStatusOptions(data.settings?.customHealth), [data.settings?.customHealth]);
-    const statusKeys = useMemo(() => reportStatusKeys(data.masterHealthFilter, statusOptions), [data.masterHealthFilter, statusOptions]);
-    const setStatusKeys = (keys) => setData((d) => ({ ...d, masterHealthFilter: keys }));
-    const projectIds = useMemo(() => Object.values(data.projects).map((p) => String(p.id)), [data.projects]);
-    const projectKeys = useMemo(() => reportProjectKeys(data.masterProjectFilter, projectIds), [data.masterProjectFilter, projectIds]);
-    const setProjectKeys = (keys) => setData((d) => ({ ...d, masterProjectFilter: keys }));
-    const clearFilters = () => setData((d) => ({ ...d, masterHealthFilter: [], masterProjectFilter: [] }));
-    const filterCount = reportFilterCount(statusKeys, projectKeys);
-    const statusName = (o) => data.settings?.healthLabelOverrides?.[o.k] || o.label;
-    const totalTaskCount = useMemo(() => Object.values(data.projects).reduce((s, p) => s + p.tasks.length, 0), [data.projects]);
-    const rows = useMemo(() => {
-      const dispOf = (t, isParent, rolled, byId) => isParent ? rolled[t.id] || t.health : computeDisplayHealth(t, data.settings, byId);
-      return Object.values(data.projects).flatMap((p) => {
-        const childIds = new Set(p.tasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
-        const rolled = computeRolledHealth(p.tasks, data.settings);
-        const byId = {};
-        p.tasks.forEach((t) => byId[t.id] = t);
-        const { ownerLabel } = scheduleLabelParts(p);
-        const projLabel = crossScheduleLabel(p);
-        const _own = ownerOf(p);
-        const projSiteId = _own.kind === OWNER_KIND_SITE ? _own.siteId : null;
-        return p.tasks.map((t) => {
-          let depth = 0, cur = t;
-          while (cur && cur.parentId !== null) {
-            depth++;
-            cur = p.tasks.find((x) => x.id === cur.parentId) || null;
-          }
-          const isLeaf = !childIds.has(t.id);
-          return { ...t, projName: p.name, projId: p.id, projSiteId, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks) };
-        });
-      });
-    }, [data.projects, data.settings, NOW]);
-    const levelRows = useMemo(() => {
-      if (lvlFilter.leafOnly) return rows.filter((r) => r.isLeaf);
-      return rows.filter((r) => lvlFilter.depths.includes(Math.min(r.depth, 3)));
-    }, [rows, lvlFilter]);
-    const facets = useMemo(() => reportFacetCounts(levelRows, statusKeys, projectKeys), [levelRows, statusKeys, projectKeys]);
-    const filteredRows = useMemo(
-      () => levelRows.filter((r) => reportStatusPasses(statusKeys, r._disp) && reportProjectPasses(projectKeys, r.projId)),
-      [levelRows, statusKeys, projectKeys]
-    );
-    const projOrder = useProjectOrder();
-    const projectChoices = useMemo(() => groupRowsByProject(
-      Object.values(data.projects).map((p) => ({ projId: String(p.id), projSiteId: ownerOf(p).kind === OWNER_KIND_SITE ? ownerOf(p).siteId : null, projOwnerLabel: scheduleLabelParts(p).ownerLabel, projName: p.name, projLabel: crossScheduleLabel(p) })),
-      projOrder.ids
-    ), [data.projects, projOrder.ids]);
-    const getParentName = (t) => {
-      if (!t.parentId) return "—";
-      const proj = data.projects[t.projId];
-      return proj?.tasks.find((x) => x.id === t.parentId)?.name || "—";
-    };
-    const _getPredStr = (t) => {
-      const proj = data.projects[t.projId];
-      if (!proj) return "";
-      return normPreds(t.predecessors).map((p) => {
-        const pt = proj.tasks.find((x) => x.id === p.id);
-        return pt ? `${p.id} – ${pt.name}` : "";
-      }).filter(Boolean).join("; ");
-    };
-    const _getSuccStr = (t) => {
-      const proj = data.projects[t.projId];
-      if (!proj) return "";
-      return proj.tasks.filter(
-        (x) => normPreds(x.predecessors).some((p) => p.id === t.id)
-      ).map((x) => `${x.id} – ${x.name}`).join("; ");
-    };
-    const applyCommit = (t, col, val) => {
-      if (col === "duration") {
-        const parsed = parseDurationInput(val);
-        if (parsed.error) {
-          showToast(parsed.error);
-          return;
-        }
-        if (parsed.value !== taskDurValue(t) || parsed.unit !== taskDurUnit(t)) updateTask(t.id, { durValue: parsed.value, durUnit: parsed.unit }, t.projId);
-      } else if (col === "health") {
-        if (val !== t.health) updateTask(t.id, { health: val }, t.projId);
-      } else if (col === "percentComplete") {
-        const nv = Math.max(0, Math.min(100, parseInt(val) || 0));
-        if (nv !== (t.percentComplete || 0)) updateTask(t.id, { percentComplete: nv }, t.projId);
-      } else if (col === "name") {
-        if (val.trim() && val.trim() !== t.name) updateTask(t.id, { name: val.trim() }, t.projId);
-      } else if (col === "responsibleParty") {
-        const next = Array.isArray(val) ? val : ownerListOf({ responsibleParty: val });
-        const cur = ownerListOf(t);
-        if (next.length !== cur.length || next.some((n, i) => n !== cur[i])) updateTask(t.id, { responsibleParty: next }, t.projId);
-      }
-    };
-    const closeEdit = () => {
-      setLocalEdit(null);
-      setTimeout(() => tableWrapRef.current?.focus({ preventScroll: true }), 0);
-    };
-    const commit = (t, col, val) => {
-      applyCommit(t, col, val);
-      closeEdit();
-    };
-    const isE = (t, col) => localEdit?.id === t.id && localEdit?.projId === t.projId && localEdit?.col === col;
-    const fmtDate = (s) => {
-      if (!s) return "";
-      const [y, m, d] = s.split("-");
-      if (!y || !m || !d) return "";
-      return String(+m).padStart(2, "0") + "/" + String(+d).padStart(2, "0") + "/" + y.slice(2);
-    };
-    const masterGroupBy = data.masterGroupBy || null;
-    const setGroupBy = (v) => setData((d) => ({ ...d, masterGroupBy: v }));
-    const HEALTH_ORDER = { red: 0, yellow: 1, paused: 2, gray: 3, green: 4 };
-    const sortedRows = useMemo(() => {
-      if (!masterSort.col) return filteredRows;
-      const { col, dir } = masterSort;
-      const mult = dir === "asc" ? 1 : -1;
-      return [...filteredRows].sort((a, b) => {
-        let av, bv;
-        switch (col) {
-          case "health":
-            av = HEALTH_ORDER[a._disp] ?? 5;
-            bv = HEALTH_ORDER[b._disp] ?? 5;
-            break;
-          case "id":
-            av = a.id;
-            bv = b.id;
-            break;
-          case "duration":
-            av = a.duration;
-            bv = b.duration;
-            break;
-          case "percentComplete":
-            av = a._pct ?? effectivePercentComplete(a);
-            bv = b._pct ?? effectivePercentComplete(b);
-            break;
-          case "start":
-            av = a.start;
-            bv = b.start;
-            break;
-          case "end":
-            av = a.end;
-            bv = b.end;
-            break;
-          case "project":
-            av = `${(a.projLabel || "").toLowerCase()}\0${String(a.projId)}`;
-            bv = `${(b.projLabel || "").toLowerCase()}\0${String(b.projId)}`;
-            break;
-          case "name":
-            av = (a.name || "").toLowerCase();
-            bv = (b.name || "").toLowerCase();
-            break;
-          case "responsibleParty":
-            av = (ownerListOf(a)[0] || "").toLowerCase();
-            bv = (ownerListOf(b)[0] || "").toLowerCase();
-            break;
-          case "notes":
-            av = (a.notes || []).length;
-            bv = (b.notes || []).length;
-            break;
-          default:
-            av = 0;
-            bv = 0;
-        }
-        if (av < bv) return -1 * mult;
-        if (av > bv) return 1 * mult;
-        return 0;
-      });
-    }, [filteredRows, masterSort]);
-    const groupedRows = useMemo(
-      () => masterGroupBy === "project" ? groupRowsByProject(sortedRows, projOrder.ids) : null,
-      [masterGroupBy, sortedRows, projOrder.ids]
-    );
-    const movableIds = useMemo(() => {
-      const out = [];
-      (groupedRows || []).forEach((g2) => {
-        if (g2.siteId != null && g2.rank !== Infinity && !out.includes(g2.siteId)) out.push(g2.siteId);
-      });
-      return out;
-    }, [groupedRows]);
-    const canReorderGroups = !!projOrder.canOrder && movableIds.length > 1;
-    const [grpDrag, setGrpDrag] = useState(null);
-    const grpStopRef = useRef(null);
-    useEffect(() => () => {
-      if (grpStopRef.current) grpStopRef.current();
-    }, []);
-    const requestGroupMove = (siteId, dest) => postToShell({ type: "planar:project-order-move", groupId: siteId, dest, visibleIds: movableIds });
-    const pickGroupMenu = (siteId, to) => {
-      const pos = movableIds.indexOf(siteId);
-      if (pos < 0) return;
-      if (to === "top" || to === "bottom") requestGroupMove(siteId, { to });
-      else requestGroupMove(siteId, { index: to === "up" ? pos - 1 : pos + 1 });
-    };
-    const startGroupDrag = (e, siteId) => {
-      if (e.button != null && e.button !== 0) return;
-      const wrap = tableWrapRef.current;
-      if (!wrap) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const others = movableIds.filter((x) => x !== siteId);
-      const firstHeaders = () => {
-        const m = /* @__PURE__ */ new Map();
-        wrap.querySelectorAll("tr[data-grp-site]").forEach((tr) => {
-          const k = tr.getAttribute("data-grp-site");
-          if (k && !m.has(k)) m.set(k, tr);
-        });
-        return m;
-      };
-      const atFor = (y2) => {
-        const hs = firstHeaders();
-        let at = 0;
-        for (const id of others) {
-          const tr = hs.get(id);
-          if (!tr) continue;
-          const b = tr.getBoundingClientRect();
-          if (y2 > b.top + b.height / 2) at++;
-        }
-        return at;
-      };
-      let y = e.clientY, raf = 0, last = atFor(y);
-      setGrpDrag({ siteId, at: last });
-      const tick = () => {
-        const b = wrap.getBoundingClientRect();
-        const zone = 28;
-        if (y < b.top + zone) wrap.scrollTop -= 8;
-        else if (y > b.bottom - zone) wrap.scrollTop += 8;
-        const at = atFor(y);
-        if (at !== last) {
-          last = at;
-          setGrpDrag({ siteId, at });
-        }
-        raf = requestAnimationFrame(tick);
-      };
-      raf = requestAnimationFrame(tick);
-      const move = (ev) => {
-        y = ev.clientY;
-      };
-      const releaseCursor = window.pinSchedCursor("grabbing", { onExit: () => end(false) });
-      const end = (commit2) => {
-        releaseCursor();
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        window.removeEventListener("pointercancel", cancel);
-        window.removeEventListener("keydown", key, true);
-        cancelAnimationFrame(raf);
-        grpStopRef.current = null;
-        setGrpDrag(null);
-        if (commit2) requestGroupMove(siteId, { index: last });
-      };
-      const up = () => end(true);
-      const cancel = () => end(false);
-      const key = (ev) => {
-        if (ev.key === "Escape") {
-          ev.stopPropagation();
-          end(false);
-        }
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-      window.addEventListener("pointercancel", cancel);
-      window.addEventListener("keydown", key, true);
-      grpStopRef.current = () => end(false);
-    };
-    const dragOthers = grpDrag ? movableIds.filter((x) => x !== grpDrag.siteId) : [];
-    const lineAboveSite = grpDrag && grpDrag.at < dragOthers.length ? dragOthers[grpDrag.at] : null;
-    const lineBelowSite = grpDrag && grpDrag.at >= dragOthers.length && dragOthers.length ? dragOthers[dragOthers.length - 1] : null;
-    const lastGroupOfSite = (sid) => {
-      let idx = -1;
-      (groupedRows || []).forEach((g2, i) => {
-        if (g2.siteId === sid) idx = i;
-      });
-      return idx;
-    };
-    const [colWidths, setColWidths] = useState(() => {
-      const saved = data.masterColWidths || {};
-      return Object.fromEntries(Object.entries(DEFAULT_MASTER_WIDTHS).map(([k, v]) => [k, saved[k] ?? v]));
-    });
-    const startResize = (colKey, e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const startX = e.clientX, startW = colWidths[colKey];
-      let latestW = startW;
-      const move = (ev) => {
-        latestW = Math.max(40, startW + ev.clientX - startX);
-        setColWidths((w) => ({ ...w, [colKey]: latestW }));
-      };
-      const release = window.pinSchedCursor("col-resize", { onExit: () => up() });
-      const up = () => {
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
-        release();
-        setData((d) => ({ ...d, masterColWidths: { ...colWidths, [colKey]: latestW } }));
-      };
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
-    };
-    const autoSizeMCol = (colKey) => {
-      const colDef = MASTER_COL_DEFS.find((c) => c.k === colKey);
-      if (!colDef) return;
-      const fmtD2 = (s) => {
-        if (!s) return "";
-        const [y, m, d] = s.split("-");
-        return `${String(+m).padStart(2, "0")}/${String(+d).padStart(2, "0")}/${(y || "").slice(2)}`;
-      };
-      const values = sortedRows.map((t) => {
-        let val = "";
-        switch (colKey) {
-          case "project":
-            val = t.projLabel || "";
-            break;
-          case "id":
-            val = String(t.id);
-            break;
-          case "name":
-            val = t.name || "";
-            break;
-          case "start":
-            val = fmtD2(t.start);
-            break;
-          case "end":
-            val = fmtD2(t.end);
-            break;
-          case "duration":
-            val = fmtTaskDuration(t, !t.isLeaf) || `${t.duration}d`;
-            break;
-          case "health":
-            val = HEALTH[t.health]?.label || "";
-            break;
-          case "percentComplete":
-            val = `${t._pct ?? effectivePercentComplete(t)}%`;
-            break;
-          case "responsibleParty":
-            val = ownerDisplayParts(ownerListOf(t)).label;
-            break;
-          case "notes":
-            val = t.notes?.length > 0 ? `${t.notes.length} entr` : "+ Add";
-            break;
-          case "parent": {
-            const p = data.projects[t.projId]?.tasks.find((x) => x.id === t.parentId);
-            val = p ? p.name : "—";
-            break;
-          }
-          default:
-            val = String(t[colKey] || "");
-        }
-        return val;
-      });
-      const n = { ...colWidths, [colKey]: measuredColWidth(colDef.label, values, 40) };
-      setColWidths(n);
-      setData((d) => ({ ...d, masterColWidths: n }));
-    };
-    const activeCols = visCols.map((k) => MASTER_COL_DEFS.find((c) => c.k === k)).filter(Boolean);
-    const displayCols = masterGroupBy === "project" ? activeCols.filter((c) => c.k !== "project") : activeCols;
-    const renderJumpCell = (t) => /* @__PURE__ */ React.createElement("td", { key: "__jump", style: {
-      width: 30,
-      minWidth: 30,
-      maxWidth: 30,
-      padding: 0,
-      textAlign: "center",
-      borderBottom: "1px solid var(--bd)",
-      borderRight: "1px solid var(--bd)"
-    } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        title: `Open row in ${t.projLabel}`,
-        onClick: (e) => {
-          e.stopPropagation();
-          if (goToTask) goToTask(t.projId, t.id);
-        },
-        onMouseEnter: (e) => {
-          e.currentTarget.style.color = "var(--blue)";
-          e.currentTarget.style.background = "rgba(9,105,218,0.08)";
-        },
-        onMouseLeave: (e) => {
-          e.currentTarget.style.color = "var(--mut)";
-          e.currentTarget.style.background = "transparent";
-        },
-        style: {
-          width: 20,
-          height: 20,
-          padding: 0,
-          border: "none",
-          borderRadius: 4,
-          background: "transparent",
-          color: "var(--mut)",
-          cursor: "pointer",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          verticalAlign: "middle",
-          transition: "color .12s, background .12s"
-        }
-      },
-      /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M5 2 H2.5 A.5 .5 0 0 0 2 2.5 V9.5 A.5 .5 0 0 0 2.5 10 H9.5 A.5 .5 0 0 0 10 9.5 V7" }), /* @__PURE__ */ React.createElement("path", { d: "M7.2 2 H10 V4.8" }), /* @__PURE__ */ React.createElement("path", { d: "M10 2 L5.8 6.2" }))
-    ));
-    const EDITABLE_KEYS = /* @__PURE__ */ new Set(["name", "duration", "health", "percentComplete", "responsibleParty", "notes"]);
-    const handleTableKey = (e) => {
-      if (localEdit) return;
-      if (!selCell) return;
-      const { ri, ci } = selCell;
-      if (e.altKey && e.key === "ArrowDown") {
-        const col = displayCols[ci];
-        const t = sortedRows[ri];
-        if (col?.k === "health" && t) {
-          e.preventDefault();
-          setLocalEdit({ id: t.id, projId: t.projId, col: "health" });
-        }
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelCell({ ri: Math.min(sortedRows.length - 1, ri + 1), ci });
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelCell({ ri: Math.max(0, ri - 1), ci });
-        return;
-      }
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setSelCell({ ri, ci: Math.min(displayCols.length - 1, ci + 1) });
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setSelCell({ ri, ci: Math.max(0, ci - 1) });
-        return;
-      }
-      if (e.key === "Escape") {
-        setSelCell(null);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "F2") {
-        const col = displayCols[ci];
-        const t = sortedRows[ri];
-        if (col && t && EDITABLE_KEYS.has(col.k)) {
-          e.preventDefault();
-          if (col.k === "notes") {
-            setNotesCtx({ taskId: t.id, projectId: t.projId, initChar: null });
-            return;
-          }
-          if (col.k === "duration" && !t.isLeaf) return;
-          setLocalEdit({ id: t.id, projId: t.projId, col: col.k });
-        }
-        return;
-      }
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const col = displayCols[ci];
-        const t = sortedRows[ri];
-        if (!col || !t || !EDITABLE_KEYS.has(col.k)) return;
-        if (col.k === "health") return;
-        if (col.k === "notes") {
-          e.preventDefault();
-          setNotesCtx({ taskId: t.id, projectId: t.projId, initChar: e.key });
-          return;
-        }
-        const isNum = col.k === "duration" || col.k === "percentComplete";
-        if (isNum && !/\d/.test(e.key)) return;
-        if (col.k === "duration" && !t.isLeaf) return;
-        e.preventDefault();
-        setLocalEdit({ id: t.id, projId: t.projId, col: col.k, initChar: e.key });
-      }
-    };
-    const renderCell = (t, col, ri) => {
-      const dispHealth = t._disp ?? computeDisplayHealth(t, data.settings, null);
-      const h = HEALTH[dispHealth];
-      const ci = displayCols.indexOf(col);
-      const isSel = selCell && selCell.ri === ri && selCell.ci === ci;
-      const selStyle = isSel ? { outline: "2px solid #2563eb", outlineOffset: "-2px" } : {};
-      const onCellClick = (e) => {
-        setSelCell({ ri, ci });
-        if (e && e.detail > 1) return;
-        clearTimeout(cellFocusTimer.current);
-        cellFocusTimer.current = setTimeout(() => tableWrapRef.current?.focus({ preventScroll: true }), 0);
-      };
-      const isFirstCol = displayCols[0] === col;
-      const stripeColor = h.dot === "#ffffff" ? "#d1d5db" : h.dot;
-      const tdBase = {
-        padding: "6px 10px",
-        borderBottom: "1px solid var(--bd)",
-        borderRight: "1px solid var(--bd)",
-        borderLeft: isFirstCol ? `3px solid ${stripeColor}` : "none",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        width: colWidths[col.k],
-        minWidth: colWidths[col.k],
-        maxWidth: colWidths[col.k],
-        cursor: "default",
-        ...selStyle
-      };
-      switch (col.k) {
-        case "project":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, title: t.projLabel, style: { ...tdBase, color: "#1d4ed8", fontSize: 11 } }, t.projLabel);
-        case "id":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, color: "var(--mut)", fontSize: 11 } }, t.id);
-        case "parent":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, color: "var(--mut)", fontSize: 11 } }, getParentName(t));
-        case "name":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "name" }) }, isE(t, "name") ? /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              ...NO_AUTOFILL,
-              autoFocus: true,
-              style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" },
-              defaultValue: localEdit?.initChar ?? t.name,
-              onBlur: (e) => commit(t, "name", e.target.value),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") commit(t, "name", e.target.value);
-                if (e.key === "Escape") setLocalEdit(null);
-              }
-            }
-          ) : /* @__PURE__ */ React.createElement("span", { style: { color: "#1f2328", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", display: "block" } }, t.name));
-        case "start":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, fontSize: 11, color: "var(--mut)" } }, fmtDate(t.start));
-        case "end":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, onClick: onCellClick, style: { ...tdBase, fontSize: 11, color: "var(--mut)" } }, fmtDate(t.end));
-        case "duration":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => {
-            if (!t.isLeaf) return;
-            openEdit({ id: t.id, projId: t.projId, col: "duration" });
-          } }, isE(t, "duration") ? /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, autoFocus: true, style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" }, defaultValue: localEdit?.initChar ?? fmtTaskDuration(t), onBlur: (e) => commit(t, "duration", e.target.value), onKeyDown: (e) => {
-            if (e.key === "Enter") commit(t, "duration", e.target.value);
-            if (e.key === "Escape") setLocalEdit(null);
-          } }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" }, title: t.isLeaf ? durTooltip(t) || void 0 : "Computed from subtasks" }, fmtTaskDuration(t, !t.isLeaf) || "0d"));
-        case "health":
-          return /* @__PURE__ */ React.createElement(
-            "td",
-            {
-              key: col.k,
-              "data-hmenu": "1",
-              onClick: onCellClick,
-              onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "health" }),
-              style: {
-                ...tdBase,
-                cursor: "default",
-                position: "relative",
-                overflow: isE(t, "health") ? "visible" : "hidden",
-                zIndex: isE(t, "health") ? 50 : "auto"
-              }
-            },
-            isE(t, "health") && /* @__PURE__ */ React.createElement(
-              HealthDropMenu,
-              {
-                value: t.health,
-                onSelect: (val) => commit(t, "health", val),
-                onClose: () => setLocalEdit(null)
-              }
-            ),
-            /* @__PURE__ */ React.createElement("span", { style: {
-              background: h.bar,
-              borderRadius: 999,
-              padding: "3px 8px",
-              fontSize: 11,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              color: HDARK[dispHealth] || "#374151",
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-              maxWidth: "100%"
-            } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: h.dot === "#ffffff" ? "#d1d5db" : h.dot, flexShrink: 0 } }), h.label)
-          );
-        case "percentComplete":
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "percentComplete" }) }, isE(t, "percentComplete") ? /* @__PURE__ */ React.createElement("input", { ...NO_AUTOFILL, autoFocus: true, style: { display: "block", width: "100%", height: "18px", border: "none", borderBottom: "1.5px solid var(--blue)", outline: "none", background: "transparent", fontSize: 12, fontFamily: "inherit", color: "var(--txt)", padding: "0 2px" }, defaultValue: localEdit?.initChar ?? (t.percentComplete || 0), onBlur: (e) => commit(t, "percentComplete", e.target.value), onKeyDown: (e) => {
-            if (e.key === "Enter") commit(t, "percentComplete", e.target.value);
-            if (e.key === "Escape") setLocalEdit(null);
-          } }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--mut)" } }, t._pct ?? effectivePercentComplete(t), "%"));
-        case "responsibleParty": {
-          const { label, title } = ownerDisplayParts(ownerListOf(t));
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase, onClick: onCellClick, onDoubleClick: () => openEdit({ id: t.id, projId: t.projId, col: "responsibleParty" }) }, isE(t, "responsibleParty") ? /* @__PURE__ */ React.createElement(
-            ContactPicker,
-            {
-              owners: ownerListOf(t),
-              seedText: localEdit?.initChar != null ? localEdit.initChar : "",
-              contacts: data.settings?.contacts || [],
-              onOwnersChange: (names, newContacts) => {
-                if (newContacts && newContacts.length) {
-                  setData((d) => ({ ...d, settings: { ...d.settings, contacts: [...d.settings?.contacts || [], ...newContacts.map((nc) => ({ id: Date.now() + Math.random(), ...nc }))] } }));
-                }
-                applyCommit(t, "responsibleParty", names);
-              },
-              onClose: closeEdit
-            }
-          ) : /* @__PURE__ */ React.createElement("span", { title: title || void 0, style: { color: "var(--mut)" } }, label || /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—")));
-        }
-        case "predecessors": {
-          const _proj = data.projects[t.projId];
-          const _preds = normPreds(t.predecessors);
-          const _getName = (id) => _proj?.tasks.find((x) => x.id === id)?.name ?? `#${id}`;
-          const _ds = { fontSize: 12, display: "flex", alignItems: "center", overflow: "hidden", padding: 0, minHeight: 18 };
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: { ...tdBase, padding: "3px 6px" } }, _preds.length ? /* @__PURE__ */ React.createElement(DepCell, { items: _preds, renderLabel: (p) => fmtPreds([p]), renderName: (p) => _getName(p.id), s: _ds }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—"));
-        }
-        case "successors": {
-          const _proj = data.projects[t.projId];
-          const _succs = _proj ? _proj.tasks.filter((x) => normPreds(x.predecessors).some((p) => p.id === t.id)) : [];
-          const _ds = { fontSize: 12, display: "flex", alignItems: "center", overflow: "hidden", padding: 0, minHeight: 18 };
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: { ...tdBase, padding: "3px 6px" } }, _succs.length ? /* @__PURE__ */ React.createElement(DepCell, { items: _succs, renderLabel: (x) => String(x.id), renderName: (x) => x.name, s: _ds }) : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)" } }, "—"));
-        }
-        case "notes": {
-          const noteList = [...t.notes || []].reverse();
-          const visible = noteList.slice(0, 2);
-          const extra = noteList.length - 2;
-          const fmtNoteDate = (s) => {
-            try {
-              const [y, m, d] = (s || "").split("-");
-              return d ? `${+m}/${+d}/${(y || "").slice(2)}` : s;
-            } catch {
-              return s;
-            }
-          };
-          return /* @__PURE__ */ React.createElement(
-            "td",
-            {
-              key: col.k,
-              style: { ...tdBase, whiteSpace: "normal", verticalAlign: "top", cursor: "pointer", minWidth: colWidths[col.k] },
-              onClick: (e) => {
-                onCellClick();
-                setNotesCtx({ taskId: t.id, projectId: t.projId });
-              }
-            },
-            noteList.length === 0 ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--bd2)", fontSize: 11 } }, "+ Add") : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, visible.map((n) => /* @__PURE__ */ React.createElement("div", { key: n.id, style: { display: "flex", alignItems: "baseline", gap: 5, lineHeight: 1.4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--mut)", fontFamily: "inherit", flexShrink: 0 } }, fmtNoteDate(n.date)), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--mut)", flexShrink: 0 } }, "|"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#374151" } }, n.text))), extra > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#1d4ed8", fontWeight: 500 } }, "+", extra, " more…"))
-          );
-        }
-        default:
-          return /* @__PURE__ */ React.createElement("td", { key: col.k, style: tdBase });
-      }
-    };
-    return /* @__PURE__ */ React.createElement("div", { style: {
-      flex: 1,
-      minHeight: 0,
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden",
-      padding: "12px 14px 14px",
-      background: "var(--surf)"
-    } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexShrink: 0, flexWrap: "wrap", rowGap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--amber)", fontWeight: 600, fontSize: 13, letterSpacing: ".08em" } }, "TASK REPORT"), /* @__PURE__ */ React.createElement("span", { style: { background: "#dbeafe", color: "#1d4ed8", borderRadius: 8, padding: "1px 8px", fontSize: 10 } }, filteredRows.length), /* @__PURE__ */ React.createElement("div", { "data-report-toolbar": true, style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement(
-      ReportMenu,
-      {
-        id: "filter",
-        openMenu,
-        setOpenMenu,
-        active: filterCount > 0,
-        minWidth: 250,
-        label: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 16 16", "aria-hidden": "true", style: { flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M1.5 2.5h13L9.5 8.6v4.6l-3 1.5V8.6z", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinejoin: "round" })), "Filter", filterCount > 0 && /* @__PURE__ */ React.createElement("span", { "data-filter-badge": true, style: { background: "var(--amber)", color: "#fff", borderRadius: 8, minWidth: 15, height: 15, padding: "0 4px", fontSize: 10, fontWeight: 700, lineHeight: "15px", textAlign: "center", boxSizing: "border-box" } }, filterCount)),
-        footer: /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            role: "button",
-            tabIndex: 0,
-            "data-filter-clear": true,
-            style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
-            onClick: clearFilters,
-            onKeyDown: (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                clearFilters();
-              }
-            }
-          },
-          "Clear all"
-        )
-      },
-      /* @__PURE__ */ React.createElement("div", { style: REPORT_MENU_SECTION }, "Status"),
-      statusOptions.map((o) => {
-        const on = statusKeys.includes(o.k), h = HEALTH[o.k] || {};
-        return /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            key: o.k,
-            "data-filter-row": "status",
-            style: REPORT_MENU_ROW,
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              type: "checkbox",
-              "data-filter-status": o.k,
-              checked: on,
-              onChange: () => setStatusKeys(reportStatusToggle(statusKeys, o.k, statusOptions)),
-              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
-            }
-          ),
-          /* @__PURE__ */ React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: h.dot || "#d1d5db", border: h.border && h.border !== "none" ? h.border : "none", boxSizing: "border-box" } }),
-          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", flex: 1, minWidth: 0 } }, statusName(o)),
-          /* @__PURE__ */ React.createElement("span", { "data-filter-count": true, style: REPORT_MENU_COUNT }, facets.status[o.k] || 0)
-        );
-      }),
-      /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "6px 0 2px" } }),
-      /* @__PURE__ */ React.createElement("div", { style: REPORT_MENU_SECTION }, "Project"),
-      projectChoices.map((g2) => {
-        const on = projectKeys.includes(String(g2.projId));
-        return /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            key: g2.projId,
-            "data-filter-row": "project",
-            style: REPORT_MENU_ROW,
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              type: "checkbox",
-              "data-filter-project": g2.projId,
-              checked: on,
-              onChange: () => setProjectKeys(reportProjectToggle(projectKeys, g2.projId, projectIds)),
-              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
-            }
-          ),
-          /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)", flex: 1, minWidth: 0, overflowWrap: "anywhere" } }, g2.label),
-          /* @__PURE__ */ React.createElement("span", { "data-filter-count": true, style: REPORT_MENU_COUNT }, facets.project[String(g2.projId)] || 0)
-        );
-      })
-    ), /* @__PURE__ */ React.createElement(
-      ReportMenu,
-      {
-        id: "group",
-        openMenu,
-        setOpenMenu,
-        minWidth: 150,
-        label: /* @__PURE__ */ React.createElement(React.Fragment, null, "Group by: ", /* @__PURE__ */ React.createElement("span", { "data-group-current": true }, masterGroupBy === "project" ? "Project" : "None"))
-      },
-      [{ v: null, l: "None" }, { v: "project", l: "Project" }].map((opt) => {
-        const on = masterGroupBy === opt.v;
-        return /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            key: String(opt.v),
-            type: "button",
-            role: "menuitemradio",
-            "aria-checked": on,
-            "data-group-opt": opt.v || "none",
-            onClick: () => {
-              setGroupBy(opt.v);
-              setOpenMenu(null);
-            },
-            onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-            onMouseLeave: (e) => e.currentTarget.style.background = on ? "#eef2ff" : "transparent",
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: "100%",
-              padding: "6px 10px",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              textAlign: "left",
-              background: on ? "#eef2ff" : "transparent",
-              fontFamily: "inherit",
-              fontSize: 12,
-              color: "var(--txt)",
-              fontWeight: on ? 600 : 400
-            }
-          },
-          /* @__PURE__ */ React.createElement("span", { style: { width: 12, flexShrink: 0, color: "var(--amber)", fontSize: 11 } }, on ? "✓" : ""),
-          opt.l
-        );
-      })
-    ), /* @__PURE__ */ React.createElement(
-      ReportMenu,
-      {
-        id: "show",
-        openMenu,
-        setOpenMenu,
-        active: lvlActive,
-        minWidth: 176,
-        label: /* @__PURE__ */ React.createElement(React.Fragment, null, "Show ", lvlActive && /* @__PURE__ */ React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "var(--amber)", flexShrink: 0 } }))
-      },
-      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "0 10px 6px", borderBottom: "1px solid var(--bd)", marginBottom: 4 } }, "Which tasks to show"),
-      /* @__PURE__ */ React.createElement(
-        "label",
-        {
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 10px",
-            cursor: "pointer",
-            borderRadius: 4,
-            background: lvlFilter.leafOnly ? "#eef2ff" : "transparent",
-            transition: "background .1s"
-          },
-          onMouseEnter: (e) => {
-            if (!lvlFilter.leafOnly) e.currentTarget.style.background = "var(--surf)";
-          },
-          onMouseLeave: (e) => {
-            if (!lvlFilter.leafOnly) e.currentTarget.style.background = "transparent";
-          }
-        },
-        /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "checkbox",
-            checked: lvlFilter.leafOnly,
-            onChange: (e) => setLvlFilter({ ...lvlFilter, leafOnly: e.target.checked }),
-            style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
-          }
-        ),
-        /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)", fontWeight: 500 } }, "Action items only"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, "Hide phases and section headers"))
-      ),
-      /* @__PURE__ */ React.createElement("div", { style: { height: 1, background: "var(--bd)", margin: "4px 0" } }),
-      /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "var(--mut)", padding: "4px 10px 2px", letterSpacing: ".04em" } }, "OR BY OUTLINE LEVEL"),
-      [
-        { d: 0, label: "Top-level phases", sub: "Outline level 1" },
-        { d: 1, label: "Subtasks", sub: "Outline level 2" },
-        { d: 2, label: "Sub-subtasks", sub: "Outline level 3" },
-        { d: 3, label: "Deeper nesting", sub: "Level 4 and below" }
-      ].map(({ d, label, sub }) => {
-        const on = lvlFilter.depths.includes(d);
-        return /* @__PURE__ */ React.createElement(
-          "label",
-          {
-            key: d,
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "5px 10px",
-              cursor: "pointer",
-              borderRadius: 4,
-              opacity: lvlFilter.leafOnly ? 0.4 : 1,
-              transition: "background .1s"
-            },
-            onMouseEnter: (e) => {
-              if (!lvlFilter.leafOnly) e.currentTarget.style.background = "var(--surf)";
-            },
-            onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-          },
-          /* @__PURE__ */ React.createElement(
-            "input",
-            {
-              type: "checkbox",
-              checked: on,
-              disabled: lvlFilter.leafOnly,
-              onChange: (e) => setLvlFilter({ ...lvlFilter, depths: e.target.checked ? [...lvlFilter.depths, d] : lvlFilter.depths.filter((x) => x !== d) }),
-              style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
-            }
-          ),
-          /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--txt)" } }, label), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--mut)" } }, sub))
-        );
-      }),
-      /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", marginTop: 4, padding: "6px 10px 2px" } }, /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
-          onClick: () => setLvlFilter({ ...DEFAULT_LVL })
-        },
-        "Show all"
-      ))
-    ), /* @__PURE__ */ React.createElement(ReportMenu, { id: "columns", openMenu, setOpenMenu, minWidth: 168, label: "Columns" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", padding: "0 10px 6px", borderBottom: "1px solid var(--bd)", marginBottom: 4 } }, "Show / Hide Columns"), MASTER_COL_DEFS.map((col) => {
-      const on = visCols.includes(col.k);
-      return /* @__PURE__ */ React.createElement(
-        "label",
-        {
-          key: col.k,
-          style: { display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer", borderRadius: 4, transition: "background .1s" },
-          onMouseEnter: (e) => e.currentTarget.style.background = "var(--surf)",
-          onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-        },
-        /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "checkbox",
-            checked: on,
-            onChange: (e) => setVisCols(e.target.checked ? [...visCols, col.k] : visCols.filter((k) => k !== col.k)),
-            style: { accentColor: "var(--amber)", width: 12, height: 12, flexShrink: 0 }
-          }
-        ),
-        /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--txt)" } }, col.label)
-      );
-    }), /* @__PURE__ */ React.createElement("div", { style: { borderTop: "1px solid var(--bd)", marginTop: 4, paddingTop: 6, padding: "6px 10px 2px" } }, /* @__PURE__ */ React.createElement(
-      "span",
-      {
-        style: { fontSize: 10, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" },
-        onClick: () => setVisCols([...DEFAULT_MASTER_COLS])
-      },
-      "Reset to default"
-    ))))), masterGroupBy === "project" && projOrder.error && /* @__PURE__ */ React.createElement("div", { role: "alert", style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      flexShrink: 0,
-      marginBottom: 10,
-      padding: "6px 12px",
-      borderRadius: 8,
-      border: "1px solid var(--red, #dc2626)",
-      color: "var(--red, #dc2626)",
-      fontSize: 12,
-      fontWeight: 600
-    } }, /* @__PURE__ */ React.createElement("span", null, "Couldn't save your project order. It's kept on screen for now."), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        type: "button",
-        onClick: () => postToShell({ type: "planar:project-order-retry" }),
-        style: { fontSize: 12, fontWeight: 700, color: "var(--red, #dc2626)", background: "none", border: "1px solid var(--red, #dc2626)", borderRadius: 6, padding: "2px 10px", cursor: "pointer", fontFamily: "inherit" }
-      },
-      "Retry"
-    )), /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        ref: tableWrapRef,
-        "data-scroll-bounds": true,
-        tabIndex: 0,
-        onKeyDown: handleTableKey,
-        style: {
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          outline: "none",
-          overscrollBehavior: "contain",
-          paddingBottom: "var(--fab-dock, 0px)",
-          background: "var(--bg)",
-          border: "1px solid var(--bd2)",
-          borderRadius: 10,
-          boxShadow: "0 1px 2px rgba(27,31,36,.05), 0 3px 12px rgba(27,31,36,.04)"
-        },
-        onBlur: (e) => {
-          if (!e.currentTarget.contains(e.relatedTarget)) setSelCell(null);
-        }
-      },
-      /* @__PURE__ */ React.createElement("table", { style: {
-        borderCollapse: "collapse",
-        tableLayout: "fixed",
-        minWidth: "100%",
-        width: 30 + activeCols.reduce((s, c) => s + (colWidths[c.k] || 100), 0),
-        fontSize: 12
-      } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { key: "__jump", "data-grid-header": "1", style: {
-        width: 30,
-        minWidth: 30,
-        maxWidth: 30,
-        padding: 0,
-        position: "sticky",
-        top: 0,
-        zIndex: 3,
-        background: "#fafbfc",
-        boxShadow: "inset -1px 0 0 var(--bd), inset 0 -1px 0 var(--bd2)"
-      } }), displayCols.map((col) => {
-        const isActive = masterSort.col === col.k;
-        const sortable = ["project", "id", "name", "start", "end", "duration", "health", "percentComplete", "responsibleParty", "notes"].includes(col.k);
-        return /* @__PURE__ */ React.createElement(
-          "th",
-          {
-            key: col.k,
-            draggable: true,
-            onDragStart: (e) => {
-              e.dataTransfer.effectAllowed = "move";
-              setDragMCol(col.k);
-            },
-            onDragOver: (e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              setDragMOver(col.k);
-            },
-            onDragLeave: () => setDragMOver(null),
-            onDrop: (e) => {
-              e.preventDefault();
-              reorderMCols(dragMCol, col.k);
-              setDragMCol(null);
-              setDragMOver(null);
-            },
-            onDragEnd: () => {
-              setDragMCol(null);
-              setDragMOver(null);
-            },
-            onClick: sortable && dragMCol === null ? () => setSort(col.k) : void 0,
-            style: {
-              padding: "6px 10px",
-              textAlign: "left",
-              color: "var(--mut)",
-              fontSize: 10,
-              textTransform: "uppercase",
-              fontWeight: 600,
-              letterSpacing: ".06em",
-              position: "sticky",
-              top: 0,
-              zIndex: 3,
-              boxShadow: (dragMOver === col.k && dragMCol !== col.k ? "inset 2px 0 0 var(--blue), " : "") + "inset -1px 0 0 var(--bd), inset 0 -1px 0 var(--bd2)",
-              whiteSpace: "nowrap",
-              width: colWidths[col.k],
-              minWidth: colWidths[col.k],
-              maxWidth: colWidths[col.k],
-              userSelect: "none",
-              overflow: "hidden",
-              cursor: sortable ? "pointer" : "grab",
-              opacity: dragMCol === col.k ? 0.4 : 1,
-              background: "#fafbfc",
-              transition: "opacity .1s"
-            }
-          },
-          /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4 } }, col.label, sortable && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: isActive ? "var(--txt)" : "var(--bd2)", lineHeight: 1, flexShrink: 0 } }, isActive ? masterSort.dir === "asc" ? "↑" : "↓" : "↕")),
-          /* @__PURE__ */ React.createElement(
-            "div",
-            {
-              onMouseDown: (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                startResize(col.k, e);
-              },
-              onClick: (e) => e.stopPropagation(),
-              onDoubleClick: (e) => {
-                e.stopPropagation();
-                autoSizeMCol(col.k);
-              },
-              style: {
-                position: "absolute",
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: 6,
-                cursor: "col-resize",
-                zIndex: 2,
-                background: "transparent",
-                transition: "background .12s"
-              },
-              onMouseEnter: (e) => e.currentTarget.style.background = "rgba(79,70,229,0.25)",
-              onMouseLeave: (e) => e.currentTarget.style.background = "transparent"
-            }
-          )
-        );
-      }), /* @__PURE__ */ React.createElement("th", { key: "__fill", "aria-hidden": "true", style: {
-        width: "auto",
-        minWidth: 0,
-        padding: 0,
-        position: "sticky",
-        top: 0,
-        zIndex: 3,
-        background: "#fafbfc",
-        boxShadow: "inset 0 -1px 0 var(--bd2)"
-      } }))), /* @__PURE__ */ React.createElement("tbody", null, masterGroupBy === "project" ? (() => {
-        return groupedRows.flatMap(({ projId, gRows, label, siteId, rank }, gi) => {
-          const movable = canReorderGroups && siteId != null && rank !== Infinity;
-          const pos = movable ? movableIds.indexOf(siteId) : -1;
-          const dragging = grpDrag && grpDrag.siteId === siteId;
-          const first = siteId != null && groupedRows.findIndex((g2) => g2.siteId === siteId) === gi;
-          const showCtl = movable && first;
-          const line = !grpDrag ? null : siteId === lineAboveSite && first ? "inset 0 3px 0 var(--blue)" : siteId === lineBelowSite && gi === lastGroupOfSite(siteId) ? "inset 0 -3px 0 var(--blue)" : null;
-          return [
-            /* @__PURE__ */ React.createElement("tr", { key: `grp-${projId}`, "data-grp-site": siteId != null ? siteId : "", style: { opacity: dragging ? 0.45 : 1 } }, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: {
-              padding: "10px 12px 8px",
-              borderBottom: "1px solid var(--bd)",
-              background: "#f0f0f5",
-              borderLeft: "4px solid var(--amber)",
-              boxShadow: line || "none"
-            } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } }, showCtl && /* @__PURE__ */ React.createElement(
-              "span",
-              {
-                "data-grp-grip": siteId,
-                role: "button",
-                tabIndex: 0,
-                title: "Drag to reorder",
-                "aria-label": `Drag to reorder ${label}`,
-                onPointerDown: (e) => startGroupDrag(e, siteId),
-                style: {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 26,
-                  height: 30,
-                  color: "var(--mut)",
-                  fontSize: 16,
-                  lineHeight: 1,
-                  cursor: grpDrag ? "grabbing" : "grab",
-                  touchAction: "none",
-                  userSelect: "none"
-                }
-              },
-              "⠿"
-            ), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 15, fontWeight: 700, color: "var(--txt)", letterSpacing: "-.01em" } }, label), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, background: "#dbeafe", color: "#1d4ed8", borderRadius: 8, padding: "1px 7px", verticalAlign: "middle" } }, gRows.length), showCtl && /* @__PURE__ */ React.createElement(GroupOrderMenu, { label, isFirst: pos === 0, isLast: pos === movableIds.length - 1, onPick: (to) => pickGroupMenu(siteId, to) })))),
-            ...gRows.map((t, gri) => {
-              const ri = sortedRows.indexOf(t);
-              return /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (gri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }));
-            })
-          ];
-        });
-      })() : sortedRows.map((t, ri) => /* @__PURE__ */ React.createElement("tr", { key: `${t.projId}-${t.id}`, style: { background: t.rowColor || (ri % 2 ? "#f8fafc" : "var(--bg)") } }, renderJumpCell(t), displayCols.map((col) => renderCell(t, col, ri)), /* @__PURE__ */ React.createElement("td", { style: { padding: 0, borderBottom: "1px solid var(--bd)" } }))), sortedRows.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: displayCols.length + 2, style: { padding: 40, textAlign: "center", color: "var(--mut)", fontSize: 12, borderBottom: "1px solid var(--bd)" } }, totalTaskCount === 0 ? "No tasks in this project yet." : levelRows.length > 0 && filterCount > 0 ? /* @__PURE__ */ React.createElement("span", { "data-filter-empty": true }, "No tasks match the filter (", reportFilterPhrase(statusKeys.map((k) => statusName(statusOptions.find((o) => o.k === k))), projectKeys.map((id) => (projectChoices.find((g2) => String(g2.projId) === id) || {}).label || id)), "). ", /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          type: "button",
-          "data-filter-empty-clear": true,
-          onClick: clearFilters,
-          style: { border: "none", background: "none", padding: 0, font: "inherit", color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }
-        },
-        "Clear filter"
-      )) : /* @__PURE__ */ React.createElement("span", { "data-show-empty": true }, "No tasks match the Show setting. ", /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          type: "button",
-          onClick: () => setLvlFilter({ ...DEFAULT_LVL }),
-          style: { border: "none", background: "none", padding: 0, font: "inherit", color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }
-        },
-        "Show all"
-      ))))))
-    ));
-  }
+  installProjectOrderListener();
   var PAGE_SIZES = {
     letter: { label: "Letter (8.5 × 11 in)", w: 8.5, h: 11, css: "letter", short: "Letter" },
     legal: { label: "Legal (8.5 × 14 in)", w: 8.5, h: 14, css: "legal", short: "Legal" },
@@ -20525,15 +20604,15 @@ ${resizeScript}
   function PDFExportModal({ data, activePid, onClose, setData }) {
     const projs = Object.values(data.projects);
     const now = /* @__PURE__ */ new Date();
-    const seedCollapsed = useMemo(() => {
+    const seedCollapsed = useMemo2(() => {
       const out = [];
       Object.values(data.projects).forEach((p) => p.tasks.forEach((t) => {
         if (p.tasks.some((x) => x.parentId === t.id) && t.isExpanded === false) out.push(p.id + ":" + t.id);
       }));
       return out;
     }, []);
-    const initPrefs = useMemo(() => loadExportPrefs(), []);
-    const [cfg, setCfg] = useState(() => {
+    const initPrefs = useMemo2(() => loadExportPrefs(), []);
+    const [cfg, setCfg] = useState3(() => {
       const base = {
         exhibitLabel: "",
         projectTitle: "",
@@ -20573,14 +20652,14 @@ ${resizeScript}
       return base;
     });
     const upd = (patch) => setCfg((c) => ({ ...c, ...patch }));
-    const cfgRef = useRef(cfg);
-    useEffect(() => {
+    const cfgRef = useRef3(cfg);
+    useEffect2(() => {
       cfgRef.current = cfg;
     }, [cfg]);
-    const [headerOpen, setHeaderOpen] = useState(() => !!initPrefs.headerOpen);
-    const [secOpen, setSecOpen] = useState(() => initPrefs.secOpen || {});
+    const [headerOpen, setHeaderOpen] = useState3(() => !!initPrefs.headerOpen);
+    const [secOpen, setSecOpen] = useState3(() => initPrefs.secOpen || {});
     const secIsOpen = (k) => secOpen[k] !== false;
-    useEffect(() => {
+    useEffect2(() => {
       const out = {};
       EXPORT_PERSIST_KEYS.forEach((k) => {
         out[k] = cfg[k];
@@ -20589,8 +20668,8 @@ ${resizeScript}
       out.headerOpen = headerOpen;
       saveExportPrefs(out);
     }, [cfg, secOpen, headerOpen]);
-    const [previewCfg, setPreviewCfg] = useState(cfg);
-    useEffect(() => {
+    const [previewCfg, setPreviewCfg] = useState3(cfg);
+    useEffect2(() => {
       const t = setTimeout(() => setPreviewCfg(cfg), 280);
       return () => clearTimeout(t);
     }, [cfg]);
@@ -20622,7 +20701,7 @@ ${resizeScript}
     };
     const expandAll = () => setDetailLevel("all");
     const collapseAll = () => setDetailLevel("1");
-    useEffect(() => {
+    useEffect2(() => {
       const onToggle = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarToggleCollapse") return;
@@ -20636,7 +20715,7 @@ ${resizeScript}
       window.addEventListener("message", onToggle);
       return () => window.removeEventListener("message", onToggle);
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const onResize = (e) => {
         if (e.origin !== window.location.origin) return;
         if (!e.data || e.data.type !== "planarColResize") return;
@@ -20661,18 +20740,18 @@ ${resizeScript}
         return n;
       });
     };
-    const [previewUrl, setPreviewUrl] = useState(null);
-    useEffect(() => {
+    const [previewUrl, setPreviewUrl] = useState3(null);
+    useEffect2(() => {
       const html = buildPDFHtml(previewCfg, data, true);
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }, [previewCfg]);
-    const previewPaneRef = useRef(null);
-    const [paneW, setPaneW] = useState(760);
-    const [_paneH, setPaneH] = useState(520);
-    useEffect(() => {
+    const previewPaneRef = useRef3(null);
+    const [paneW, setPaneW] = useState3(760);
+    const [_paneH, setPaneH] = useState3(520);
+    useEffect2(() => {
       const el = previewPaneRef.current;
       if (!el) return;
       const obs = new ResizeObserver(([e]) => {
@@ -20685,12 +20764,12 @@ ${resizeScript}
     const _ps = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.letter;
     const pageW = Math.round((cfg.orientation === "landscape" ? _ps.h : _ps.w) * 96);
     const pageH = Math.round((cfg.orientation === "landscape" ? _ps.w : _ps.h) * 96);
-    const iframeRef = useRef(null);
-    const [iframeH, setIframeH] = useState(pageH);
-    useEffect(() => {
+    const iframeRef = useRef3(null);
+    const [iframeH, setIframeH] = useState3(pageH);
+    useEffect2(() => {
       setIframeH(pageH);
     }, [pageH]);
-    useEffect(() => {
+    useEffect2(() => {
       const handler = (e) => {
         if (e.origin !== window.location.origin) return;
         if (e.data?.type === "planarPreviewHeight") setIframeH(Math.max(pageH, e.data.h));
@@ -20699,7 +20778,7 @@ ${resizeScript}
       return () => window.removeEventListener("message", handler);
     }, [pageH]);
     const fitScale = Math.min(1, (paneW - 48) / pageW);
-    const [previewZoom, setPreviewZoom] = useState(1);
+    const [previewZoom, setPreviewZoom] = useState3(1);
     const scale = fitScale * previewZoom;
     const zoomTo = (z) => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
     const fitWidth = () => {
@@ -20708,11 +20787,11 @@ ${resizeScript}
     };
     const setTimeUnit = (u) => upd({ timeUnit: u, zoomMul: 1, panFrac: 0 });
     const bumpScale = (f) => upd({ zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul || 1) * f)) });
-    const [panMode, setPanMode] = useState(false);
-    const panRef = useRef(null);
-    const overlayRef = useRef(null);
-    const flushRef = useRef(0);
-    useEffect(() => {
+    const [panMode, setPanMode] = useState3(false);
+    const panRef = useRef3(null);
+    const overlayRef = useRef3(null);
+    const flushRef = useRef3(0);
+    useEffect2(() => {
       const el = overlayRef.current;
       if (!el || !panMode) return;
       const pane = previewPaneRef.current;
@@ -21120,7 +21199,7 @@ ${resizeScript}
     onCancel,
     onDelete
   }) {
-    const [hover, setHover] = useState(false);
+    const [hover, setHover] = useState3(false);
     return /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -21237,7 +21316,7 @@ ${resizeScript}
     );
   }
   function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
-    const [dateEdit, setDateEdit] = useState(false);
+    const [dateEdit, setDateEdit] = useState3(false);
     return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" } }, /* @__PURE__ */ React.createElement("div", { style: { minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 } }, dateEdit ? /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -21314,13 +21393,13 @@ ${resizeScript}
     ))));
   }
   function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
-    const [draftText, setDraftText] = useState(() => initChar || "");
-    const [draftDate, setDraftDate] = useState(() => NOW);
-    const [edit, setEdit] = useState(null);
-    const [editText, setEditText] = useState("");
-    const [editDate, setEditDate] = useState("");
-    const [menuOpen, setMenuOpen] = useState(false);
-    const [confirmClear, setConfirmClear] = useState(false);
+    const [draftText, setDraftText] = useState3(() => initChar || "");
+    const [draftDate, setDraftDate] = useState3(() => NOW);
+    const [edit, setEdit] = useState3(null);
+    const [editText, setEditText] = useState3("");
+    const [editDate, setEditDate] = useState3("");
+    const [menuOpen, setMenuOpen] = useState3(false);
+    const [confirmClear, setConfirmClear] = useState3(false);
     const defSize = (() => {
       try {
         return localStorage.getItem("planar_noteSize") || "sm";
@@ -21329,14 +21408,14 @@ ${resizeScript}
       }
     })();
     const noteFs = (n) => NOTE_SIZES.find((s) => s.k === (n.size || defSize))?.px ?? 13;
-    const taRef = useRef(null);
-    const backdropRef = useRef(null);
-    const downOnBackdropRef = useRef(false);
-    const editRef = useRef(null);
-    useEffect(() => {
+    const taRef = useRef3(null);
+    const backdropRef = useRef3(null);
+    const downOnBackdropRef = useRef3(false);
+    const editRef = useRef3(null);
+    useEffect2(() => {
       editRef.current = edit;
     }, [edit]);
-    useEffect(() => {
+    useEffect2(() => {
       const ta = taRef.current;
       if (ta) {
         const len = ta.value.length;
@@ -21344,7 +21423,7 @@ ${resizeScript}
         ta.selectionStart = ta.selectionEnd = len;
       }
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       const handler = (e) => {
         if (e.key !== "Escape") return;
         if (editRef.current) {
@@ -22506,27 +22585,7 @@ ${resizeScript}
     rowWindow: [() => rowWindow],
     GRID_SCROLL_MEMO: [() => GRID_SCROLL_MEMO],
     GANTT_SCROLL_MEMO: [() => GANTT_SCROLL_MEMO],
-    NO_AUTOFILL: [() => NO_AUTOFILL],
-    CONTACT_TOKENS: [() => CONTACT_TOKENS],
-    contactField: [() => contactField],
-    MENU_STOPS_GRID: [() => MENU_STOPS_GRID],
-    anchorHidden: [() => anchorHidden],
-    anchorSurroundings: [() => anchorSurroundings],
-    useAnchoredPopover: [() => useAnchoredPopover],
     ROW_COLORS: [() => ROW_COLORS],
-    BASE_HEALTH: [() => BASE_HEALTH],
-    BASE_HK: [() => BASE_HK],
-    BASE_HDARK: [() => BASE_HDARK],
-    HEALTH: [() => HEALTH, (v) => {
-      HEALTH = v;
-    }],
-    HK: [() => HK, (v) => {
-      HK = v;
-    }],
-    HDARK: [() => HDARK, (v) => {
-      HDARK = v;
-    }],
-    rebuildHEALTH: [() => rebuildHEALTH],
     escapeHtml: [() => escapeHtml],
     pinnedFillLayers: [() => pinnedFillLayers],
     SAFE_COLOR_RE: [() => SAFE_COLOR_RE],
@@ -22538,7 +22597,6 @@ ${resizeScript}
     stepFontSize: [() => stepFontSize],
     fmtBarDate: [() => fmtBarDate],
     barLabelText: [() => barLabelText],
-    showToast: [() => showToast],
     askConfirm: [() => askConfirm],
     mkt: [() => mkt],
     postLoadState: [() => postLoadState],
@@ -22588,13 +22646,6 @@ ${resizeScript}
     SuccessorPromptModal: [() => SuccessorPromptModal],
     DeleteChildrenModal: [() => DeleteChildrenModal],
     MoveToModal: [() => MoveToModal],
-    getInitials: [() => getInitials],
-    AVATAR_COLORS: [() => AVATAR_COLORS],
-    avatarColor: [() => avatarColor],
-    _cpCanvas: [() => _cpCanvas],
-    _cpCtx: [() => _cpCtx],
-    _cpMeasure: [() => _cpMeasure],
-    ContactPicker: [() => ContactPicker],
     ContactsPanel: [() => ContactsPanel],
     HistoryPanel: [() => HistoryPanel],
     ErrorBoundary: [() => ErrorBoundary],
@@ -22658,19 +22709,10 @@ ${resizeScript}
     GridColumnsChooser: [() => GridColumnsChooser],
     GridHeaderMenu: [() => GridHeaderMenu],
     FormulaColumnEditor: [() => FormulaColumnEditor],
-    measuredColWidth: [() => measuredColWidth],
     GridView: [() => GridView],
     PICKER_EVENT: [() => PICKER_EVENT],
     HealthPicker: [() => HealthPicker],
     StatusPicker: [() => StatusPicker],
-    DEPCELL_FONT_SIZE: [() => DEPCELL_FONT_SIZE],
-    DEPCELL_LINE_H: [() => DEPCELL_LINE_H],
-    DEPCELL_TWO_LINE_MIN_H: [() => DEPCELL_TWO_LINE_MIN_H],
-    depCellFullTitle: [() => depCellFullTitle],
-    DEPCELL_ONE_LINE_BELOW: [() => DEPCELL_ONE_LINE_BELOW],
-    DEPCELL_TWO_LINE_AT: [() => DEPCELL_TWO_LINE_AT],
-    depCellNarrowNext: [() => depCellNarrowNext],
-    DepCell: [() => DepCell],
     predLagPlainEnglish: [() => predLagPlainEnglish],
     PredEditor: [() => PredEditor],
     TASK_ICON_PX: [() => TASK_ICON_PX],
@@ -22726,34 +22768,6 @@ ${resizeScript}
     SplitView: [() => SplitView],
     PhoneSplitView: [() => PhoneSplitView],
     DesktopSplitView: [() => DesktopSplitView],
-    HealthDropMenu: [() => HealthDropMenu],
-    MASTER_COL_DEFS: [() => MASTER_COL_DEFS],
-    DEFAULT_MASTER_COLS: [() => DEFAULT_MASTER_COLS],
-    DEFAULT_MASTER_WIDTHS: [() => DEFAULT_MASTER_WIDTHS],
-    REPORT_STATUS_BASE: [() => REPORT_STATUS_BASE],
-    REPORT_STATUS_DEFAULT: [() => REPORT_STATUS_DEFAULT],
-    reportStatusOptions: [() => reportStatusOptions],
-    reportStatusKeys: [() => reportStatusKeys],
-    reportStatusToggle: [() => reportStatusToggle],
-    reportStatusPasses: [() => reportStatusPasses],
-    reportProjectKeys: [() => reportProjectKeys],
-    reportProjectToggle: [() => reportProjectToggle],
-    reportProjectPasses: [() => reportProjectPasses],
-    reportFilterCount: [() => reportFilterCount],
-    reportFacetCounts: [() => reportFacetCounts],
-    reportFilterPhrase: [() => reportFilterPhrase],
-    _projectOrder: [() => _projectOrder, (v) => {
-      _projectOrder = v;
-    }],
-    _projectOrderSubs: [() => _projectOrderSubs],
-    postToShell: [() => postToShell],
-    useProjectOrder: [() => useProjectOrder],
-    GroupOrderMenu: [() => GroupOrderMenu],
-    REPORT_MENU_SECTION: [() => REPORT_MENU_SECTION],
-    REPORT_MENU_ROW: [() => REPORT_MENU_ROW],
-    REPORT_MENU_COUNT: [() => REPORT_MENU_COUNT],
-    ReportMenu: [() => ReportMenu],
-    MasterView: [() => MasterView],
     PAGE_SIZES: [() => PAGE_SIZES],
     buildGanttSVG: [() => buildGanttSVG],
     EXHIBIT_MIN_GANTT: [() => EXHIBIT_MIN_GANTT],

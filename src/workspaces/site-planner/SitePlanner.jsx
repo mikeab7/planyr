@@ -270,6 +270,7 @@ import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
+import { looksLikeParcelNumber } from "./lib/parcelNumberShape.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
 import { resolveParcelLook, parcelPatchFor, parcelResetPatch, validateLook, ptToPx } from "./lib/parcelLook.js";
@@ -378,7 +379,7 @@ import { computeBuildingGrid, resolveGridSettings } from "./lib/buildingGrid.js"
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { pointInRing, projectOntoSegment } from "./lib/ringMath.js";
+import { pointInRing, projectOntoSegment, distToSegment as segDist } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { pondLedgerSignature, createIdentityToken } from "./lib/pondLedgerKey.js";
@@ -11144,12 +11145,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ align rotation to a target (parcel edge / element) ------------ */
-  const segDist = (p, a, b) => {
-    const vx = b.x - a.x, vy = b.y - a.y, wx = p.x - a.x, wy = p.y - a.y;
-    const L2 = vx * vx + vy * vy || 1;
-    let t = (wx * vx + wy * vy) / L2; t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
-  };
   // Snap an element from curRot to be parallel to a line at `ang°`, choosing the
   // nearest of the four 90°-equivalent orientations (least rotation).
   const snapParallel = (curRot, ang) => {
@@ -15688,6 +15683,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ensureBasemapOn(); setJurInfo(null);
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
+      /* NEW-1 (Meriwether GA, 2026-11-24) — a typed parcel NUMBER ("023 012", "069A 009") is looked up in the county the plan sits in (lib/viewParcelId.js, the same front door as the Map's search)
+       * and the lot added; a miss says where it looked, a server that did not answer says so. Anything that is not a number goes to the geocoder as before. */
+      if (looksLikeParcelNumber(q)) {
+        const { resolveViewParcelId, viewParcelIdMessage } = await import("./lib/viewParcelId.js");
+        const vr = await resolveViewParcelId(q, { lat: origin.lat, lng: origin.lon });
+        if (vr.status === "found") {
+          const [fp] = lngLatRingToFeet([[vr.point.lng, vr.point.lat]], origin.lon, origin.lat);
+          setAddrQuery("");
+          await quickAddAt(fp);
+          return;
+        }
+        if (vr.status === "notfound" || vr.status === "unavailable") { setIdentifyRes({ error: viewParcelIdMessage(vr, q) }); return; }
+      }
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
       if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
@@ -21016,7 +21024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} countyState={(COUNTIES[restored?.county] || {}).state || null} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} countyState={(COUNTIES[restored?.county] || {}).state || null} county={restored?.county || null} />
     );
   };
   /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is

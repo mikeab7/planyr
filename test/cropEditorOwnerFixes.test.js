@@ -105,8 +105,9 @@ describe("NEW-3 / NEW-1 (2026-10-15) — one header row, a floating view toolbar
 
 describe("NEW-1 / NEW-2 — the crop modal is above every map control; the Adjust panel steps aside", () => {
   it("CropModal portals to <body> at a z-index above Leaflet's controls and every MAP_CHROME band", () => {
-    expect(modal).toMatch(/createPortal\(/);
-    expect(modal).toMatch(/document\.body/);
+    // The portal to <body> now lives in the shared Dialog (audit M2); CropModal must render through it at CROP_MODAL_Z.
+    expect(modal).toMatch(/<Dialog[\s\S]*z=\{CROP_MODAL_Z\}/);
+    expect(readFileSync("src/shared/ui/controls.jsx", "utf8")).toMatch(/createPortal\([\s\S]*document\.body/);
     const z = Number(/CROP_MODAL_Z = (\d+)/.exec(modal)[1]);
     const stack = readFileSync("src/workspaces/site-planner/lib/mapChromeStack.js", "utf8");
     const leaflet = Number(/LEAFLET_CONTROL_Z = (\d+)/.exec(stack)[1]);

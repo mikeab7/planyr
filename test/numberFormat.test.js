@@ -64,7 +64,9 @@ describe("every moved formatter prints exactly what the private copy printed", (
   }
 
   it("the module exports exactly the characterized set (a new variant needs a verbatim old body here)", () => {
-    expect(Object.keys(nf).sort()).toEqual(Object.keys(OLD).sort());
+    // money/acres variants (audit M2) are pinned in test/moneyAcresDateFormat.test.js
+    const moneyAcres = new Set(["usdWhole", "usdFixed", "usdUpTo2", "acresTwoOrBlank", "acresTiered"]);
+    expect(Object.keys(nf).filter((k) => !moneyAcres.has(k)).sort()).toEqual(Object.keys(OLD).sort());
   });
 
   it("the three styles still differ where they always did (no accidental unification)", () => {

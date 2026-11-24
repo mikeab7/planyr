@@ -16,7 +16,7 @@
  */
 import { offsetPolygon } from "./parcelOffset.js";
 import { polyIntersectArea } from "./polyClip.js";
-import { pointInRing, projectOntoSegment } from "./ringMath.js";
+import { pointInRing, projectOntoSegment, extentOfRings } from "./ringMath.js";
 import { setSectionSetback } from "./boundarySections.js";
 
 /** The element kinds the paving setback limits. Sidewalks are deliberately absent. */
@@ -100,11 +100,7 @@ function densify(pts, step = WALK_STEP_FT) {
   return out;
 }
 
-const bbox = (ring) => {
-  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-  for (const p of ring) { if (p.x < a) a = p.x; if (p.x > c) c = p.x; if (p.y < b) b = p.y; if (p.y > d) d = p.y; }
-  return { a, b, c, d };
-};
+const bbox = (ring) => { const [a, b, c, d] = extentOfRings([ring]); return { a, b, c, d }; };
 const bbTouch = (u, v) => u.a <= v.c && v.a <= u.c && u.b <= v.d && v.b <= u.d;
 
 /** Square feet of `ring` lying in the band between the lot line and the paving line. */

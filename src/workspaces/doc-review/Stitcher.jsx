@@ -10,6 +10,7 @@
  * World↔screen is a single pan/zoom group.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNoticeToast } from "../../shared/ui/Toast.jsx";
 import { loadPdf, renderPageToImage, renderPageToImageData } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
@@ -84,7 +85,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [notesOpen, setNotesOpen] = useState(false);       // expand the aggregated notes/legend (B350)
   const [showRefs, setShowRefs] = useState(true);          // show clickable detail-callout hotspots (B350)
   const [detail, setDetailPopup] = useState(null);         // open detail "cloud" popup (B350)
-  const [notice, setNotice] = useState("");                // transient auto-stitch result line
+  const setNotice = useNoticeToast("stitcher-notice", { testId: "stitcher-notice", ttlMs: 30000 }); // transient auto-stitch result line, shown as an app toast (audit M2)
   const [steerDismissed, setSteerDismissed] = useState(false); // B630/NEW-1: dismissed the "reference set (not to scale)" steer
   const [metaScanning, setMetaScanning] = useState(false); // B631: a post-load not-to-scale re-scan is in flight — hold the align nag until we've read the sheets
   const drag = useRef(null);
@@ -1291,9 +1292,6 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key{noteCount > 0 ? ` · ${noteCount} notes` : ""}</button>
           )}
           {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
-          {notice && (
-            <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: RADIUS.md, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
-          )}
           {/* B630/NEW-1 — a reference set (schedules/legends, not to scale) has nothing to stitch or
               measure; steer to single-sheet Review instead of leaving a wall of impossible Align gates.
               Dismissible so it never becomes a nag itself. */}

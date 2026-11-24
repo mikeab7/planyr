@@ -145,8 +145,11 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
   it("B532: the Site review modal closes on Escape and announces as a dialog", () => {
     const src = read("../src/workspaces/site-planner/components/SiteReviewModal.jsx");
-    expect(src).toMatch(/role="dialog"/);
-    expect(src).toMatch(/e\.key === "Escape"/);
+    // Audit M2: the modal renders through the shared Dialog, which owns role="dialog" and Escape-to-close.
+    expect(src).toMatch(/<Dialog\b/);
+    const shared = read("../src/shared/ui/controls.jsx");
+    expect(shared).toMatch(/role="dialog"/);
+    expect(shared).toMatch(/e\.key === "Escape"/);
   });
 
   it("B528: Doc Review upsertReview serializes per-id writes (no false self-conflict)", () => {

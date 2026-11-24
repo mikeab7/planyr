@@ -70,6 +70,7 @@ import { GRADING_RULES, gradingRuleFor, validateSlopeAgainstRule } from "./gradi
 import { resolveGradingLimit, pointInRegions, regionsAreaSf, throwEdge } from "./gradingLimit.js";
 import { SQFT_PER_ACRE } from "../../../shared/units/areaUnits.js";
 import { plainDec2 as f2 } from "../../../shared/units/numberFormat.js";
+import { extentOfRings } from "./ringMath.js";
 
 export const TIE_DROP_FT = 0.15;   // threshold tie: paving meets the doors just below slab FF
 export const DOCK_BREAK_FT = 0.75; // adjoining-pavement step at a court edge a truck can't cross
@@ -645,11 +646,7 @@ const BAND_BUCKET_FT = 40;                // a point whose band clamp is below t
 const LIMIT_SAMPLE_FT = 10;     // the limit ring is sampled this often for the slope reach + the daylight line
 const REACH_MAX_FT = 400;
 
-const bboxOfRings = (rings) => {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const r of rings) for (const p of r) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
-  return [x0, y0, x1, y1];
-};
+const bboxOfRings = extentOfRings;
 const sampleRing = (ring, stepFt) => {
   const out = [];
   for (let i = 0; i < ring.length; i++) {

@@ -14,6 +14,7 @@
  * points plus a screen-space radius; `cloudScallopPath` just turns points into a path string.
  */
 
+import { distToSegment as distToSeg } from "./ringMath.js";
 // Arc radius presets (feet). The Properties panel no longer shows Small/Medium/Large buttons (NEW-3,
 // 2026-10-08); `medium` remains the DEFAULT arc for a new cloud.
 export const CLOUD_ARC_PRESETS = { small: 1.5, medium: 3, large: 6 };
@@ -111,13 +112,6 @@ export function cloudScallopPath(pts, arcSize) {
 export function simplifyPath(pts, tol) {
   const arr = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
   if (arr.length < 3 || !(tol > 0)) return arr;
-  const distToSeg = (p, a, b) => {
-    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
-    if (!L2) return Math.hypot(p.x - a.x, p.y - a.y);
-    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-  };
   const rdp = (list) => {
     if (list.length < 3) return list;
     const a = list[0], b = list[list.length - 1];

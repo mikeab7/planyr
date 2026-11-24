@@ -31,6 +31,7 @@ import { balloonHtml, buildKml, siteRecordFeatures, pointFeature, polygonFeature
 import { polygonCentroid } from "./kmlImport.js";
 import { mapNoteHeadline } from "../../mapNotes/lib/mapNotes.js";
 
+import { pointInPairRing } from "../../../workspaces/site-planner/lib/ringMath.js";
 /** Outer ring(s) of a comp's parcel-anchor GeoJSON (Polygon | MultiPolygon), WGS84 lon/lat. Holes
  * are dropped; a malformed shape contributes nothing (the comp degrades to its plain pin). */
 export function compParcelRings(geom) {
@@ -93,14 +94,7 @@ export function compParcels(comps) {
   return out;
 }
 
-const inRing = (lon, lat, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-};
+const inRing = (lon, lat, ring) => pointInPairRing(ring, lon, lat);
 
 /** Is this comp parcel the SAME ground as one of the site's own rings? Same APN (the site parcel's
  * `acct`), or geometrically the same lot: the comp ring's centroid sits inside the site ring and

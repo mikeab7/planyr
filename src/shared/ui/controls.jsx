@@ -605,7 +605,8 @@ export function useListboxNav({ count, open, setOpen, onCommit, listboxId }) {
  * starts in a field and ends outside, or an injected click, must never throw away a half-filled form). Pure rules below
  * are exported so they are unit-tested in node (this repo has no component-render environment).
  * Props: onClose · label (aria-label) · z (default 3000) · testId · width · padding · dismissOnBackdrop (default true) ·
- * dismissOnEscape (default true) · style (the card). Children render inside the card. */
+ * dismissOnEscape (default true) · scrim (backdrop colour) · backdropPadding · backdropProps (extra attributes on the backdrop, e.g. a
+ * data-testid a harness already looks for) · style (the card). Children render inside the card. */
 export const DIALOG_FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 // The backdrop closes only for a press that began on the backdrop AND a release that ended on it.
 export function dialogBackdropShouldClose(pressStartedOnBackdrop, releaseOnBackdrop) { return !!pressStartedOnBackdrop && !!releaseOnBackdrop; }
@@ -617,7 +618,7 @@ export function dialogTabTarget(count, index, shift) {
   if (!shift && index === count - 1) return 0;
   return null;
 }
-export function Dialog({ onClose, label, z = 3000, testId, width = "min(560px, 100%)", padding = 16, dismissOnBackdrop = true, dismissOnEscape = true, style, children }) {
+export function Dialog({ onClose, label, z = 3000, testId, width = "min(560px, 100%)", padding = 16, dismissOnBackdrop = true, dismissOnEscape = true, scrim = "rgba(20,18,15,0.42)", backdropPadding = 16, backdropProps, style, children }) {
   const cardRef = useRef(null);
   const pressOnBackdrop = useRef(false);
   const closeRef = useRef(onClose);
@@ -642,7 +643,8 @@ export function Dialog({ onClose, label, z = 3000, testId, width = "min(560px, 1
   return createPortal(
     <div
       data-testid={testId ? testId + "-backdrop" : undefined}
-      style={{ position: "fixed", inset: 0, zIndex: z, background: "rgba(20,18,15,0.42)", display: "grid", placeItems: "center", padding: 16 }} // design-exempt: modal scrim — no backdrop-color token yet
+      {...backdropProps}
+      style={{ position: "fixed", inset: 0, zIndex: z, background: scrim, display: "grid", placeItems: "center", padding: backdropPadding }} // design-exempt: modal scrim default — no backdrop-color token yet
       onPointerDown={(e) => { pressOnBackdrop.current = e.target === e.currentTarget; }}
       onPointerUp={(e) => { if (dismissOnBackdrop && dialogBackdropShouldClose(pressOnBackdrop.current, e.target === e.currentTarget)) closeRef.current?.(); pressOnBackdrop.current = false; }}
       onKeyDown={onKeyDown}

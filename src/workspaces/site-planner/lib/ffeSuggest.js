@@ -19,6 +19,7 @@
  * caller supplies, so a verdict here can never differ from what the tiles paint. */
 import { solveBalanced, compass8, cap, BALANCE_TOL_CY, evalSteps, scopeIds } from "./buildingGrade.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
+import { pointInPairRing } from "./ringMath.js";
 
 export const ROCK_CLEARANCE_FT = 2;      // cut may go no deeper than depth-to-rock minus this
 export const DOCK_UPHILL_MIN_FT = 1;              // default max cut / fill under a pad
@@ -105,14 +106,7 @@ export function rockDepthLookup(polys, origin, toLatLng) {
     }
   }
   if (!prepared.length) return null;
-  const inRing = (lng, lat, ring) => {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-      if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  };
+  const inRing = (lng, lat, ring) => pointInPairRing(ring, lng, lat);
   return (pt) => {
     const [lat, lng] = toLatLng(pt, origin.lat, origin.lon);
     let best = null;

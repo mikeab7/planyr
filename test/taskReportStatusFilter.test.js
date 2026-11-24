@@ -12,7 +12,7 @@ const SRC = sequenceSource();
 const START = "// ── Task Report filter (NEW-1)";
 const END = "// ── end Task Report filter";
 const a = SRC.indexOf(START), b = SRC.indexOf(END);
-const block = a > -1 && b > a ? SRC.slice(a, b) : "";
+const block = a > -1 && b > a ? SRC.slice(a, b).replace(/^export /gm, "") : ""; // the page module exports these; the function body below wants plain declarations
 const lib = block
   ? new Function(`${block}\nreturn { REPORT_STATUS_BASE, reportStatusOptions, reportStatusKeys, reportStatusToggle, reportStatusPasses, reportProjectKeys, reportProjectToggle, reportProjectPasses, reportFilterCount, reportFacetCounts, reportFilterPhrase };`)()
   : null;
@@ -127,7 +127,8 @@ describe("Task Report filter — badge, counts, empty wording", () => {
 });
 
 describe("Task Report filter — one classification, wired end to end (source guards)", () => {
-  const mv = SRC.slice(SRC.indexOf("function MasterView("), SRC.indexOf("// ── PDF helpers"));
+  const mvAt = SRC.indexOf("function MasterView(");
+  const mv = SRC.slice(mvAt, SRC.indexOf("// harness compatibility", mvAt));   // MasterView is the last declaration of taskReport/TaskReport.jsx
   it("rows are classified by the SAME displayed status (dispOf → _disp) that paints the pill and drives the Status sort; the filter reads _disp", () => {
     expect(mv).toMatch(/_disp: dispOf\(t, !isLeaf, rolled, byId\)/);
     expect(mv).toMatch(/levelRows\.filter\(r => reportStatusPasses\(statusKeys, r\._disp\) && reportProjectPasses\(projectKeys, r\.projId\)\)/);
@@ -163,7 +164,7 @@ describe("Task Report filter — one classification, wired end to end (source gu
   it("the four dropdowns share ONE open slot, close on outside press / Esc, and the menu is a module-scope fixed-position component", () => {
     expect(mv).toMatch(/const \[openMenu, setOpenMenu\] = useState\(null\)/);
     expect(mv).toMatch(/e\.key === "Escape"/);
-    expect(SRC).toMatch(/\nfunction ReportMenu\(/);                   // module scope, never inside MasterView
+    expect(SRC).toMatch(/\n(?:export )?function ReportMenu\(/);                   // module scope, never inside MasterView
     expect(mv).not.toMatch(/function ReportMenu\(/);
     expect(SRC).toMatch(/position:"fixed",left:pos\?pos\.left:0/);
     expect(SRC).toMatch(/overflowY:"auto"/);
