@@ -48,6 +48,12 @@ const CASES = [
   { key: "katy-etj", why: "Katy's ETJ — H-GAC answers nothing, Harris's table does", at: [-95.90246, 29.77651],
     truth: { harris: ["KATY"], hgac: [] },
     wantRe: /^City of Katy ETJ · (Harris|Fort Bend|Waller) County$/, preFix: null },
+  { key: "brookshire-etj", why: "Brookshire's ETJ (Donigan Rd, Waller County) — H-GAC and TxGIO answer nothing, Waller County's own ETJ table does (sweep 2026-11-22)", at: [-95.98, 29.78],
+    truth: { hgac: [] },
+    want: "City of Brookshire ETJ · Waller County", preFix: "Unincorporated · Waller County" },
+  { key: "houston-etj-waller", why: "Houston's ETJ in Waller County — H-GAC and the county agree, no double answer", at: [-95.86, 29.79],
+    truth: { hgac: ["HOUSTON"] },
+    want: "City of Houston ETJ · Waller County", preFix: "City of Houston ETJ · Waller County" },
   { key: "houston-downtown", why: "downtown Houston — H-GAC and the city answer; unchanged", at: [-95.3698, 29.7604],
     truth: { hgac: [] }, want: "City of Houston · Harris County", preFix: "City of Houston · Harris County" },
 ];
