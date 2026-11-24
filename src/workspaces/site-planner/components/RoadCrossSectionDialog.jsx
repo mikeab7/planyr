@@ -31,6 +31,7 @@ import {
 } from "../lib/roadCrossSection.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { trimInt as f0, trimDec1 as f1 } from "../../../shared/units/numberFormat.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const uid = () => `xsec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -73,7 +74,7 @@ function packRows(items, gap) {
   return rowRight.length;
 }
 
-/* NEW-1 follow-up — the width field that used to be a raw, always-controlled `<input type="number">`
+/* NEW-1 follow-up — the width field that used to be a raw, always-controlled `<input {...NO_AUTOFILL} type="number">`
  * bound straight to committed band state, so every keystroke was a commit: typing "2" on the way to
  * "25" instantly set that band's width to 2, and the WHOLE dialog (preview + every derived total)
  * recomputed off that transient value. This mirrors SitePlanner.jsx's NumInput contract — a local
@@ -110,7 +111,7 @@ function BandWidthInput({ value, onCommit, ariaLabel = "Band width, feet", testI
     if (next !== value || (forceCommit && wasDirty)) onCommit(next);
   };
   return (
-    <input type="text" inputMode="decimal" value={draft} aria-label={ariaLabel} data-testid={testId}
+    <input {...NO_AUTOFILL} type="text" inputMode="decimal" value={draft} aria-label={ariaLabel} data-testid={testId}
       onChange={(e) => { setDraft(e.target.value); dirtyRef.current = true; }}
       onBlur={commit}
       onKeyDown={(e) => {
@@ -544,7 +545,7 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
             ))}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-            <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this section to reuse it on any road, any project"
+            <input {...NO_AUTOFILL} value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this section to reuse it on any road, any project"
               style={{ flex: 1, minWidth: 0, padding: "6px 10px", fontSize: 12.5, fontFamily: "inherit", border: "1px solid var(--planner-border)", borderRadius: 7, background: "var(--surface-base)", color: "var(--text-primary)" }} />
             <button type="button" disabled={!presetName.trim()} onClick={saveAsPreset}
               style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, borderRadius: 7, border: "1px solid var(--planner-border)", background: "var(--surface-base)", color: presetName.trim() ? "var(--text-primary)" : "var(--text-tertiary)", cursor: presetName.trim() ? "pointer" : "default" }}>

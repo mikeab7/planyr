@@ -13,6 +13,7 @@ import AdminPanel, { Card, Chip, PanelState, useAdminLoad } from "./AdminPanel.j
 import { exactTime } from "./lib/adminFormat.js";
 import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago, digestStamp } from "./lib/adminPanels.js";
 import { snapshotHealth, CHECK_LABELS, SOURCES, SOURCE_LABELS, staleLimitMin } from "../../shared/auth/signinHealth.js";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 /* NEW-1 (2026-11-02, after B2619760) — the hourly outside-in sign-in check. "Stopped" is computed here from the clock:
  * a snapshot that says all-clear and has not been touched for hours is exactly the dead-man's-switch case. */
@@ -98,10 +99,10 @@ function SweepForm({ onSaved }) {
     <details>
       <summary style={{ cursor: "pointer", fontSize: FONT_SIZE.control, fontWeight: 700 }} data-testid="record-manually">Record manually</summary>
       <div style={{ display: "grid", gap: 8, marginTop: 8, maxWidth: 560 }}>
-        <label style={{ fontSize: FONT_SIZE.control }}>Sessions archived<input type="number" min="0" value={archived} onChange={(e) => setArchived(e.target.value)} style={{ ...field, display: "block", width: 90, marginTop: 2 }} /></label>
+        <label style={{ fontSize: FONT_SIZE.control }}>Sessions archived<input {...NO_AUTOFILL} type="number" min="0" value={archived} onChange={(e) => setArchived(e.target.value)} style={{ ...field, display: "block", width: 90, marginTop: 2 }} /></label>
         <label style={{ fontSize: FONT_SIZE.control }}>Still open — one per line, “title — what it is waiting on”
           <textarea rows={4} value={stillOpen} onChange={(e) => setStillOpen(e.target.value)} style={{ ...field, display: "block", width: "100%", boxSizing: "border-box", marginTop: 2 }} /></label>
-        <label style={{ fontSize: FONT_SIZE.control }}>Note (optional)<input value={note} onChange={(e) => setNote(e.target.value)} style={{ ...field, display: "block", width: "100%", boxSizing: "border-box", marginTop: 2 }} /></label>
+        <label style={{ fontSize: FONT_SIZE.control }}>Note (optional)<input {...NO_AUTOFILL} value={note} onChange={(e) => setNote(e.target.value)} style={{ ...field, display: "block", width: "100%", boxSizing: "border-box", marginTop: 2 }} /></label>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Button size="sm" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save sweep"}</Button>
           {err && <span role="alert" style={{ color: "var(--danger-text)", fontSize: FONT_SIZE.control }}>Could not save: {err}</span>}

@@ -55,6 +55,7 @@ import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { shortDateWithYear } from "../../../shared/units/dateFormat.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 // Cross-project category tree: remembered set of OPEN categories (default: all collapsed).
 // Category names are stable canonical labels, so one shared key works across sessions.
@@ -1015,7 +1016,7 @@ export default function FileBrowser({
                   {renaming && renaming.id === f.id ? (
                     <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
                       <FileTypeIcon kind={f.kind} />
-                      <input autoFocus data-testid="library-rename-input" aria-label={`Rename ${f.title || "file"}`} value={renaming.value}
+                      <input {...NO_AUTOFILL} autoFocus data-testid="library-rename-input" aria-label={`Rename ${f.title || "file"}`} value={renaming.value}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => setRenaming({ id: f.id, value: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRename(f); } else if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); } }}
@@ -1087,7 +1088,7 @@ export default function FileBrowser({
         <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPick} />
         {/* webkitdirectory turns this picker into a folder picker; set imperatively so React
             can't drop the non-standard attribute. Its files list is already flat + recursed. */}
-        <input ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
+        <input {...NO_AUTOFILL} ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
           type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
       </div>
 
@@ -1197,7 +1198,7 @@ function RefileRow({ value = {}, discipline, choices = null, folderId = null, bu
         <option value="">Auto</option>
         {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
       </select>
-      <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
+      <input {...NO_AUTOFILL} list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
         onChange={(e) => onChange({ ...value, discipline: e.target.value, folderId: undefined })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       {choices && choices.length > 0 && (
         <FolderPicker choices={choices} value={folderId} onChange={(v) => onChange({ ...value, folderId: v })} ariaLabel="Folder to file into" testId="library-refile-folder" ctl={ctl} />
@@ -1221,7 +1222,7 @@ function ShareRow({ state = {}, onCreate, onClose }) {
     return (
       <div style={wrap}>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Link:</span>
-        <input readOnly value={state.url} onFocus={(e) => e.target.select()}
+        <input {...NO_AUTOFILL} readOnly value={state.url} onFocus={(e) => e.target.select()}
           style={{ flex: 1, minWidth: 120, fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 6px", color: "var(--text-primary)", background: "var(--surface-page)" }} />
         <button onClick={copy} style={btn(true)}>{copied ? "Copied ✓" : "Copy"}</button>
         <button onClick={onClose} style={btn(false)}>Done</button>

@@ -4340,7 +4340,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           </button>
         )}
         {isRenaming ? (
-          <input autoFocus defaultValue={renaming.name}
+          <input {...NO_AUTOFILL} autoFocus defaultValue={renaming.name}
             onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();

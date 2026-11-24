@@ -14,6 +14,7 @@ import { BYPASS, fixupTracked, listChanges, acceptChange, rejectChange, acceptAl
 import { HIGHLIGHT } from "../../../shared/files/docx/ooxml.js";
 import { loadModel, buildSave } from "./docModel.js";
 import { sectChanges, resolveSect } from "../../../shared/files/docx/fmtChange.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const FONTS = ["Calibri", "Arial", "Times New Roman", "Cambria", "Georgia", "Verdana", "Courier New"];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36];
@@ -283,8 +284,8 @@ function FindBar({ editor, onClose }) {
   };
   return (
     <div className="dre-find" role="search" data-testid="doc-find">
-      <input aria-label="Find" placeholder="Find" value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? idx - 1 : idx + (q ? 0 : 0)); } if (e.key === "Escape") onClose(); }} data-testid="find-input" />
-      <input aria-label="Replace with" placeholder="Replace with" value={rep} onChange={(e) => setRep(e.target.value)} data-testid="replace-input" />
+      <input {...NO_AUTOFILL} aria-label="Find" placeholder="Find" value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? idx - 1 : idx + (q ? 0 : 0)); } if (e.key === "Escape") onClose(); }} data-testid="find-input" />
+      <input {...NO_AUTOFILL} aria-label="Replace with" placeholder="Replace with" value={rep} onChange={(e) => setRep(e.target.value)} data-testid="replace-input" />
       <span className="dre-meta" aria-live="polite">{q ? `${matches.length ? Math.min(idx, matches.length - 1) + 1 : 0} of ${matches.length}` : ""}</span>
       <Btn title="Previous match" onClick={() => go(idx - 1)} disabled={!matches.length}>↑</Btn>
       <Btn title="Next match" onClick={() => go(idx + 1)} disabled={!matches.length} testid="find-next">↓</Btn>

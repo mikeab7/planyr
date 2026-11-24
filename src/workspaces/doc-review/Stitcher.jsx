@@ -40,6 +40,7 @@ import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { fileDropEffect } from "./lib/reviewCursor.js";
 import { commaInt as f0, commaDec1 as f1, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -1214,7 +1215,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
-                <input autoFocus value={calInput.value}
+                <input {...NO_AUTOFILL} autoFocus value={calInput.value}
                   onChange={(e) => { const v = e.target.value; setCalInput((c) => (c ? { ...c, value: v } : c)); if (err) setErr(""); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitCalibrate(); } else if (e.key === "Escape") { e.preventDefault(); setCalInput(null); setErr(""); } }}
                   placeholder={`120  or  38'-7"`}

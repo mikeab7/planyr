@@ -15,6 +15,7 @@ import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, partyLabels, emptyDraft, draftToComp, validateComp,
 } from "../lib/comps.js";
 import { draftTitleFor } from "../lib/compDrafts.js";
+import { NO_AUTOFILL } from "../../ui/noAutofill.js";
 
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease", under_construction: "Under construction" };
 
@@ -61,7 +62,7 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
         </div>
       )}
 
-      <Field label="Title" stacked><input value={fields.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
+      <Field label="Title" stacked><input {...NO_AUTOFILL} value={fields.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
 
       <Field label="Type" stacked>
         {/* B1149586 — emptyDraft no longer defaults compType to "land", so a draft with no type
@@ -76,14 +77,14 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
           blocks a save on it); this asterisk used to tell a promoter the opposite of what
           `canPromote` (validateComp, below) actually enforces. */}
       <Field label="Date" stacked>
-        <input type="date" value={fields.compDate} onChange={set("compDate")} placeholder="optional" style={inputStyle} />
+        <input {...NO_AUTOFILL} type="date" value={fields.compDate} onChange={set("compDate")} placeholder="optional" style={inputStyle} />
       </Field>
 
       {fields.compType === "land" && (<>
-        <Field label="Price" stacked><input type="number" value={fields.landPrice} onChange={set("landPrice")} placeholder="optional" style={inputStyle} /></Field>
+        <Field label="Price" stacked><input {...NO_AUTOFILL} type="number" value={fields.landPrice} onChange={set("landPrice")} placeholder="optional" style={inputStyle} /></Field>
         <Field label="Size" stacked>
           <span style={{ display: "flex", gap: 6 }}>
-            <input type="number" value={fields.landSizeValue} onChange={set("landSizeValue")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+            <input {...NO_AUTOFILL} type="number" value={fields.landSizeValue} onChange={set("landSizeValue")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
             <select value={fields.landSizeUnit} onChange={set("landSizeUnit")} style={{ ...inputStyle, width: 68, flex: "none" }}>
               <option value="ac">AC</option><option value="sf">SF</option>
             </select>
@@ -92,14 +93,14 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
       </>)}
 
       {fields.compType === "building_sale" && (<>
-        <Field label="Price" stacked><input type="number" value={fields.bldgPrice} onChange={set("bldgPrice")} placeholder="optional" style={inputStyle} /></Field>
-        <Field label="Building SF" stacked><input type="number" value={fields.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
+        <Field label="Price" stacked><input {...NO_AUTOFILL} type="number" value={fields.bldgPrice} onChange={set("bldgPrice")} placeholder="optional" style={inputStyle} /></Field>
+        <Field label="Building SF" stacked><input {...NO_AUTOFILL} type="number" value={fields.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
       </>)}
 
       {fields.compType === "lease" && (<>
         <Field label="Rate ($/SF)" stacked>
           <span style={{ display: "flex", gap: 6 }}>
-            <input type="number" value={fields.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+            <input {...NO_AUTOFILL} type="number" value={fields.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
             <select value={fields.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 60, flex: "none" }}>
               <option value="">?</option>
               {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
@@ -112,11 +113,11 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
             {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
           </select>
         </Field>
-        <Field label="Leased SF" stacked><input type="number" value={fields.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
+        <Field label="Leased SF" stacked><input {...NO_AUTOFILL} type="number" value={fields.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
       </>)}
 
-      <Field label={providerLabel} stacked><input value={fields.partyProvider} onChange={set("partyProvider")} style={inputStyle} /></Field>
-      <Field label={acquirerLabel} stacked><input value={fields.partyAcquirer} onChange={set("partyAcquirer")} style={inputStyle} /></Field>
+      <Field label={providerLabel} stacked><input {...NO_AUTOFILL} value={fields.partyProvider} onChange={set("partyProvider")} style={inputStyle} /></Field>
+      <Field label={acquirerLabel} stacked><input {...NO_AUTOFILL} value={fields.partyAcquirer} onChange={set("partyAcquirer")} style={inputStyle} /></Field>
       <Field label="Notes" stacked><textarea value={fields.notes} onChange={set("notes")} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
 
       <Field label="Location" stacked>

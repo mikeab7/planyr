@@ -21,6 +21,7 @@ import { NumInput } from "./NumInput.jsx";
 import { COLOR_SEED, MK_BOX_KINDS } from "../lib/plannerConstants.js";
 import { Section, ROAD_GUTTER_W, Field, PairedField, PairedFieldHead, PercentField, StdSubLabel, RotationField } from "./PropFields.jsx";
 import { DASH_OPTIONS } from "./PlannerIcons.jsx";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 export const EasementInspector = memo(function EasementInspector({
   PAL,
@@ -63,7 +64,7 @@ export const EasementInspector = memo(function EasementInspector({
                 {/* Map label — what the map and the PDF draw. Empty = the automatic name (type + width),
                     which keeps tracking those while no custom text is set. One undo frame per typing session. */}
                 <Field label={<b style={{ color: PAL.ink }}>Map label</b>}>
-                  <input value={e.labelOverride || ""} maxLength={120} data-testid="easement-map-label"
+                  <input {...NO_AUTOFILL} value={e.labelOverride || ""} maxLength={120} data-testid="easement-map-label"
                     onChange={(ev) => { const v = ev.target.value; coalesceLabelWrite(`ease-label-${e.id}`, (p) => setMarkups((a) => a.map((m) => (m.id === e.id ? withEaseRing(m, p) : m))))({ labelOverride: v }, { live: true }); }}
                     onBlur={() => { labelSessionRef.current = null; }}
                     placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
@@ -90,8 +91,8 @@ export const EasementInspector = memo(function EasementInspector({
                   </span>
                 </Field>
                 <Collapse sectionId="easement-recording" title="Recording details" defaultOpen={false} summary={easementRecordingSummary(e)}>
-                  <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
-                  <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
+                  <Field label="Holder / beneficiary"><input {...NO_AUTOFILL} value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
+                  <Field label="Recording ref"><input {...NO_AUTOFILL} value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
                   {check("Exclusive easement", e.exclusive, "exclusive")}
                 </Collapse>
                 <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
@@ -102,7 +103,7 @@ export const EasementInspector = memo(function EasementInspector({
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
                     easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
                     onFocus pushes one undo frame per edit. */}
-                <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input value={e.inlineLabel || ""} maxLength={120}
+                <Field gutter={ROAD_GUTTER_W} oneLine label="Inline label"><input {...NO_AUTOFILL} value={e.inlineLabel || ""} maxLength={120}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>

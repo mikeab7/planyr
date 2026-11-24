@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 import { Button, ToggleChip, SegmentedControl, RangeFields, RangeRow, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 /* ⛔ Deliberately NOT `import { STATUS_TOKENS } from "../../shared/ui/statusTokens.js"`, and NOT
  * `import { SPACE, FONT_SIZE, CONTROL_H } from "../../shared/ui/designTokens.js"` — this page is a
@@ -168,7 +169,7 @@ function GalleryBody() {
 
       <Row title="Field — label + control row">
         <Specimen label="Field" tokens="label 12px / --text-secondary">
-          <div style={{ width: 220 }}><Field label="Setback (ft)"><input style={{ width: 60 }} defaultValue="25" /></Field></div>
+          <div style={{ width: 220 }}><Field label="Setback (ft)"><input {...NO_AUTOFILL} style={{ width: 60 }} defaultValue="25" /></Field></div>
         </Specimen>
       </Row>
 

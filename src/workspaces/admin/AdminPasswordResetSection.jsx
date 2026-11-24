@@ -14,6 +14,7 @@ import { Button } from "../../shared/ui/controls.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import { AdminTable, Th, Td, RelTime } from "./AdminTable.jsx";
 import { parseAdminHash } from "./lib/adminRoute.js";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 const userLabel = (u) => {
   const name = [u.first_name, u.last_name].filter(Boolean).join(" ");
@@ -80,7 +81,7 @@ export default function AdminPasswordResetSection() {
       {loadError && <div role="alert" style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>Could not load users: {loadError}</div>}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <input aria-label="Search users" placeholder="Search by name or email…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ ...field, flex: "1 1 220px" }} />
+        <input {...NO_AUTOFILL} aria-label="Search users" placeholder="Search by name or email…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ ...field, flex: "1 1 220px" }} />
         <select aria-label="Select a user" value={selected} onChange={(e) => { setSelected(e.target.value); setResult(null); setError(null); }} style={{ ...field, flex: "1 1 260px" }}>
           <option value="">{users == null ? "Loading users…" : "Choose a user…"}</option>
           {filtered.map((u) => <option key={u.id} value={u.id}>{userLabel(u)}</option>)}

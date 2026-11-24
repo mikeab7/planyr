@@ -30,6 +30,7 @@ import { layoutLabelSet } from "../lib/spotLabelPlacement.js";
 import { fmtSf } from "../../../shared/units/areaUnits.js";
 import { gradingPanelView, limitOffsetFt, marginFromOffset, LIMIT_PAST_MAX_FT, ffePillText, groundNumbers, haulWords } from "../lib/gradingPanelModel.js";
 import { plainDec1 as f1 } from "../../../shared/units/numberFormat.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const sectionLabel = {
   fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)",
@@ -64,7 +65,7 @@ function NumField({ value, onCommit, min = null, max = null, step = 0.5, width =
   };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <input type={signed ? "text" : "number"} inputMode={signed ? "text" : "decimal"} step={signed ? undefined : step} value={txt} placeholder={placeholder} disabled={disabled} autoFocus={autoFocus}
+      <input {...NO_AUTOFILL} type={signed ? "text" : "number"} inputMode={signed ? "text" : "decimal"} step={signed ? undefined : step} value={txt} placeholder={placeholder} disabled={disabled} autoFocus={autoFocus}
         data-testid={testid} aria-label={ariaLabel} {...(attrs || {})}
         onChange={(e) => setTxt(e.target.value)} onBlur={() => { commit(); if (onDone) onDone(); }}
         onKeyDown={(e) => {

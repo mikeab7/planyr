@@ -28,6 +28,7 @@ const ParcelCopyNote = lazy(() => import("./ParcelCopyNote.jsx")); // NEW-1 (202
 const isHttp = (v) => /^https?:\/\//i.test(String(v ?? ""));
 import { agUseLine, AG_USE_RULES } from "../lib/agUseRules.js";
 import { accountOf as recordAccountOf } from "../lib/parcelOrigin.js";
+import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
 const eyebrow = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
 const inputBox = { width: "100%", boxSizing: "border-box", height: CONTROL_H.lg, padding: `0 ${SPACE.lg}px`, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", fontSize: FONT_SIZE.control };
@@ -54,7 +55,7 @@ function Fact({ label, children }) {
 function CommitField({ value, placeholder, onCommit, testid, ariaLabel }) {
   const ref = useRef(null);
   return (
-    <input ref={ref} defaultValue={value || ""} key={`${testid}:${value || ""}`} placeholder={placeholder} aria-label={ariaLabel} data-testid={testid} style={inputBox}
+    <input {...NO_AUTOFILL} ref={ref} defaultValue={value || ""} key={`${testid}:${value || ""}`} placeholder={placeholder} aria-label={ariaLabel} data-testid={testid} style={inputBox}
       onKeyDown={(e) => {
         if (e.key === "Enter") { e.stopPropagation(); e.currentTarget.blur(); }
         else if (e.key === "Escape") { e.stopPropagation(); e.currentTarget.value = value || ""; e.currentTarget.blur(); } // only the keys this field consumes (keyScope's FIELD scope covers the rest)

@@ -76,6 +76,7 @@ import { useReviewPinch } from "./lib/useReviewPinch.js";
 import { viewportCursor, vertexGripAt, gripCursorFor, gripHoverCursor, fileDropEffect } from "./lib/reviewCursor.js";
 import { commaInt as f0, commaDec2 as f2 } from "../../shared/units/numberFormat.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { NO_AUTOFILL } from "../../shared/ui/noAutofill.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -2946,7 +2947,7 @@ export default function DocReview({
                   );
                 }
                 return (
-                  <input autoFocus value={editing.text}
+                  <input {...NO_AUTOFILL} autoFocus value={editing.text}
                     onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
                     onPointerDown={(ev) => ev.stopPropagation()}
                     onKeyDown={onKeyDown}
@@ -2959,7 +2960,7 @@ export default function DocReview({
                 <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
-                    <input autoFocus value={calInput.value}
+                    <input {...NO_AUTOFILL} autoFocus value={calInput.value}
                       onChange={(e) => { const v = e.target.value; setCalInput((c) => (c ? { ...c, value: v } : c)); if (err) setErr(""); }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitCalibrate(); } else if (e.key === "Escape") { e.preventDefault(); setCalInput(null); setErr(""); } }}
