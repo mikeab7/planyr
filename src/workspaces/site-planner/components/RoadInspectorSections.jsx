@@ -15,7 +15,7 @@ import { Field, ROAD_GUTTER_W, ROAD_SELECT_STYLE } from "./PropFields.jsx";
 import { RoadStripCaption, RoadXSectionStrip } from "./RoadPanelParts.jsx";
 import { NO_AUTOFILL } from "../../../shared/ui/noAutofill.js";
 
-export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, jumpToStandards, setRoadClass, setRoadLength, stepBox, settings, linkBtn, travelFt, roadLengthOf, designed, selEl, showRow, cl, setRoadRowFt, setRoadTravel, setRoadParkSetback, mutedEll }) {
+export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, jumpToStandards, setRoadClass, setRoadLength, stepBox, settings, linkBtn, travelFt, roadLengthOf, designed, selEl, showRow, cl, setRoadRowFt, setRoadRowSide, rowSideInfo, setRoadTravel, setRoadParkSetback, mutedEll }) {
   return (
     <Collapse sectionId="road-size" title="Road" defaultOpen>
       <Field gutter={ROAD_GUTTER_W} oneLine label="Length">
@@ -39,6 +39,17 @@ export const RoadSizeSection = memo(function RoadSizeSection({ rowFt, readout, j
           {stepBox({ ariaLabel: "Right-of-way width", testid: "road-row", placeholder: "—", value: rowFt, seed: selEl.xsection ? Math.round(rowWidth(selEl.xsection)) : travelFt, min: 1, step: 5, coarse: 20, allowClear: true, onCommit: (n) => setRoadRowFt(selEl, n) })}
         </Field>
       )}
+      {/* 2026-11-24 (owner: "I should be able to edit the right-of-way boundary") — once a ROW is designated, each SIDE's distance from the
+          road's centerline, named by the compass side it lies on. Typing one side moves only that line (the other stays put; the width above
+          follows); the same as dragging the dashed line on the plan. Never closer than the curb / the modeled section on that side. */}
+      {rowSideInfo && rowSideInfo.map((sd) => (
+        <Field key={sd.sign} gutter={ROAD_GUTTER_W} oneLine label={`${sd.name} side`} title={`How far the ${sd.name.toLowerCase()} right-of-way line sits from the road's centerline. Change it here or drag the dashed line on the plan; the other side stays where it is.`}>
+          <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, minWidth: 0 }}>
+            {stepBox({ ariaLabel: `${sd.name} side right-of-way, feet from centerline`, testid: `road-row-side-${sd.sign > 0 ? "l" : "r"}`, value: Math.round(sd.ft * 10) / 10, min: sd.min, step: 1, coarse: 5, onCommit: (n) => setRoadRowSide(selEl, sd.sign, n) })}
+            <span style={mutedEll}>from center</span>
+          </span>
+        </Field>
+      ))}
       {cl && (
         <Field gutter={ROAD_GUTTER_W} oneLine label="Class">
           <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>

@@ -12,8 +12,9 @@ import { roadTapersOf, taperJointCover } from "./roadTaper.js";
 import { fieldInsidesOf } from "./parkingApproach.js";
 import { rowRingOf } from "./parkingRoadTrim.js";
 import { junctionMouthCuts, stripeRunsNearOutline, trimPolylineOutsideRings, snapPieceEnd } from "./roadDeco.js";
+import { roadRowGeometry } from "./roadRowBand.js";
 import {
-  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes, teeJunctionCurbStripes,
+  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, roadDenseCenterline, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes, teeJunctionCurbStripes,
 } from "./siteGeometry.js";
 
 /* how far from a return's tangent point a straight stripe's end may lie and still be the one that return continues (the wedge's backing can clip a stripe ~20 ft short of an acute approach's tangent) */
@@ -98,7 +99,7 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), parkTrims: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { rows: new Map(), regions: [], stripes: new Map(), outlineCuts: new Map(), bandCuts: new Map(), stallClips: new Map(), parkTrims: new Map(), mouths: new Map(), seams: [], memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   /* NEW-1 (2026-11-10) — a taper narrows INTO the road it meets; a partner that is hidden is not on the drawing, so that end keeps its width. */
   const trimFor = (r) => {
@@ -349,7 +350,16 @@ export function* roadNetSteps(inp) {
       mouths.set(fid, [...(mouths.get(fid) || []), ...r.perimeter.map(({ a, b }) => ({ a, b }))]);
     }
   }
-  return { regions, stripes, outlineCuts, bandCuts, stallClips, parkTrims, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  /* Owner, 2026-11-24 — each road's RIGHT-OF-WAY (lib/roadRowBand.js): its two lines (an uneven ROW keeps each side's own distance), the band between them the
+   * planner paints as the ground under every road, and where ROWs meet each line stopped at the other road's band or pavement. Model + settings only. */
+  const rows = roadRowGeometry({
+    roads,
+    denseOf: (r) => roadDenseCenterline(r, settings, sharpFor(r), trimFor(r)),
+    taperOf: (r) => { const t = trimFor(r); return t ? t.taper : undefined; },
+    pavingOf: (r) => strip.get(r.id),
+  });
+  yield;
+  return { rows, regions, stripes, outlineCuts, bandCuts, stallClips, parkTrims, mouths, seams, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 

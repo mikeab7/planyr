@@ -260,8 +260,8 @@ export default function ViewMenu({
           <label style={row} title="The red footprint dimension callouts (building depth, road width, strip width)">
             <input type="checkbox" checked={settings.showDims !== false} onChange={(e) => patchSettings({ showDims: e.target.checked })} /> Dimensions
           </label>
-          <label style={row} title="The dashed right-of-way boundary lines and R.O.W. label on a banded road that has a designated right-of-way width">
-            <input type="checkbox" checked={settings.showRowLines !== false} onChange={(e) => patchSettings({ showRowLines: e.target.checked })} /> ROW lines
+          <label style={row} title="A road's designated right-of-way: the solid band from the pavement edge out to the right-of-way line, the dashed boundary lines and the R.O.W. label">
+            <input type="checkbox" checked={settings.showRowLines !== false} onChange={(e) => patchSettings({ showRowLines: e.target.checked })} /> Right-of-way
           </label>
 
           <div style={{ borderTop: `1px solid ${pal.panelLine}`, margin: "9px 0 7px" }} />

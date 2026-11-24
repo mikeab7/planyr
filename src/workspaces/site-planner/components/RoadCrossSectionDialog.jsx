@@ -25,7 +25,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Dialog } from "../../../shared/ui/controls.jsx";
 import {
-  BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
+  BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth, designatedRowSides,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
   MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt, rowMarginsBySide,
 } from "../lib/roadCrossSection.js";
@@ -178,7 +178,10 @@ function XSectionPreview({ xsection, activeIndex }) {
   // matching the canvas exactly; the loud warning below the field is what surfaces it.
   const designatedRow = designatedRowFt(xsection);
   const margin = designatedRow != null ? rowMarginFt(xsection) : null;
-  const totalExtent = margin != null ? designatedRow : rowW;
+  // 2026-11-24 — an UNEVEN ROW (`designatedRowSides`): each boundary at its own side's distance; the preview stays centred on the centerline,
+  // so its extent is twice the farther side.
+  const rowSidesP = margin != null ? designatedRowSides(xsection) : null;
+  const totalExtent = rowSidesP ? 2 * Math.max(rowSidesP.left, rowSidesP.right) : rowW;
 
   const usableW = Math.max(60, containerW - LADDER_MARGIN);
   const scale = Math.min(MAX_PX_PER_FT, usableW / totalExtent); // px per foot — content width never exceeds usableW
@@ -268,7 +271,7 @@ function XSectionPreview({ xsection, activeIndex }) {
             centerline — an honest picture of the actual geometry beats forcing two equal rects that
             wouldn't line up with where the bands really end. */}
         {margin != null && (() => {
-          const rowL = xOf(designatedRow / 2), rowR = xOf(-designatedRow / 2);
+          const rowL = xOf(rowSidesP.left), rowR = xOf(-rowSidesP.right);
           const bandL = xOf(outerFrom), bandR = xOf(outerTo);
           return (
             <>
@@ -351,7 +354,7 @@ function XSectionPreview({ xsection, activeIndex }) {
             ticked at the band block's outer edges and at the ROW boundary, with the ROW total below —
             distinct from (never merged into) the band ladder above it. */}
         {margin != null && (() => {
-          const rowL = xOf(designatedRow / 2), rowR = xOf(-designatedRow / 2);
+          const rowL = xOf(rowSidesP.left), rowR = xOf(-rowSidesP.right);
           const bandL = xOf(outerFrom), bandR = xOf(outerTo);
           const leftMarginFt = (bandL - rowL) / scale, rightMarginFt = (rowR - bandR) / scale;
           const leftText = `${f1(leftMarginFt)}′`, rightText = `${f1(rightMarginFt)}′`;
@@ -395,7 +398,8 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
   // until the user commits a real value). Deliberately not reset when a preset swaps `bands` — the
   // designated ROW is a fact about this ROAD, not about which bands happen to be modeled right now.
   const [rowDesignFt, setRowDesignFt] = useState(() => (initialXSection && initialXSection.rowDesignFt) || null);
-  const x = makeXSection(bands, rowDesignFt);
+  // 2026-11-24 — an uneven ROW's shift (set on the plan or in the panel) rides through the dialog untouched; a new width keeps it.
+  const x = makeXSection(bands, rowDesignFt, initialXSection && initialXSection.rowShiftFt);
   const c2c = curbToCurbWidth(x), row = rowWidth(x);
   const designatedRow = designatedRowFt(x);
   const rowMargin = designatedRow != null ? rowMarginFt(x) : null;

@@ -161,7 +161,7 @@ describe("NEW-1: a POINT drag opts out of the rebase and stays under the pointer
 
   it("the planner opts every vertex layer and the road end out, and nothing else", () => {
     const optedOut = DRAG_STARTS.filter((d) => /rebase: false/.test(d.literal)).map((d) => d.mode).sort();
-    expect(optedOut).toEqual(["easeLabelRot", "easeVertex", "elVertex", "grLimitVertex", "measureVertex", "mkVertex", "roadEnd", "roadVtx", "vertex"]);
+    expect(optedOut).toEqual(["easeLabelRot", "easeVertex", "elVertex", "grLimitVertex", "measureVertex", "mkVertex", "roadEnd", "roadVtx", "rowSide", "vertex"]); // rowSide: the right-of-way line follows the pointer to a distance from the centerline (2026-11-24)
   });
 });
 

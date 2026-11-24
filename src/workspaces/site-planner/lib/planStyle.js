@@ -32,6 +32,12 @@ export const TYPE = {
   sidewalk: { fill: "#f7f6f2", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
   road: { fill: "#9eabb7", stroke: "#66737f", label: "Road", weight: 1.25 },
+  /* Owner, 2026-11-24 — a road's RIGHT-OF-WAY: not an element you draw, but the ground band from the pavement edge out to the ROW line
+   * (lib/roadRowBand.js), painted SOLID under every element so the street edge reads against the aerial, plus its dashed boundary line.
+   * A row here so its colours are a standard like every other fill (Standards → Colors: Fill = the band, Line = the dashed boundary).
+   * A pale grass-verge tone: clearly lighter than the road grey so the curb edge reads, cooler and paler than Landscape's sage (which
+   * keeps its hatch), and not the near-white of Sidewalk. `notDrawn` — no element ever carries this type. */
+  rightOfWay: { fill: "#e2e7d9", stroke: "#5d6a5f", label: "Right-of-way", weight: 1, notDrawn: true },
   // NEW-1 (2026-10-30) — a drive-in ramp is poured concrete: a plain concrete grey, lighter than paving so the wing walls (drawn in ink) read on it.
   driveInRamp: { fill: "#c8c9c6", stroke: "#6c7075", label: "Drive-in Ramp", weight: 1 },
 };
