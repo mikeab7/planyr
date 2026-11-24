@@ -73,6 +73,20 @@ describe("applyBulk — every unlocked member, same writers as the single panel"
     applyBulk([{ id: "t1", type: "trailer" }, { id: "t2", type: "trailer", labelHidden: true }], field("trailer", "labelShown"), false, l.ops);
     expect(l.calls).toEqual([["label", "t1"]]);
   });
+  it("rotation turns each bonded assembly ONCE (two fields on one building, or a building + its own field)", () => {
+    const { calls, ops } = log();
+    const r = applyBulk([park("p1", { attachedTo: "B" }), park("p2", { attachedTo: "B" }), park("p3")], field("parking", "rotation"), 90, ops);
+    expect(calls).toEqual([["rot", "p1", 90], ["rot", "p3", 90]]);
+    expect(r.done).toBe(2);
+    const m = log();
+    applyBulk([bldg("B"), park("p1", { attachedTo: "B" })], fieldsFor(null)[0], 45, m.ops);
+    expect(m.calls).toEqual([["rot", "B", 45]]);
+  });
+  it("a non-rotation field still writes every member of a shared assembly", () => {
+    const { calls, ops } = log();
+    applyBulk([park("p1", { attachedTo: "B" }), park("p2", { attachedTo: "B" })], field("parking", "stallDepth"), 19, ops);
+    expect(calls.length).toBe(2);
+  });
   it("mixed-type selection offers only Rotation", () => {
     expect(fieldsFor(null).map((f) => f.id)).toEqual(["rotation"]);
     expect(fieldsFor("pond")).toEqual([]);
