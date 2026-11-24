@@ -88,6 +88,8 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/components/elementRender.jsx",
   "src/workspaces/site-planner/components/NumInput.jsx",
   "src/workspaces/site-planner/components/YieldDrainagePanels.jsx",
+  "src/workspaces/site-planner/components/yieldPanelParts.jsx", // audit batch L3
+  "src/workspaces/site-planner/components/drainageBlocks.jsx", // audit batch L3
   "src/workspaces/site-planner/lib/planRenderHelpers.jsx",
   // Audit batch G1 — pieces moved verbatim out of SitePlanner.jsx keep its exemption.
   "src/workspaces/site-planner/components/PropFields.jsx",

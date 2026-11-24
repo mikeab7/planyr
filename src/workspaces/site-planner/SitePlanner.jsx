@@ -108,7 +108,8 @@ import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { loadEasementRules, patchEasementRule, subscribeEasementRules, resolveEasementJur } from "./lib/easementRules.js";
-import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
+import { wasRequested } from "./lib/criteriaRequests.js";
+import { useCriteriaRequest } from "./lib/useCriteriaRequest.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
  * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
  * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
@@ -1846,14 +1847,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (temporal dead zone), since both blocks run as plain IIFEs during the same render pass.
   // Keyed on county:family so unrelated rows never share state; `wasRequested` (checked at each
   // read site) seeds the "Requested ✓" read-back from localStorage after a reload.
-  const [critReqStatus, setCritReqStatus] = useState({});
-  const onRequestCriteria = async (info) => {
-    if (!info || !info.countyKey || !info.family) return;
-    const k = `${info.countyKey}:${info.family}`;
-    setCritReqStatus((s) => ({ ...s, [k]: { busy: true } }));
-    const r = await requestCriteria(supabase, { countyKey: info.countyKey, countyLabel: info.countyLabel, state: siteStateId || null, family: info.family, siteId: siteId || null });
-    setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
-  };
+  const { critReqStatus, onRequestCriteria } = useCriteriaRequest(siteId, siteStateId);
   const [rulesOpen, setRulesOpen] = useState(false);
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The

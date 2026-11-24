@@ -113,7 +113,7 @@ describe("a reloaded check shows the note once, not twice", () => {
 });
 
 describe("the readout draws it in place of the generic line", () => {
-  const panels = readFileSync(new URL("../src/workspaces/site-planner/components/YieldDrainagePanels.jsx", import.meta.url), "utf8");
+  const panels = readFileSync(new URL("../src/workspaces/site-planner/components/YieldDrainagePanels.jsx", import.meta.url), "utf8") + readFileSync(new URL("../src/workspaces/site-planner/components/drainageBlocks.jsx", import.meta.url), "utf8"); // the Drainage verdict groups moved to drainageBlocks.jsx (audit L3)
   it("renders cityNotes and suppresses the generic city-unv sentence when one exists", () => {
     expect(panels).toMatch(/for \(const cn of \(d\.cityNotes \|\| \[\]\)\) detR\.push\(warnNote\(cn\.short/);
     expect(panels).toMatch(/city-criteria-unverified"\) && !\(d\.cityNotes \|\| \[\]\)\.length/);
