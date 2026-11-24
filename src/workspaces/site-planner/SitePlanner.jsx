@@ -1849,7 +1849,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (temporal dead zone), since both blocks run as plain IIFEs during the same render pass.
   // Keyed on county:family so unrelated rows never share state; `wasRequested` (checked at each
   // read site) seeds the "Requested ✓" read-back from localStorage after a reload.
-  const { critReqStatus, onRequestCriteria } = useCriteriaRequest(siteId, siteStateId);
   const [rulesOpen, setRulesOpen] = useState(false);
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
@@ -12403,6 +12402,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * when a site is most likely to fall through to a default. A plan with no origin resolves to
    * null, which behaves exactly as it did before Colorado existed. */
   const siteStateId = origin ? resolveSiteState({ lat: origin.lat, lng: origin.lon }) : null;
+  // Declared right after siteStateId (the hook reads it); every read of critReqStatus is further down.
+  const { critReqStatus, onRequestCriteria } = useCriteriaRequest(siteId, siteStateId);
   // The lazily-loaded Colorado tier. `null` until the chunk arrives (and forever on a Texas site,
   // where it is never requested at all), which the render already handles: the guard's own line
   // has a regime-less variant, and the statute simply does not render until it can.
