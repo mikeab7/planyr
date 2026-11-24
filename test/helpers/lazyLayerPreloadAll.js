@@ -19,6 +19,7 @@ const mods = NO ? [] : await Promise.all([
   import(LIB + "chambersLayers.js"),
   import(LIB + "houstonMetroLayers.js"),
   import(LIB + "txCityZoningLayers.js"),
+  import(LIB + "wallerLayers.js"),
 ]);
 export const PRELOADED = NO ? null : {
   desoto: mods[0],
@@ -35,4 +36,5 @@ export const PRELOADED = NO ? null : {
   chambers: mods[11],
   houstonMetro: mods[12],
   txCityZoning: mods[13],
+  waller: mods[14],
 };

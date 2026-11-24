@@ -2544,7 +2544,7 @@ const JURISDICTION_LAYERS_RAW = {
   waller: {
     label: "Waller County",
     layers: {},
-    note: "No public GIS is published for Waller County. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Waller County's own layers (proposed thoroughfares, Katy Prairie Conservancy land, water and sewer service areas, municipal utility districts, floodway buffer) sit in the Access, Environmental, Utilities and Flood & Drainage groups, shown only on a Waller site. FEMA, wetlands and TxRRC layers above still apply.",
   },
 };
 
