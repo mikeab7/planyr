@@ -49,7 +49,7 @@ const reportPurgeFailure = (e) => reportClientEvent("notes-purge-failed", String
 import {
   clearNotesStorageError, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  collectBinFacts, ignoreDuplicate, listStoredPageIds, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
+  activeProjectKey, collectBinFacts, ignoreDuplicate, listStoredPageIds, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
   sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, writeActivePageId, writeNoteTemplates, writePage, writeTree,
@@ -503,9 +503,14 @@ export default function Notes({
    * the user actually had open instead of always landing on the tree's first page. An effect
    * that resolves its own fallback id (the visibility guard, the cloud seed) writes through
    * itself inline, since it needs the resolved value before this wrapper ever sees it. */
+  /* PER-PROJECT: the remembered page is keyed by the route's project (see activeProjectKey), kept
+   * in a ref assigned during render so the stable callbacks below always write under the project
+   * the person is standing in, never a stale closure's. */
+  const projectKeyRef = useRef("all");
+  projectKeyRef.current = activeProjectKey(projectId, orgScope);
   const goToPage = useCallback((id) => {
     setActivePageId(id);
-    writeActivePageId(id);
+    writeActivePageId(id, undefined, projectKeyRef.current);
     setHistoryOpen(false);
     setPageSetupOpen(false);
     setFindReplaceOpen(false);
@@ -608,10 +613,10 @@ export default function Notes({
      * A stored id naming a page that no longer exists (deleted, or a stale cross-account
      * leftover) falls back exactly as before. `noteIntent`, if present, wins over this — its
      * own effect below runs after this one settles the tree and overrides unconditionally. */
-    const storedActive = readActivePageId();
+    const storedActive = readActivePageId(undefined, projectKeyRef.current);
     const initialActive = storedActive && findPage(loaded, storedActive) ? storedActive : firstPageId(loaded);
     setActivePageId(initialActive);
-    writeActivePageId(initialActive);
+    writeActivePageId(initialActive, undefined, projectKeyRef.current);
     setQuery("");
     setHighlight("");
     setDeleted(null);
@@ -631,7 +636,7 @@ export default function Notes({
         setTree(next);
         setActivePageId((cur) => {
           const resolved = cur && findPage(next, cur) ? cur : firstPageId(next);
-          writeActivePageId(resolved);
+          writeActivePageId(resolved, undefined, projectKeyRef.current);
           return resolved;
         });
       },
@@ -835,7 +840,12 @@ export default function Notes({
     if (!tree.pages.length) return;
     const roots = pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT));
     const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
-    if (!activePageId || !visible.has(activePageId)) goToPage(roots[0]?.id || null);
+    if (!activePageId || !visible.has(activePageId)) {
+      /* PER-PROJECT RESTORE: the page this project last had open, if it still exists and is still
+       * filed here (a deleted or moved page fails `visible` and falls to the default). */
+      const remembered = readActivePageId(undefined, projectKeyRef.current);
+      goToPage(remembered && visible.has(remembered) ? remembered : (roots[0]?.id || null));
+    }
   }, [projectId, orgScope, tree, activePageId, goToPage]);
 
   /* B1366384 — honor a cross-workspace "open this exact page" request (Shell's `noteIntent`,
