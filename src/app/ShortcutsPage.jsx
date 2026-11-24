@@ -17,6 +17,7 @@
  * scrolls correctly rather than assuming everything fits on screen at once.
  */
 import { useMemo, useRef, useState, useEffect } from "react";
+import { Dialog } from "../shared/ui/controls.jsx";
 import { isCoarsePointer } from "../shared/ui/coarsePointer.js";
 import { SHORTCUT_SECTIONS } from "../shared/keyboard/shortcutsData.js";
 import { formatCombo, comboAriaLabel } from "../shared/keyboard/platform.js";
@@ -72,16 +73,9 @@ function matches(it, q) {
 export default function ShortcutsPage({ onClose }) {
   const [query, setQuery] = useState("");
   const searchRef = useRef(null);
-  const dialogRef = useRef(null);
   const bodyRef = useRef(null);
 
   useEffect(() => { if (!isCoarsePointer()) searchRef.current?.focus(); }, []);
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => SHORTCUT_SECTIONS.map((section) => ({
@@ -97,23 +91,9 @@ export default function ShortcutsPage({ onClose }) {
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 5000, background: BACKDROP, display: "grid", placeItems: "center", padding: 12 }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-        data-testid="shortcuts-page"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: "flex", flexDirection: "column",
-          background: "var(--surface-raised)", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)",
-          width: "min(760px, 94vw)", maxHeight: "90vh", minHeight: 0,
-        }}
-      >
+    <Dialog onClose={onClose} label="Keyboard shortcuts" testId="shortcuts-page" z={5000} scrim={BACKDROP} backdropPadding={12} padding={0}
+      width="min(760px, 94vw)"
+      style={{ display: "flex", flexDirection: "column", border: "none", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)", maxHeight: "90vh", minHeight: 0, overflowY: "visible" }}>
         {/* Header + search — fixed height, never scrolls away */}
         <div style={{ flex: "0 0 auto", padding: "16px 20px 10px", borderBottom: "1px solid var(--border-default)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
@@ -189,7 +169,6 @@ export default function ShortcutsPage({ onClose }) {
             </div>
           ))}
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
