@@ -11,8 +11,11 @@ import { sequenceSource } from "./helpers/sequenceSource.js";
 
 const SRC = sequenceSource();
 const block = SRC.slice(SRC.indexOf("const VIEW_TAB_KEYS"), SRC.indexOf("function App() {"));
+// activeProjectOf moved with the grid column helpers (page/grid/columns.js); slice it by its own bounds.
+const apStart = SRC.indexOf("function activeProjectOf(");
+const activeProjectOfSrc = SRC.slice(apStart, SRC.indexOf("\n}\n", apStart) + 3);
 const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };
-const mod = new Function("sessionStorage", "localStorage", `${block}\nreturn { pickActivePid, activeProjectOf, resolveViewState };`)(store(), store());
+const mod = new Function("sessionStorage", "localStorage", `${block}\n${activeProjectOfSrc}\nreturn { pickActivePid, activeProjectOf, resolveViewState };`)(store(), store());
 
 const TEST_ACCOUNT_DOC = { nPid: 970235, nTid: {}, settings: {}, projects: {}, aPid: 911625, view: "grid", section: "projects" };
 

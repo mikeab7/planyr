@@ -27,7 +27,8 @@ describe("Schedule grid — one cell-line rule (NEW-1)", () => {
     expect(seq).toMatch(/borderRight:GRID_LINE, borderBottom:GRID_LINE,/);
   });
   it("no grid cell hard-codes its own divider colour any more", () => {
-    const grid = seq.slice(seq.indexOf("function GridView("), seq.indexOf("// ── HealthPicker"));
+    const gridStart = seq.indexOf("function GridView(");
+    const grid = seq.slice(gridStart, seq.indexOf("\nimport ", gridStart));   // GridView.jsx ends where the next module's imports begin
     expect(grid).not.toMatch(/borderBottom:\s*"1px solid var\(--bd\)"/);
   });
 });
