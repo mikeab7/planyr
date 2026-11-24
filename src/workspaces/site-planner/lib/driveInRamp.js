@@ -3,10 +3,12 @@
  *
  * A dock-high building's floor (FFE) sits one dock height (48 in typical) above the truck-court apron. A DRIVE-IN door is a grade-level overhead
  * door a forklift or truck drives through, so a concrete ramp has to climb from apron grade to the FFE: rise = dock height, grade 6–10 % (8 %
- * common, 10 % the forklift maximum) → a 4-ft rise at 8 % is 50 ft of ramp. Wing walls hold the fill on both long sides; bollards flank the door.
+ * common, 10 % the forklift maximum) → a 4-ft rise at 8 % is 50 ft of ramp. Wing walls hold the fill on both long sides.
  *
  * MODEL — one building-attached element, the way a dog-ear bump-out is one:
- *     { id, type: "driveInRamp", attachedTo: <building id>, cx, cy, w, h, rot, ramp: { side, at, width, gradePct, riseIn?, layout, dir, door, wings, bollards } }
+ *     { id, type: "driveInRamp", attachedTo: <building id>, cx, cy, w, h, rot, ramp: { side, at, width, gradePct, riseIn?, layout, dir, door, wings } }
+ *     (an older record may still carry `bollards: true`; it is IGNORED — bollard dots are retired from the drawing, owner 2026-11-24,
+ *     "getting rid of the dots on the ramps": at the default sizes they sat on the footprint's two wall corners and read as stray dots.)
  *   · `ramp` holds only what the OWNER chose; the box (cx/cy/w/h/rot) is a DERIVED cache of `rampBox(host, ramp)` so hit-testing, the PDF walker, KMZ and
  *     the grading ring all read an ordinary box — it is re-fitted from the host by `refitRamps` at the planner's one element-write seam, so a host that
  *     moves, rotates or resizes carries its ramps with it (and undo/redo, which restore exact geometry, never re-interpret it).
@@ -20,7 +22,7 @@
  */
 
 import { pointInRing } from "./ringMath.js";
-export const RAMP_DEFAULTS = Object.freeze({ widthFt: 16, gradePct: 8, layout: "straight", dir: 1, door: "12x14", wings: true, bollards: true });
+export const RAMP_DEFAULTS = Object.freeze({ widthFt: 16, gradePct: 8, layout: "straight", dir: 1, door: "12x14", wings: true });
 export const RAMP_MAX_GRADE_PCT = 10;          // the practical forklift maximum
 export const RAMP_MIN_GRADE_PCT = 2;                      // one lane
 export const RAMP_MAX_WIDTH_FT = 40;
@@ -31,8 +33,6 @@ export const DOOR_SIZES = Object.freeze({ "12x14": { w: 12, h: 14 }, "14x16": { 
 export const DOOR_TOUCH_FT = 1;
 /** The along-the-wall ramp lands on a square at its high end; a marker (non-dock wall) is a short stub the width of the door. */
 export const MARKER_DEPTH_FT = 1.5;
-const BOLLARD_SETOFF_FT = 2;                   // a bollard's distance off the door jamb
-const BOLLARD_V_FT = 2.5;                      // …and off the wall face
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -88,7 +88,7 @@ export const rampDir = (ramp) => (ramp && ramp.dir === -1 ? -1 : 1);
 /** A fresh record's defaults, merged under what the caller chose. */
 export function newRampRecord(side, at, over = {}) {
   return { side, at: r2(at), width: RAMP_DEFAULTS.widthFt, gradePct: RAMP_DEFAULTS.gradePct, layout: RAMP_DEFAULTS.layout, dir: RAMP_DEFAULTS.dir,
-    door: RAMP_DEFAULTS.door, wings: RAMP_DEFAULTS.wings, bollards: RAMP_DEFAULTS.bollards, ...over };
+    door: RAMP_DEFAULTS.door, wings: RAMP_DEFAULTS.wings, ...over };
 }
 
 /* ---- the footprint, in the wall frame -------------------------------------------------------------------------------------------------- */
@@ -129,8 +129,8 @@ export function rampParts(host, ramp, opt = {}) {
       ? [[f.pt(sp.u0, sp.v1), f.pt(sp.u1, sp.v1)], [f.pt(sp.u0, 0), f.pt(sp.u1, 0)]]
       : [[f.pt(sp.u0, 0), f.pt(sp.u0, sp.v1)], [f.pt(sp.u1, 0), f.pt(sp.u1, sp.v1)]])
     : [];
-  const bollards = !marker && ramp.bollards !== false
-    ? [f.pt(at - dw / 2 - BOLLARD_SETOFF_FT, BOLLARD_V_FT), f.pt(at + dw / 2 + BOLLARD_SETOFF_FT, BOLLARD_V_FT)] : [];
+  // NO bollards (owner 2026-11-24): a ramp draws no dot anywhere — not unselected, selected, printed or in the editable PDF; a stored
+  // `bollards: true` from an older record is ignored. `test/rampNoDots.test.js` guards it.
   // the slope arrow points UP toward the door
   let arrow = null;
   if (!marker) {
@@ -144,7 +144,7 @@ export function rampParts(host, ramp, opt = {}) {
   }
   const centre = f.pt((sp.u0 + sp.u1) / 2, (sp.v0 + sp.v1) / 2);
   const long = rampLayout(ramp) === "along" ? sp.u1 - sp.u0 : sp.v1;
-  return { ring, door, wings, bollards, arrow, centre, labelAxisDeg: ((f.horiz ? 0 : 90) + f.rotDeg) % 180, longFt: marker ? sp.u1 - sp.u0 : long,
+  return { ring, door, wings, arrow, centre, labelAxisDeg: ((f.horiz ? 0 : 90) + f.rotDeg) % 180, longFt: marker ? sp.u1 - sp.u0 : long,
     labelAlongWall: rampLayout(ramp) === "along" || marker, lengthFt: sp.lengthFt, frame: f, span: sp };
 }
 

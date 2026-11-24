@@ -217,7 +217,7 @@ export function DriveInRampPanel({ ramp, marker, lengthFt, riseIn, dockHeightIn,
         <SegmentedControl aria-label="Door size" data-testid="ramp-door" value={ramp.door === "14x16" ? "14x16" : "12x14"} onChange={(k) => onPatch({ door: k })} accent="var(--accent-site)" onAccent="var(--on-accent-site)"
           options={[{ key: "12x14", label: "12×14", testid: "ramp-door-12x14" }, { key: "14x16", label: "14×16", testid: "ramp-door-14x16" }]} />
       </Field>
-      {!marker && <Field label="Details"><span style={{ display: "inline-flex", gap: SPACE.xl, flexWrap: "wrap" }}>{check("wings", "Wing walls", ramp.wings !== false, "ramp-wings")}{check("bollards", "Bollards", ramp.bollards !== false, "ramp-bollards")}</span></Field>}
+      {!marker && <Field label="Details"><span style={{ display: "inline-flex", gap: SPACE.xl, flexWrap: "wrap" }}>{check("wings", "Wing walls", ramp.wings !== false, "ramp-wings")}</span></Field>}
       {!marker && (
         <>
           <StdSubLabel section="size">Size & position</StdSubLabel>

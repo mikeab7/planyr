@@ -113,7 +113,7 @@ test.describe("drive-in ramps on dock walls", () => {
     expect(ramps).toHaveLength(1);
     const r = ramps[0];
     expect(r.attachedTo).toBe(bl.id);
-    expect(r.ramp).toMatchObject({ width: 16, gradePct: 8, layout: "straight", door: "12x14", wings: true, bollards: true });
+    expect(r.ramp).toMatchObject({ width: 16, gradePct: 8, layout: "straight", door: "12x14", wings: true });
     expect(r.ramp.riseIn).toBeUndefined();
     const horiz = r.ramp.side === "top" || r.ramp.side === "bottom";
     expect(Math.round(horiz ? r.h : r.w)).toBe(50);
