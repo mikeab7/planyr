@@ -11,6 +11,7 @@
 // testable (test/measureHit.test.js); the SitePlanner canvas closes over them in selectMeasure.
 
 import { pointInRing, ringArea } from "./ringMath.js";
+import { MEASURE_LINE } from "./measureStyle.js";
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -39,6 +40,10 @@ export function distToPolyline(p, pts) {
   return best;
 }
 
+// 2026-11-24 — an AREA measurement grabs by its INTERIOR only while it has a visible fill (base opacity
+// > 0, the same number the canvas paints before the selected-state bump); with fill off, only its outline.
+export const measureGrabsInterior = (m) => (Number.isFinite(m?.fillOpacity) ? m.fillOpacity : MEASURE_LINE.fillOpacity) > 0;
+
 // Indices of every measurement whose geometry sits within `tol` feet of point `p`, ordered
 // smaller-area-first (lines/counts have no area → 0 → they sort ahead of area measurements),
 // ties broken by array index so the cycle is stable across repeated clicks.
@@ -49,7 +54,7 @@ export function measuresUnderPoint(measures, p, tol) {
     if (mode === "count") {
       if (pts.some((q) => hyp(p, q) <= tol)) hits.push({ i, area: 0 });
     } else if (mode === "area") {
-      if (pts.length >= 3 && (pointInRing(p, pts) || distToPolyline(p, [...pts, pts[0]]) <= tol)) hits.push({ i, area: ringArea(pts) });
+      if (pts.length >= 3 && ((measureGrabsInterior(m) && pointInRing(p, pts)) || distToPolyline(p, [...pts, pts[0]]) <= tol)) hits.push({ i, area: ringArea(pts) });
     } else {
       if (pts.length >= 2 && distToPolyline(p, pts) <= tol) hits.push({ i, area: 0 });
     }

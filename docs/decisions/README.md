@@ -96,6 +96,7 @@ On 2026-11-23 (audit batch H, owner-approved) `/CLAUDE.md` was slimmed from ~37,
 | 728-729 | Constraint #58 | [constraint-58.md](constraint-58.md) |
 | 730-731 | Constraint #59 | [constraint-59.md](constraint-59.md) |
 | 732-733 | Constraint #60 | [constraint-60.md](constraint-60.md) |
+| 734 | Constraint #61 | [constraint-61.md](constraint-61.md) |
 | 734-759 | ## Grading model (owner rules 2026-10-16; round 4 2026-10-19) | [docs/site-planner/grading-model.md](../site-planner/grading-model.md) |
 | 760-818 | ## What Planyr is | kept in CLAUDE.md (verbatim) |
 | 819-829 | ### Dependency notes (client bundle) | [dependency-notes.md](dependency-notes.md) |
