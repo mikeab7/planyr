@@ -77,7 +77,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   `alert` anywhere** (house rule). The row's key handler answers Enter/Space, Left/Right and the
   menu keys and **nothing else** — Delete and Backspace are permanently unhandled here (B1366),
   because hovering is not intent. Esc in the search box clears the query.
-- `components/NoteEditor.jsx` — one page: title, toolbar, find bar, document. The sheet is
+- `components/NoteEditor.jsx` — one page: title, toolbar, find bar, document. (Audit batch L1: its stylesheet is `noteEditorCss.js`, the find/zoom/page-setup bars `NoteEditorBars.jsx`, the paste flyout `PasteOptions.jsx`, the mini toolbar `MiniBar.jsx`, the right-click menu `DocMenu.jsx`, the E2E hook `useNoteE2EHook.js`; source-scan tests read them all through `test/helpers/noteEditorSource.js`.) The sheet is
   **left-aligned, not centred** (B1369 — centring read as "my text is over on the right" on a
   wide monitor), and the whole pane is a **mat that forwards a press to the caret** (B1368 —
   clicking below or beside the text used to do nothing). **The only module on this route that
