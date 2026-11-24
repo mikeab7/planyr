@@ -292,10 +292,10 @@ describe("neither module may rejoin the Site route's STATIC graph", () => {
   const src = plannerSource();
   it("groundElevation.js is reached only by a dynamic import", () => {
     expect(src).not.toMatch(/^import\s[^\n]*lib\/groundElevation\.js/m);
-    expect(src).toMatch(/import\("\.\/lib\/groundElevation\.js"\)/);
+    expect(src).toMatch(/import\("\.\/(?:lib\/)?groundElevation\.js"\)/) /* batch G2: the dynamic import moved into lib/useDrainageCheck.js, where the path is ./groundElevation.js */;
   });
   it("drainageTiming.js is reached only by a dynamic import", () => {
     expect(src).not.toMatch(/^import\s[^\n]*lib\/drainageTiming\.js/m);
-    expect(src).toMatch(/import\("\.\/lib\/drainageTiming\.js"\)/);
+    expect(src).toMatch(/import\("\.\/(?:lib\/)?drainageTiming\.js"\)/);
   });
 });
