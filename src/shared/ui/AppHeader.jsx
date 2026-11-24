@@ -58,6 +58,7 @@ import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import { logoDashboardAction } from "./dashboardNav.js";
+import { useDashboardOwner, dashboardCopy } from "./dashboardAccess.js";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import PriorityToolbar, { ToolbarBudgetContext } from "./PriorityToolbar.jsx";
@@ -1085,7 +1086,9 @@ export default function AppHeader({
   const accent = ACCENT_TEXT[module] || "var(--accent)";
 
   // B1128272 — the wordmark's own action/tooltip; see dashboardNav.js's header.
-  const logoAction = logoDashboardAction({ onDashboard, onLogoDashboard, logoDashboardTitle });
+  const dashOwner = useDashboardOwner();
+  const logoAction0 = logoDashboardAction({ onDashboard, onLogoDashboard, logoDashboardTitle });
+  const logoAction = { ...logoAction0, title: dashboardCopy(logoAction0.title, dashOwner) };
 
   /* ⛔ B1173(×2) — THE FLOATING "✕ Exit fullscreen" BUTTON IS GONE, and its removal is the point
      rather than a tidy-up. It existed for exactly one reason: a hidden header has no exit control,

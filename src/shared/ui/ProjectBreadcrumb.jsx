@@ -64,6 +64,7 @@ import ContextMenu from "./ContextMenu.jsx";
 import { MenuScroll, MenuFooter, BinBackRow } from "./menuBin.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import { crumbDashboardTitle } from "./dashboardNav.js";
+import { useDashboardOwner, dashboardCopy } from "./dashboardAccess.js";
 import {
   listProjects, filterProjects, warmProjectsIfEmpty, reconcileProjects,
   renameProject as storeRename, deleteProject as storeDelete,
@@ -375,7 +376,7 @@ export default function ProjectBreadcrumb({
   // When omitted it falls back to the Site Planner site store via listProjects().
   projects: controlledProjects,
   // The "home" crumb label — Site → "Map", Schedule → "Dashboard" (B204).
-  homeLabel = "Dashboard",
+  homeLabel: homeLabelProp = "Dashboard",
   // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
   // the project crumb reads "All projects" instead of a single name. Off by default.
   cross = false,
@@ -400,6 +401,8 @@ export default function ProjectBreadcrumb({
 }) {
   const controlled = Array.isArray(controlledProjects);
   const liveSchedules = useLiveSchedules(); // NEW-2 — the calendar icon is verified against live schedules, not the stored hint alone
+  const dashOwner = useDashboardOwner();
+  const homeLabel = dashboardCopy(homeLabelProp, dashOwner);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [internalProjects, setInternalProjects] = useState([]);
@@ -1149,7 +1152,7 @@ export default function ProjectBreadcrumb({
         className="tap-target"
         data-testid="dashboard-crumb"
         onClick={goDashboard}
-        title={crumbDashboardTitle({ homeLabel, dashboardTitle })}
+        title={dashboardCopy(crumbDashboardTitle({ homeLabel, dashboardTitle }), dashOwner)}
         aria-current={onDash ? "page" : undefined}
         style={crumbBtn({ color: onDash ? INK : MUTED })}
         onMouseEnter={(e) => { if (!onDash) e.currentTarget.style.color = INK; }}

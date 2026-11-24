@@ -88,7 +88,7 @@ describe("NEW-3 — every leading crumb's label matches its real destination", (
     // AppHeader.jsx takes no default of its own for `homeLabel` — it forwards the prop straight
     // to ProjectBreadcrumb.jsx, which is where the shared "Dashboard" default actually lives.
     const crumb = read("src/shared/ui/ProjectBreadcrumb.jsx");
-    expect(crumb).toMatch(/homeLabel = "Dashboard"/);
+    expect(crumb).toMatch(/homeLabel(: homeLabelProp)? = "Dashboard"/); // owner-only Dashboard (2026-11-24): a non-owner sees "Map" via dashboardCopy, default unchanged
   });
 
   // MUTATION PROOF — the rule has teeth: relabeling Schedule's project-scope crumb back to

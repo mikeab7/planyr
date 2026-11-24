@@ -33,6 +33,7 @@
  * at load (`status: "diverged"`, a loud red badge + an explicit banner) — v1 still doesn't
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
+import { useDashboardOwner, dashboardCopy } from "../../shared/ui/dashboardAccess.js";
 import { useProjectName, projectNameOf } from "../../shared/names/names.js";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -131,6 +132,7 @@ function DivergedBar({ showing, onKeepDevice, onUseCloud }) {
 }
 
 function EmptyProjectState({ onGoDashboard }) {
+  const dashOwner = useDashboardOwner();
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, background: "var(--surface-page)" }}>
       <div style={{ maxWidth: 380, textAlign: "center" }}>
@@ -142,7 +144,7 @@ function EmptyProjectState({ onGoDashboard }) {
           type="button"
           onClick={onGoDashboard}
           style={{ height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--accent-model)", background: "var(--accent-model)", color: "var(--on-accent-model)", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer" }}
-        >Go to Dashboard</button>
+        >Go to {dashboardCopy("Dashboard", dashOwner)}</button>
       </div>
     </div>
   );
