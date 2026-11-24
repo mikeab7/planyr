@@ -292,7 +292,7 @@ jobs:
       # failing build still reports "failure" rather than leaving the PR stuck a second way.
       - name: Backfill required status for a sweep-repaired PR
         if: always() && github.event.inputs.pr_number != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;

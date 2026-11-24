@@ -40,7 +40,7 @@ jobs:
           cat gis-drift-report.txt
       - name: Open or bump a @claude drift issue on regression
         if: steps.verify.outputs.code != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require("fs");
@@ -75,7 +75,7 @@ jobs:
             }
       - name: Close the drift issue when green
         if: steps.verify.outputs.code == '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;

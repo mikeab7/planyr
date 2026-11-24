@@ -91,7 +91,7 @@ jobs:
         # failed (the rules misbehaved; the channel itself delivered) — also red, but "not delivering" would be false and it
         # @-mentions the owner (it did exactly that on the first live drill of B2650848, issue #2843).
         if: always() && steps.check.outputs.code != '0' && steps.check.outputs.code != '5' && steps.check.outputs.code != '1'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require("fs");
@@ -116,7 +116,7 @@ jobs:
             core.info(`Opened #${created.number}`);
       - name: Close the fallback issue when the channel is healthy again
         if: steps.check.outputs.code == '0' && !inputs.drill
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;
