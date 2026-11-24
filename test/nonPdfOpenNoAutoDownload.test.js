@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,7 +23,7 @@ import path from "node:path";
  * (DocReview's redrop-banner Download button; FileBrowser's pendingDl-confirmation Download
  * button) — and this test fails against the pre-fix source, which had no such handler at all.
  */
-const DOC_REVIEW = fs.readFileSync(path.join(process.cwd(), "src/workspaces/doc-review/DocReview.jsx"), "utf8");
+const DOC_REVIEW = docReviewSource();
 const FILE_BROWSER = fs.readFileSync(path.join(process.cwd(), "src/workspaces/library/components/FileBrowser.jsx"), "utf8");
 
 describe("DocReview.jsx fetchSourceBytes — a non-PDF open never auto-downloads", () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { plannerSource } from "./helpers/plannerSource.js";
@@ -99,7 +100,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     // per-project last-doc work they ALSO arm the pointer writes afterwards (.finally),
     // so the guard matches the catch-then-finally chain shape.
     const stitch = read("../src/workspaces/doc-review/Stitcher.jsx");
-    const dr = read("../src/workspaces/doc-review/DocReview.jsx");
+    const dr = docReviewSource();
     expect(stitch).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\) \/\/ B534/);
     expect(stitch).toMatch(/\.finally\(\(\) => setBootResolved\(true\)\)/);
     expect(dr).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\) \/\/ B535/);
@@ -670,7 +671,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const pp = read("../src/shared/markup/PropertyPanel.jsx");
     expect(pp).toMatch(/onInput=\{\(e\) => onChange\(e\.target\.value, \{ live: true \}\)\}/);
     expect(pp).toMatch(/onChange=\{\(e\) => onChange\(e\.target\.value, \{ live: false \}\)\}/);
-    const dr = read("../src/workspaces/doc-review/DocReview.jsx");
+    const dr = docReviewSource();
     expect(dr).toMatch(/const colorSessionRef = useRef\(null\)/);
     expect(dr).toMatch(/if \(opts\.live\) \{\s*if \(colorSessionRef\.current !== key\) \{ pushHistory\(\); colorSessionRef\.current = key; \}/);
   });
@@ -693,7 +694,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B579: DocReview warns on a genuine signed-in PDF store failure (not oversize, not logged-out)", () => {
-    const src = read("../src/workspaces/doc-review/DocReview.jsx");
+    const src = docReviewSource();
     expect(src).toMatch(/if \(!r\.ok && !r\.oversize && \(await cloudReady\(\)\)\)/);
   });
 

@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { metaForOpenedFile, noticeForTab } from "../src/workspaces/doc-review/lib/openedFileMeta.js";
 import { composeTitle } from "../src/workspaces/doc-review/lib/reviewNaming.js";
 
-const src = readFileSync(new URL("../src/workspaces/doc-review/DocReview.jsx", import.meta.url), "utf8");
+const src = docReviewSource();
 const D = "2026-10-04";
 const unfiled = { projectId: null, project: "", orgScope: false };
 
