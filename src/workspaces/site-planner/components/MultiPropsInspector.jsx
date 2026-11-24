@@ -20,14 +20,21 @@ const MixedTick = memo(function MixedTick({ checked, mixed, onChange, label }) {
   );
 });
 
-export const MultiPropsInspector = memo(function MultiPropsInspector({ members, type, fields, ctx, onWrite, muted }) {
+export const MultiPropsInspector = memo(function MultiPropsInspector({ members, type, fields, ctx, onWrite, muted, stalls }) {
   const shown = fields.map((f) => ({ f, r: readShared(members, f, ctx) })).filter((x) => x.r.n > 0);
-  if (!shown.length) return null;
+  const stallRows = stalls ? [stalls.car && { key: "car", label: "Car parking", t: stalls.car, unit: "stalls", of: "parking field" }, stalls.trailer && { key: "trailer", label: "Trailer parking", t: stalls.trailer, unit: "trailer stalls", of: "trailer row" }].filter(Boolean) : [];
+  if (!shown.length && !stallRows.length) return null;
   const lockedN = members.filter((m) => m.locked).length;
   const heading = type ? `${(TYPE[type]?.label || type).split(" / ")[0]} · ${members.length}` : `${members.length} items`;
   return (
     <Section title={null}>
       <div data-testid="multi-props" style={{ fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>{heading}</div>
+      {stallRows.map(({ key, label, t, unit, of }) => (
+        <div key={key} data-testid={`multi-stalls-${key}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: FONT_SIZE.control, marginBottom: 6 }}>
+          <span>{label} · {t.n} {of}{t.n === 1 ? "" : "s"}</span>
+          <b data-testid={`multi-stalls-${key}-total`}>{t.count.toLocaleString("en-US")} {unit}{t.est ? " (est.)" : ""}</b>
+        </div>
+      ))}
       {shown.map(({ f, r }) => (
         <Field key={f.id} label={f.label}>
           {f.kind === "toggle"
@@ -37,9 +44,9 @@ export const MultiPropsInspector = memo(function MultiPropsInspector({ members, 
                 min={f.min} max={f.max} step={f.step} coarse={f.coarse} onCommit={(n) => onWrite(f, n)} />}
         </Field>
       ))}
-      <div style={{ fontSize: 10.5, color: muted, marginTop: 2 }}>
+      {shown.length > 0 && <div style={{ fontSize: 10.5, color: muted, marginTop: 2 }}>
         Typing a value sets it on all {members.length}.{lockedN ? ` ${lockedN} locked ${lockedN === 1 ? "item is" : "items are"} left alone.` : ""}
-      </div>
+      </div>}
     </Section>
   );
 });

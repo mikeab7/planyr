@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectionKinds, readShared, fieldsFor, applyBulk } from "../src/workspaces/site-planner/lib/multiProps.js";
+import { selectionKinds, readShared, fieldsFor, applyBulk, stallTotals } from "../src/workspaces/site-planner/lib/multiProps.js";
 
 const bldg = (id, over = {}) => ({ id, type: "building", cx: 0, cy: 0, w: 200, h: 100, rot: 0, ...over });
 const park = (id, over = {}) => ({ id, type: "parking", cx: 0, cy: 0, w: 100, h: 60, rot: 0, ...over });
@@ -90,5 +90,23 @@ describe("applyBulk — every unlocked member, same writers as the single panel"
   it("mixed-type selection offers only Rotation", () => {
     expect(fieldsFor(null).map((f) => f.id)).toEqual(["rotation"]);
     expect(fieldsFor("pond")).toEqual([]);
+  });
+});
+
+describe("stallTotals — total stalls across a multi-selection", () => {
+  const tr = (id, over = {}) => ({ id, type: "trailer", cx: 0, cy: 0, w: 100, h: 60, rot: 0, ...over });
+  const c = { carCount: (el) => ({ count: el.n || 0, est: !!el.points }), trailerCount: (el) => ({ count: el.t || 0 }) };
+  it("sums car fields and trailer rows separately; mixed with a building shows both, building ignored", () => {
+    const els = [park("a", { n: 40 }), park("b", { n: 25 }), tr("t1", { t: 10 }), tr("t2", { t: 6 }), bldg("x")];
+    expect(stallTotals(els, c)).toEqual({ car: { count: 65, n: 2, est: false }, trailer: { count: 16, n: 2, est: false } });
+  });
+  it("null for a kind that is not selected; est flag when any member is an estimate; bump-outs skipped; add/remove changes the sum", () => {
+    expect(stallTotals([park("a", { n: 5 })], c)).toEqual({ car: { count: 5, n: 1, est: false }, trailer: null });
+    expect(stallTotals([park("a", { n: 5 }), park("b", { n: 7, points: [] })], c).car).toEqual({ count: 12, n: 2, est: true });
+    expect(stallTotals([bldg("x"), park("a", { n: 3, dogEar: true })], c)).toEqual({ car: null, trailer: null });
+    const three = [park("a", { n: 5 }), park("b", { n: 7 }), park("c", { n: 9 })];
+    expect(stallTotals(three, c).car.count).toBe(21);
+    expect(stallTotals(three.slice(1), c).car.count).toBe(16);
+    expect(stallTotals([], c)).toEqual({ car: null, trailer: null });
   });
 });
