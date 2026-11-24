@@ -161,8 +161,7 @@ describe("the planner wiring (source guards)", () => {
   it("the neutral markup panel has an Appearance and a Size & position section and no opacity slider", () => {
     // G5b: the neutral-markup block is the NeutralMarkupInspector component now.
     const start = SP.indexOf("export const NeutralMarkupInspector");
-    const end = SP.indexOf("export const MarkupStyleInspector", start);
-    const body = SP.slice(start, end);
+    const body = SP.slice(start, SP.indexOf("@planner-extract — the metes-and-bounds (deed", start)); // NeutralMarkupInspector is the last component in MarkupInspector.jsx (the deed panel is DeedInspector.jsx)
     expect(body).toMatch(/section="appearance"/);
     expect(body).toMatch(/section="size"/);
     expect(body).not.toMatch(/type="range"/);
@@ -276,8 +275,8 @@ describe("NEW-3 — every element panel takes layout A's control rules", () => {
     expect(easement).toMatch(/section="appearance"/); expect(easement).toMatch(/section="size"/);
     expect(easement).toMatch(/<PercentField boxed /); expect(easement).toMatch(/textAlignLast: "right"/);
     expect(easement).not.toMatch(/Drag a centerline dot to reshape \(the strip|Drag a boundary dot to reshape;/);
-    const d0 = SP.indexOf("export const MarkupStyleInspector"); // G5b: the deed-encumbrance block
-    const deed = SP.slice(d0, d0 + 12000);
+    const d0 = SP.indexOf("export const DeedInspector"); // NEW-1 2026-11-24: the deed panel is its own component
+    const deed = SP.slice(d0, d0 + 30000);
     expect(deed).toMatch(/section="appearance"/); expect(deed).toMatch(/section="size"/);
     expect(deed).toMatch(/<PercentField boxed /); expect(deed).not.toMatch(/type="range"/);
     expect(deed).not.toMatch(/Move the deed as one piece/);
