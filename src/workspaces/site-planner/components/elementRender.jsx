@@ -22,6 +22,7 @@ import { offsetPolyline } from "../lib/metesAndBounds.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { keptRuns } from "../lib/parkingApproach.js";
 import { roadTravelWidth } from "../lib/siteModel.js";
+import { roadRowLabelPlace } from "../lib/roadRowLabel.js";
 import { CURB_STROKE_MIN_PX, GRID_FLEX, GRID_LINE, GRID_WALL, INLINE_LABEL_SPACING, POND_ADD_FILL_DEFAULT, centroid, inlineLabelEls, labelPlaceOf, ringMinSpanFt } from "../lib/planRenderHelpers.jsx";
 
 /* Stage-contour overlay for a detention pond (the "topographic" depth rings inside the
@@ -629,17 +630,13 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
             rparts.push(<polyline key={`rowln${i}`} points={toPts(line)} fill="none" stroke="var(--text-tertiary)" strokeWidth={Math.max(0.75, lfK)} strokeDasharray={rowDash} pointerEvents="none" />);
           });
           if (settings.showDims !== false && xsDense.length >= 2) {
-            const mi = Math.max(1, Math.min(xsDense.length - 1, Math.floor(xsDense.length / 2)));
-            const p0 = xsDense[mi - 1], p1 = xsDense[mi];
-            const ddl = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-            const rdir = { x: (p1.x - p0.x) / ddl, y: (p1.y - p0.y) / ddl };
-            const rnrm = { x: -rdir.y, y: rdir.x };
-            const midPt = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-            const labelPt = f2p({ x: midPt.x + rnrm.x * rowHw, y: midPt.y + rnrm.y * rowHw });
+            // B2671331 — the label rides the road's centerline, turned with the road and kept upright (lib/roadRowLabel.js).
             const rk = dimFontScale(lfPpf || ppf) * lfK, rfz = 10 * rk;
-            rparts.push(
-              <text key="rowlbl" x={labelPt.x} y={labelPt.y} textAnchor="middle" dominantBaseline="middle" fontSize={rfz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="var(--text-tertiary)" stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="700" pointerEvents="none">
-                {f0(rowFt)}′ R.O.W.
+            const rowTxt = `${f0(rowFt)}′ R.O.W.`;
+            const rpl = roadRowLabelPlace(xsDense, f2p, rowTxt.length * rfz * 0.62, (rowTxt.length * 0.62 * 0.5 + 3) * rfz + 11 * rk * 2.2);
+            if (rpl) rparts.push(
+              <text key="rowlbl" x={rpl.x} y={rpl.y} transform={`rotate(${rpl.angle} ${rpl.x} ${rpl.y})`} textAnchor="middle" dominantBaseline="middle" fontSize={rfz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="var(--text-tertiary)" stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="700" pointerEvents="none">
+                {rowTxt}
               </text>,
             );
           }
