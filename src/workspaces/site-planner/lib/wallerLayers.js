@@ -12,8 +12,8 @@
  * nothing is a hover; every row starts at 100% opacity (#42). NOTHING HERE COMPUTES OR SHOWS A RATE, VOLUME OR ELEVATION (#4). The floodway buffer is a MAP LAYER ONLY: Planyr's screening math keeps
  * its own modelled `floodwayBufferFt` and the existing Waller detention rule (Appendix E) is untouched. Nothing is wired into Site Analysis verdicts (siteChecks.TRUSTED_CHECKS is untouched).
  *
- * The card readers for the four rows whose attribute names the sweep did not record (Conservancy fee land, CCN, MUD, floodway buffer) read the first plausible column case-insensitively and
- * print NOTHING they cannot read — a wrong guess costs a row, never a wrong claim. The live pass (V#) pins the real names.
+ * Every attribute name below was MEASURED LIVE (2026-11-24, from Michael's browser on build a181f59) — each layer is its own FeatureServer service in the county's org, and the first cut pointed
+ * all six at the BKDD service and answered "Invalid URL". A card prints nothing it cannot read, so an empty or placeholder column drops its row.
  *
  * PURE: no network, no React — the card / style rules unit-test standalone (test/wallerLayers.test.js). */
 
@@ -31,17 +31,6 @@ export function soft(v) {
   if (!t || /[a-z]/.test(t)) return t;
   return t.toLowerCase().replace(/[a-z0-9][a-z0-9'.&#]*/g, (w, i) => (i > 0 && SMALL.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).replace(/\b(Fm|Us|Sh|Ih|Cr|Mud|Ccn|Cpc|Row|Wcid|Wsc)\b/g, (m) => m.toUpperCase());
 }
-/* The value of the first attribute whose NAME matches (case-insensitive, exact) one of `names`, in order; "" when none reads. */
-export function pick(props, names) {
-  const p = props || {};
-  const byLower = new Map(Object.keys(p).map((k) => [k.toLowerCase(), k]));
-  for (const n of names) {
-    const k = byLower.get(n.toLowerCase());
-    if (k !== undefined && has(p[k])) return str(p[k]);
-  }
-  return "";
-}
-
 const srcOf = (k) => {
   const s = GIS_SOURCES[k];
   if (!s) throw new Error(`wallerLayers: no GIS_SOURCES row "${k}"`);
@@ -91,37 +80,55 @@ export function cpcEasementCard(props) {
     ]),
   };
 }
+/* An acreage as the county gives it, trimmed to a sensible precision; nothing for a blank / zero / junk value. */
+export function acresText(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${n.toLocaleString("en-US", { maximumFractionDigits: n >= 100 ? 0 : 1 })} acres`;
+}
 export function cpcOwnedCard(props) {
-  const title = soft(pick(props, ["Name", "PROPERTY", "Property_Name", "TRACT_NAME", "Tract"]));
+  const p = props || {};
   return {
-    title: title || "Katy Prairie Conservancy land",
-    rows: [{ label: "What this is", text: "Land the Katy Prairie Conservancy owns outright — not developable" }],
+    title: soft(p.Property) || "Katy Prairie Conservancy land",
+    rows: clean([
+      { label: "What this is", text: "Land the Katy Prairie Conservancy owns outright — not developable" },
+      row("Size", acresText(p.Acres)),
+    ]),
   };
 }
 
 /* ───────────────────────── Utilities: CCN service areas and MUDs ───────────────────────── */
+const STATUS_WORDS = { a: "Active", i: "Inactive" };
+const statusText = (v) => { const t = str(v); return STATUS_WORDS[t.toLowerCase()] || soft(t); };
 export function ccnCard(props) {
-  const name = soft(pick(props, ["CCN_Name", "UTILITY", "Utility_Name", "Company", "System_Name", "Name", "Owner"]));
-  const kind = soft(pick(props, ["CCN_Type", "Service", "Service_Type", "Type", "Utility_Type"]));
-  const no = pick(props, ["CCN_No", "CCN_Number", "CCN_NUM", "CCN", "Certificate"]);
+  const p = props || {};
+  const kind = soft(p.CCN_TYPE);
+  const type = soft(p.TYPE);
   return {
-    title: name || "Water / sewer service area",
-    rows: clean([row("Service", kind), has(no) ? { label: "Certificate number", text: no } : null]),
+    title: soft(p.UTILITY) || "Water / sewer service area",
+    rows: clean([
+      row("Service", kind || type),
+      kind && type && kind.toLowerCase() !== type.toLowerCase() ? row("Type", type) : null,
+      row("Certificate number", p.CCN_NO),
+      has(p.STATUS) ? { label: "Status", text: statusText(p.STATUS) } : null,
+    ]),
   };
 }
 export function mudCard(props) {
-  const name = soft(pick(props, ["MUD_Name", "District_Name", "Name", "District", "Label"]));
-  const tceq = pick(props, ["TCEQ_ID", "TCEQ_District_ID", "District_ID"]);
-  const status = pick(props, ["Status"]);
+  const p = props || {};
   return {
-    title: name || "Municipal utility district",
-    rows: clean([has(tceq) ? { label: "TCEQ district ID", text: tceq } : null, status ? { label: "Status", text: /^a$/i.test(status) ? "Active" : soft(status) } : null]),
+    title: soft(p.NAME) || "Municipal utility district",
+    rows: clean([row("District ID", p.DISTRICT_ID), row("Type", soft(p.TYPE)), has(p.STATUS) ? { label: "Status", text: statusText(p.STATUS) } : null]),
   };
 }
 
 /* ───────────────────────── Flood & Drainage: the county's floodway buffer ───────────────────────── */
-export function floodwayBufferCard() {
-  return { title: "County floodway buffer", rows: [{ label: "What this is", text: BUFFER_STATUS }] };
+export function floodwayBufferCard(props) {
+  const p = props || {};
+  return {
+    title: "County floodway buffer",
+    rows: clean([row("Mapped as", p.FLD_ZONE ? `Zone ${str(p.FLD_ZONE)}` : ""), row("Zone subtype", soft(p.ZONE_SUBTY)), { label: "What this is", text: BUFFER_STATUS }]),
+  };
 }
 
 /* ───────────────────────── The registry rows ───────────────────────── */
@@ -145,6 +152,7 @@ export const WALLER_LAYERS = {
   }),
   waller_cpc_owned: feature("wallerCpcOwned", {
     label: "Katy Prairie Conservancy Land (Waller)", role: "area", group: "environmental", order: 71, minZoom: 10, source: "Waller County GIS — Katy Prairie Conservancy owned properties (2024)",
+    fields: ["OBJECTID", "Property", "Acres"],
     color: WALLER_COLORS.cpcOwned, weight: 1.6, simplifyFactor: 2, styleFn: outline(WALLER_COLORS.cpcOwned, 1.6, 0.26), identifyCard: cpcOwnedCard,
     note: "Land the Katy Prairie Conservancy owns outright.",
     infoCaveat: "Fee land held for conservation — not available for development. The boundary is the county's 2024 layer, not a survey.",
@@ -152,12 +160,14 @@ export const WALLER_LAYERS = {
   /* ---- Utilities ---- */
   waller_ccn: feature("wallerCcn", {
     label: "Water & Sewer Service Areas (Waller CCN)", role: "area", group: "utilities", order: 70, minZoom: 10, source: "Waller County GIS — CCN boundaries (certificated water / sewer service areas)",
+    fields: ["OBJECTID", "UTILITY", "TYPE", "CCN_NO", "CCN_TYPE", "STATUS"],
     color: WALLER_COLORS.ccn, weight: 1.6, simplifyFactor: 2, styleFn: outline(WALLER_COLORS.ccn, 1.6, 0.1, "8 5"), identifyCard: ccnCard,
     note: "The certificated water and sewer service areas in Waller County — who holds the right to serve a site. Click one for the utility.",
     infoCaveat: "A certificate of convenience and necessity (CCN) gives one utility the exclusive right to serve its area. The boundary is the county's copy; confirm service availability and capacity with the utility itself.",
   }),
   waller_mud: feature("wallerMud", {
     label: "Municipal Utility Districts (Waller)", role: "area", group: "utilities", order: 71, minZoom: 10, source: "Waller County GIS — municipal utility districts",
+    fields: ["OBJECTID", "NAME", "DISTRICT_ID", "TYPE", "STATUS"],
     color: WALLER_COLORS.mud, weight: 1.6, simplifyFactor: 2, styleFn: outline(WALLER_COLORS.mud, 1.6, 0.12, "3 4"), identifyCard: mudCard,
     note: "Municipal utility districts in Waller County. Click one for its name.",
     infoCaveat: "A district can levy taxes and build or serve infrastructure inside its boundary; its rates and rules are not in this layer. The county's own copy — the statewide TCEQ water-district row also draws MUDs.",
@@ -165,6 +175,7 @@ export const WALLER_LAYERS = {
   /* ---- Flood & Drainage ---- */
   waller_floodway_buffer: feature("wallerFloodwayBuffer", {
     label: "County Floodway Buffer (Waller)", role: "area", group: "flood", order: 70, minZoom: 10, source: "Waller County GIS — floodway buffer (2023-11)",
+    fields: ["OBJECTID", "FLD_ZONE", "ZONE_SUBTY"],
     color: WALLER_COLORS.floodwayBuffer, weight: 1.4, simplifyFactor: 2, styleFn: outline(WALLER_COLORS.floodwayBuffer, 1.4, 0.2), identifyCard: floodwayBufferCard,
     floodTier: "local", agency: "Waller County", areaCounties: ["waller"],
     note: "The county's own drawn floodway buffer, as a map layer.",

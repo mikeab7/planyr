@@ -1463,7 +1463,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://services1.arcgis.com/BqVKz0o32DERqyE4/arcgis/rest/services/City_Limits_Updated/FeatureServer/0",
     layerId: null,
     geometryType: "polygon",
-    fields: { name: "CityName" },
+    fields: { name: "CITY" }, // measured live 2026-11-24 (e.g. "Brookshire"); NOT `CityName`, which is Fort Bend's column
     /* The county's table is its incorporated limits (7 cities); no class column was recorded, so it is read as full-purpose limits like Fort Bend's. */
     fullPurposeOnly: true,
     coverage: "city",
