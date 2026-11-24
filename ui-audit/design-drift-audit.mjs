@@ -149,6 +149,11 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/site-planner/lib/baytownZoning.js", // B2671240 — zone-family map ink (a zoning wash), the sibling of sugarLandZoning.js
 ];
 
+// The Schedule page (audit batch J3) moved from public/sequence/index.html into src/workspaces/scheduler/page/. It is a
+// standalone iframe with its own stylesheet and hand-typed colours / sizes / radii that were never counted (the old file
+// sat outside src/). Counting them now would jump the ceiling for code nobody touched, so the folder is exempt as a whole
+// until the page adopts the shared tokens (owner-approved 2026-11-24; the J3 colour-tokens step removes this line).
+const LEGACY_PAGE_DIR = "src/workspaces/scheduler/page/";
 const EXEMPT_FILES = new Set([...TOKEN_LAYER_FILES, ...DRAWING_SURFACE_FILES]);
 
 const RADIUS_VALUES = new Set(Object.values(RADIUS));
@@ -211,7 +216,7 @@ export function scanRepo({ root = SRC } = {}) {
   const exemptFiles = new Set();
   walk(root, (absPath) => {
     const rel = relPath(absPath);
-    if (EXEMPT_FILES.has(rel)) { exemptFiles.add(rel); return; }
+    if (EXEMPT_FILES.has(rel) || rel.startsWith(LEGACY_PAGE_DIR)) { exemptFiles.add(rel); return; }
     const text = readFileSync(absPath, "utf8");
     const { violations, exemptions } = scanFile(rel, text);
     allViolations.push(...violations);

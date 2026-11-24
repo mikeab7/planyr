@@ -15,8 +15,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 describe("NEW-1 — the key guard asks the right question", () => {
   it("latches the overlay state in CAPTURE, before React or the document handler sees the key", () => {

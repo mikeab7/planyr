@@ -1,14 +1,14 @@
 // src/shared/schedule/engine/pageEntry.js
 //
-// The ONE entry the Schedule page loads. `npm run build:sequence-engine` bundles this file (esbuild,
-// IIFE) into public/sequence/engine.js, which public/sequence/index.html loads with a plain
-// <script src> BEFORE its own code. Everything the page used to carry as pasted-in copies — the
+// Imported FIRST by the Schedule page's own entry (src/workspaces/scheduler/page/main.jsx). `npm run
+// build:sequence-page` bundles that entry (esbuild, IIFE) into public/sequence/page.js, which
+// public/sequence/index.html loads with a plain <script src>. Everything the page used to carry as pasted-in copies — the
 // formula engine, schedule ownership, range selection, the health rule engine, and the date /
 // cascade / merge / drop-rule engine — is imported here from its real module and published as
-// globals, so the page (a classic script, not an ES module) calls them by bare name exactly as before.
+// globals, so the ui-audit / e2e drivers (and any classic script) still call them by bare name exactly as before.
 //
-// Live bindings: HOLIDAY_SET, NOW and MEETING_BODY_INDEX are reassigned over time (the page does
-// `NOW = …` / `HOLIDAY_SET = …`). A plain copy would freeze the first value, so each is published
+// Live bindings: HOLIDAY_SET, NOW and MEETING_BODY_INDEX are reassigned over time (the page calls
+// setNOW / setHolidaySet). A plain copy would freeze the first value, so each is published
 // as a global ACCESSOR whose getter reads the module's live binding and whose setter calls the
 // module's setter.
 import * as calendar from "./calendar.js";

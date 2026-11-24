@@ -11,8 +11,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 describe("Schedule grid — one cell-line rule (NEW-1)", () => {
   it("defines the single line rule from the existing --bd token, solid and without alpha", () => {

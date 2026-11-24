@@ -3,6 +3,7 @@
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
 import { isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl, pointOrderByForUrl, pointWhereForUrl, stackRuleForUrl } from "./counties.js";
+import { fetchArcgisJson, GisFetchError } from "./gisFetch.js";
 import { pickAtPoint } from "./parcelStack.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
@@ -50,30 +51,22 @@ async function fetchJson(url, params, { timeoutMs = PARCEL_FETCH_TIMEOUT_MS } = 
   if (params)
     for (const [k, v] of Object.entries(params))
       if (v != null) u.searchParams.set(k, String(v));
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  let res;
+  // Audit M3 (I3): the one GIS fetch helper. retries:0 + noCoalesce keep the old one-shot behaviour exactly (the
+  // parcel fallback chain, constraint #39, decides what to do next), and the typed ParcelFetchError wording is unchanged.
   try {
-    res = await fetch(u.toString(), { signal: ctrl.signal });
+    return await fetchArcgisJson(u.toString(), { timeoutMs, retries: 0, noCoalesce: true });
   } catch (e) {
-    if (e && e.name === "AbortError")
+    if (!(e instanceof GisFetchError)) throw e;
+    if (e.kind === "timeout")
       throw new ParcelFetchError("timeout", `The county server didn't respond within ${Math.round(timeoutMs / 1000)}s.`);
+    if (e.kind === "http-5xx" || e.kind === "http-4xx")
+      throw new ParcelFetchError("http", `The county server returned HTTP ${e.status}.`, e.status);
+    if (e.kind === "arcgis")
+      throw new ParcelFetchError("arcgis", e.arcgisMessage || "ArcGIS query error.", e.diag.arcgisCode ?? null);
+    if (e.unreadable)
+      throw new ParcelFetchError("arcgis", "The county server returned an unreadable response.");
     throw new ParcelFetchError("network", "Couldn't reach the county server (network or CORS block).");
-  } finally {
-    clearTimeout(timer);
   }
-  // Validate the RESPONSE BODY, not just the HTTP status: ArcGIS routinely returns
-  // HTTP 200 with a JSON `{error:…}` body (e.g. 499 Token Required) for a failed
-  // query, which must read as a failure — not a silent success (B245).
-  if (!res.ok) throw new ParcelFetchError("http", `The county server returned HTTP ${res.status}.`, res.status);
-  let j;
-  try {
-    j = await res.json();
-  } catch (_) {
-    throw new ParcelFetchError("arcgis", "The county server returned an unreadable response.");
-  }
-  if (j && j.error) throw new ParcelFetchError("arcgis", j.error.message || "ArcGIS query error.", j.error.code ?? null);
-  return j;
 }
 
 const trim = (s) => s.replace(/\/+$/, "");

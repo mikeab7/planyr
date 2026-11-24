@@ -3,7 +3,7 @@
 // Dates and the working-day calendar: date strings, holidays, business-day math, the live "today", default settings.
 //
 // Pure functions only (no React, no DOM). The Schedule page (public/sequence/index.html) gets this code
-// through the generated script public/sequence/engine.js (npm run build:sequence-engine), and the unit
+// through the generated script public/sequence/page.js (npm run build:sequence-page), and the unit
 // tests import it directly — ONE copy, no paste-in. Moved here verbatim from the page (audit batch J1);
 // behaviour is unchanged.
 

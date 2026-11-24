@@ -1,5 +1,5 @@
 /* Edge-scroll speed for a held drag-select (B2452528; shared by the Spreadsheet, the Schedule grid — bundled into
- * public/sequence/engine.js — and the Notes tables, B2530690). Pure and DOM-free. All positions are in
+ * public/sequence/page.js — and the Notes tables, B2530690). Pure and DOM-free. All positions are in
  * the scroll container's VIEWPORT space.
  */
 /** Scroll starts when the pointer is within this many px of the edge of the cell area (or past it). */

@@ -10,8 +10,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 const here = dirname(fileURLToPath(import.meta.url));
-const seq = readFileSync(resolve(here, "../public/sequence/index.html"), "utf8");
+const seq = sequencePageSource();
 
 describe("Schedule grid — row outline runs through the pinned columns (NEW-1)", () => {
   it("draws the hover/selected top+bottom line as ONE ::after on the row, above the frozen cells — not a row-level box-shadow under them, not a ::before per cell (B2584496)", () => {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { setNOW, computeDisplayHealth, rolledStatusLeaf, leafFocusStatus, hideStatusOf } from "./helpers/schedulerEngine.js";
 
+import { sequencePageSource } from "./helpers/sequenceSource.js";
 /* B717 — Focus must not hide overdue tasks that display red "Needs Attn.".
  *
  * The scheduler grid colours a task via computeDisplayHealth (which applies the
@@ -97,7 +98,7 @@ describe("B717 design choice: dueSoonYellow promotion also survives Focus (match
 });
 
 describe("B717 anti-drift: the single-source-of-truth fix is present in the real source", () => {
-  const src = read("../public/sequence/index.html");
+  const src = sequencePageSource();
   const mjs = read("./helpers/schedulerEngine.js");
 
   it("flatTasks captures settings and the leaf branch classifies via computeDisplayHealth", () => {

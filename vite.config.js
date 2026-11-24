@@ -5,11 +5,30 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { transformSync } from "esbuild";
+import { buildPage } from "./scripts/sequence-page-bundle.mjs";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
 import univerPrune from "./scripts/vite-plugin-univer-prune.mjs";
 import spreadsheetPreload from "./scripts/vite-plugin-spreadsheet-preload.mjs";
 import plannerPreload from "./scripts/vite-plugin-planner-preload.mjs";
 import { UNSAFE_BUILDS } from "./src/app/unsafeBuilds.js";
+
+// The Schedule page (audit batch J3) is committed as a readable bundle, public/sequence/page.js. Vite copies public/
+// verbatim, so this minifies the COPY in the build output (a classic script: esbuild keeps top-level names, so
+// nothing the harnesses or the shell reach for by name changes). A minify failure fails the build loudly.
+function minifySequencePage() {
+  let outDir = "dist";
+  return {
+    name: "minify-sequence-page",
+    apply: "build",
+    configResolved(c) { outDir = path.resolve(c.root, c.build.outDir); },
+    closeBundle() {
+      const file = path.join(outDir, "sequence", "page.js");
+      if (!fs.existsSync(file)) throw new Error("minify-sequence-page: " + file + " is missing from the build output");
+      fs.writeFileSync(file, transformSync(fs.readFileSync(file, "utf8"), { loader: "js", minify: true, charset: "utf8" }).code);
+    },
+  };
+}
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
 // substitute fonts (non-embedded text), CMaps (CID/CJK fonts), an ICC profile (CMYK
@@ -239,6 +258,7 @@ export default defineConfig(({ command }) => ({
     /* B329408 — a page opening ON a plan starts fetching the plan editor's chunk at t=0 (it is its own chunk now; see the plugin's header). */
     plannerPreload(),
     pdfjsAssets(),
+    minifySequencePage(),
     chunkModuleStats(),
     buildStamp(),
     // In dev, Vite's SPA fallback would serve the main index.html for /sequence/.
@@ -253,6 +273,15 @@ export default defineConfig(({ command }) => ({
           if (url === "/" || url === "" || url === "/index.html") {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.end(fs.readFileSync(file));
+            return;
+          }
+          // The page's bundle is rebuilt from src/workspaces/scheduler/page/* on every request in dev, so an edit to a
+          // page module shows on reload without running `npm run build:sequence-page` (the committed copy in public/ is
+          // what the harnesses and the production build use; CI fails if it is stale).
+          if (url.split("?")[0] === "/page.js") {
+            res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end(buildPage());
             return;
           }
           next();
