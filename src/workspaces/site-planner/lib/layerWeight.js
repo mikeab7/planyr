@@ -162,7 +162,7 @@ export const LAYER_TIER = {
   has_airport_tiers: "constraint",   // NEW-2: the City regulates building height by airport tier
   tx_evac_zones: "reference",        // NEW-3: an insurance / emergency-planning flag, not the floodplain
   sl_zoning: "reference",
-  richmond_zoning: "reference", fulshear_zoning: "reference", fulshear_zoning_newer: "reference", stafford_zoning: "reference", webster_zoning: "reference", webster_pd: "reference", // NEW-1 (Texas city zoning) — the same tier as Sugar Land's
+  richmond_zoning: "reference", fulshear_zoning: "reference", fulshear_zoning_newer: "reference", stafford_zoning: "reference", webster_zoning: "reference", webster_pd: "reference", katy_zoning: "reference", katy_flu: "reference", katy_thoroughfare: "reference", // NEW-1 (Texas city zoning) — the same tier as Sugar Land's
   sl_public_land: "reference",
   sl_hydrants: "reference",
   sl_water_lines: "reference", sl_sewer_gravity: "reference", sl_sewer_laterals: "reference", sl_sewer_force: "reference", // NEW-1 (2026-11-06): Sugar Land water and sewer network

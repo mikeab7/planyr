@@ -1,7 +1,7 @@
 /* Texas city zoning — Richmond, Fulshear, Stafford (NEW-1, 2026-11-12): the pure rules, over the REAL values each city's layer holds (measured 2026-11-12, every polygon). */
 import { describe, it, expect } from "vitest";
 import {
-  normalizeCode, dateFromMs, docHref, withName, makeCityZoning, ZONE_COLORS, RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD, WEBSTER_ZONE_NAMES, TX_CITY_ZONING,
+  normalizeCode, dateFromMs, docHref, withName, makeCityZoning, ZONE_COLORS, RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD, WEBSTER_ZONE_NAMES, TX_CITY_ZONING, KATY, KATY_FLU, KATY_FLU_CLASSES, KATY_TP, KATY_TP_CLASSES,
 } from "../src/workspaces/site-planner/lib/txCityZoning.js";
 
 const ms = (y, m, d) => Date.UTC(y, m - 1, d);
@@ -237,5 +237,57 @@ describe("style, legend and the owner's rules (#42 #45 #50)", () => {
   it("makeCityZoning is the one factory (no city re-implements the card shell)", () => {
     const z = makeCityZoning({ city: "Test", codeOf: (p) => p.c, nameOf: (p) => p.n, classOf: () => "other", extraRows: () => [], citation: "x", labelField: "c" });
     expect(z.card({ c: "a", n: "B" }).rows).toEqual([{ label: "Zone", text: "A · B" }]);
+  });
+});
+
+describe("Katy — real values from the city's Planning_Map (measured 2026-11-24)", () => {
+  const ECODE = "https://ecode360.com/38859247";
+  it("a named district: code · the city's own name, the ordinance as a short link (never a raw URL, #45)", () => {
+    const c = KATY.card({ ZONECODE: "M", ZONDESC: "Industrial District", LINK: ECODE });
+    expect(c.title).toBe("Zoning · Katy");
+    const r = rows(c);
+    expect(r.Zone.text).toBe("M · Industrial District");
+    expect(r.Ordinance).toEqual({ label: "Ordinance", text: "Open", href: ECODE });
+    expect(c.rows.map((x) => x.label)).toEqual(["Zone", "Ordinance"]);
+  });
+  it("a planned district's 'code' is the development's name: shown once, as the name, with the code dropped", () => {
+    const p = { ZONECODE: "Katy Boardwalk PDD", ZONDESC: "Katy Boardwalk Planned Development District" };
+    expect(rows(KATY.card(p)).Zone.text).toBe("Katy Boardwalk Planned Development District");
+    expect(KATY.familyOf(p)).toBe("pud");
+    expect(KATY.labelText("Katy Boardwalk PDD")).toBe("Katy Boardwalk PDD"); // the city's own text, as written
+    const lg = KATY.legend(KATY.legendItemsOf([{ properties: p }, { properties: { ZONECODE: "R-1", ZONDESC: "Single Family Residential" } }]));
+    expect(lg[0]).toEqual({ heading: true, label: "Katy" });
+    expect(lg.slice(1).map((r) => r.label)).toEqual(["R-1 · Single Family Residential", "Katy Boardwalk Planned Development District"]);
+  });
+  it("a code with no description shows bare (#46), a foreign link host is not offered, and a blank record draws no rows", () => {
+    expect(rows(KATY.card({ ZONECODE: "C-9", ZONDESC: "  ", LINK: "https://example.com/x" })).Zone.text).toBe("C-9");
+    expect(rows(KATY.card({ ZONECODE: "C-9", ZONDESC: "", LINK: "https://example.com/x" })).Ordinance).toBeUndefined();
+    expect(KATY.card({}).rows).toEqual([]);
+  });
+  it("families: residential R-1/MH, business C-1/C-2, industrial M, mixed OKD, unknown neutral", () => {
+    const fam = (c, d) => KATY.familyOf({ ZONECODE: c, ZONDESC: d });
+    expect([fam("R-1", "x"), fam("MH", "x"), fam("C-1", "x"), fam("C-2", "x"), fam("M", "x"), fam("OKD", "Old Katy District"), fam("Z-9", "x")])
+      .toEqual(["residential", "residential", "business", "business", "industrial", "mixed", "other"]);
+  });
+  it("future land use: names and colours are the city's own legend; ROW is bare; the jurisdiction is a row; owner and address are never read", () => {
+    expect(Object.keys(KATY_FLU_CLASSES)).toHaveLength(15);
+    const c = KATY_FLU.card({ FLU: "GC", Jurisdiction: "City of Katy", OWNERNAME: "SOMEONE", FULLADDR: "1 MAIN ST" });
+    expect(c.title).toBe("Future land use · Katy");
+    expect(c.rows).toEqual([{ label: "Zone", text: "GC · General Commercial" }, { label: "Jurisdiction", text: "City of Katy" }]);
+    expect(KATY_FLU.style({ FLU: "I" }, 1)).toMatchObject({ color: "#7a81cc", fillColor: "#7a81cc" });
+    expect(rows(KATY_FLU.card({ FLU: "ROW" })).Zone.text).toBe("ROW");
+    expect(KATY_FLU.style({ FLU: "ROW" }, 1).color).toBe(ZONE_COLORS.other);
+    expect(KATY_FLU.card({ FLU: "SR", Jurisdiction: "NOT IN" }).rows.map((r) => r.label)).toEqual(["Zone"]);
+    expect(KATY_FLU.card({}).rows).toEqual([]);
+  });
+  it("thoroughfare plan: the city's five classes, proposed ones dashed, a card with the street and class only", () => {
+    expect(Object.values(KATY_TP_CLASSES).map((c) => c.label)).toEqual(["Interstate Freeway", "Major Street", "Collector Street", "Proposed Major Street", "Proposed Collector Street"]);
+    expect(KATY_TP.style({ ThoroClass: "Proposed Major" }, 1).dashArray).toBeTruthy();
+    expect(KATY_TP.style({ ThoroClass: "Major" }, 1).dashArray).toBeUndefined();
+    const c = KATY_TP.card({ FullStreet: "KATY FORT BEND RD", StreetName: "KATY FORT BEND", ThoroClass: "Major", Maintain: 1, RoadClass: "Major" });
+    expect(c).toEqual({ title: "Katy Fort Bend Rd", rows: [{ label: "Class", text: "Major Street" }] });
+    expect(KATY_TP.card({}).title).toBe("Thoroughfare");
+    expect(KATY_TP.legend(KATY_TP.legendItemsOf([{ properties: { ThoroClass: "Collector" } }, { properties: { ThoroClass: "Collector" } }])).map((r) => r.label)).toEqual(["Katy", "Collector Street"]);
+    expect(KATY_TP.legend([])).toEqual([]);
   });
 });

@@ -23,31 +23,36 @@ import { LAYER_TIER, hierarchyProblems } from "../src/workspaces/site-planner/li
 import { GIS_SOURCES, auditRegistry } from "../src/shared/gis/sources.js";
 import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { TX_CITY_ZONING_LAYERS, relayedUrl } from "../src/workspaces/site-planner/lib/txCityZoningLayers.js";
-import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD } from "../src/workspaces/site-planner/lib/txCityZoning.js";
+import { RICHMOND, FULSHEAR, FULSHEAR_NEWER, STAFFORD, WEBSTER, WEBSTER_PD, KATY, KATY_FLU, KATY_TP } from "../src/workspaces/site-planner/lib/txCityZoning.js";
 
 beforeAll(() => _setServiceAreas(SERVICE_AREAS));
 
 const IDS = Object.keys(TX_CITY_ZONING_LAYERS);
-const REGION_OF = { richmond_zoning: "richmond", fulshear_zoning: "fulshear", fulshear_zoning_newer: "fulshear", stafford_zoning: "stafford", webster_zoning: "webster", webster_pd: "webster" };
+const REGION_OF = { richmond_zoning: "richmond", fulshear_zoning: "fulshear", fulshear_zoning_newer: "fulshear", stafford_zoning: "stafford", webster_zoning: "webster", webster_pd: "webster", katy_zoning: "katy", katy_flu: "katy", katy_thoroughfare: "katy" };
 /* Real points, each ON a vertex of that city's own zoning layer (sourceFixturesTxCityZoning.js). */
 const INSIDE = {
   richmond: { lat: 29.5822, lng: -95.76094 },
   fulshear: { lat: 29.69419, lng: -95.89986 },
   stafford: { lat: 29.61618, lng: -95.5574 },
   webster: { lat: 29.5203, lng: -95.10914 }, // the deepest point of an M1 polygon of the city's own layer
+  katy: { lat: 29.83364, lng: -95.81796 }, // the deepest point of Katy's M polygon (its own layer)
 };
 const ELSEWHERE = {
   sugarLandAcademy: { lat: 29.6122, lng: -95.6693 }, houston: { lat: 29.7604, lng: -95.3698 }, dallas: { lat: 32.7767, lng: -96.797 }, atlanta: { lat: 33.749, lng: -84.388 },
-  katy: { lat: 29.7858, lng: -95.8245 }, rosenberg: { lat: 29.5572, lng: -95.8087 }, sienna: { lat: 29.485, lng: -95.51 }, memphis: { lat: 35.1495, lng: -90.049 },
+  rosenberg: { lat: 29.5572, lng: -95.8087 }, brookshire: { lat: 29.786, lng: -95.957 }, sienna: { lat: 29.485, lng: -95.51 }, memphis: { lat: 35.1495, lng: -90.049 },
 };
 const scopeOf = (p) => ({ state: siteState(p), loc: p });
-const SERVICE_HOSTS = /(riku34rn6C8cs2t5|k1ZyjVw1fpWcwy7h|Ga5PFntoooL0Dlwu|cityofwebster\.com)/;
+const SERVICE_HOSTS = /(riku34rn6C8cs2t5|k1ZyjVw1fpWcwy7h|Ga5PFntoooL0Dlwu|ihZy0ZJt5Ea5u0dK|cityofwebster\.com)/;
 
 describe("each city's service area is a real boundary (TxGIO city limits)", () => {
   it.each(["richmond", "fulshear", "stafford", "webster"])("%s is built into the generated area data", (k) => {
     expect(SERVICE_AREAS[k]).toBeTruthy();
     expect(SERVICE_AREAS[k].polys.length).toBeGreaterThan(0);
     expect(SERVICE_AREAS[k].source).toMatch(/Texas_City_Boundaries/);
+  });
+  it("katy is the city's own limits and ETJ (Planning_Map layers 7 and 8)", () => {
+    expect(SERVICE_AREAS.katy.polys.length).toBeGreaterThan(0);
+    expect(SERVICE_AREAS.katy.source).toMatch(/Planning_Map layers 7 .* 8/);
   });
   it("contains its own zoning-layer vertices", () => {
     for (const [k, p] of Object.entries(INSIDE)) expect(inRegion(k, p), k).toBe(true);
@@ -74,7 +79,7 @@ describe("every row is registered whole and scoped to its city", () => {
     }
   });
   it("reads the public ArcGIS Online cities directly and Webster's own server ONLY through the same-origin relay (it sends no CORS header); URL from the registry row", () => {
-    const want = { richmond_zoning: "richmondZoning", fulshear_zoning: "fulshearZoning", fulshear_zoning_newer: "fulshearZoningNewer", stafford_zoning: "staffordZoning", webster_zoning: "websterZoning", webster_pd: "websterPlannedDev" };
+    const want = { richmond_zoning: "richmondZoning", fulshear_zoning: "fulshearZoning", fulshear_zoning_newer: "fulshearZoningNewer", stafford_zoning: "staffordZoning", webster_zoning: "websterZoning", webster_pd: "websterPlannedDev", katy_zoning: "katyZoning", katy_flu: "katyFutureLandUse", katy_thoroughfare: "katyThoroughfare" };
     for (const id of IDS) {
       const src = GIS_SOURCES[want[id]];
       expect(ALL_LAYERS[id].url, id).toBe(src.relay ? relayedUrl(src.serviceUrl) : src.serviceUrl);
@@ -94,18 +99,20 @@ describe("every row is registered whole and scoped to its city", () => {
   it("carries the full row the panel reads; names say the city; legend and card are the city's", () => {
     for (const id of IDS) {
       const c = ALL_LAYERS[id];
-      expect(c.role, id).toBe("area");
-      expect(c.group, id).toBe("jurisdiction");
-      expect(c.label, id).toMatch(/^(Richmond|Fulshear|Stafford|Webster) (Zoning|Planned Developments)/);
+      const street = id === "katy_thoroughfare"; // a street line, in the Access group like Sugar Land's thoroughfare plan
+      expect(c.role, id).toBe(street ? "line" : "area");
+      expect(c.group, id).toBe(street ? "access" : "jurisdiction");
+      expect(c.label, id).toMatch(/^(Richmond|Fulshear|Stafford|Webster|Katy) (Zoning|Planned Developments|Future Land Use|Thoroughfare Plan)/);
       expect(c.source, id).toBeTruthy();
       expect(c.note, id).toBeTruthy();
-      expect(c.infoCaveat, id).toMatch(/limits only/);
+      expect(c.infoCaveat, id).toBeTruthy();
+      if (/_zoning/.test(id) || id === "webster_pd") expect(c.infoCaveat, id).toMatch(/limits only/);
       expect(Number.isFinite(c.minZoom), id).toBe(true);
       expect(typeof c.identifyCard, id).toBe("function");
       expect(typeof c.viewLegend, id).toBe("function");
       expect(typeof c.styleFn, id).toBe("function");
       expect(c.canvasIdentify, id).toBe(true);
-      expect(c.lineLabel.format, id).toBeTypeOf("function");
+      if (id !== "katy_thoroughfare") expect(c.lineLabel.format, id).toBeTypeOf("function"); // a street line carries no on-map code
     }
   });
   it("each row prints the field its own layer holds the code in", () => {
@@ -121,6 +128,29 @@ describe("every row is registered whole and scoped to its city", () => {
     expect(ALL_LAYERS.fulshear_zoning.styleFn).toBe(FULSHEAR.style);
     expect(ALL_LAYERS.fulshear_zoning_newer.styleFn).toBe(FULSHEAR_NEWER.style);
     expect(ALL_LAYERS.stafford_zoning.styleFn).toBe(STAFFORD.style);
+    expect(ALL_LAYERS.katy_zoning.lineLabel.field).toBe("ZONECODE");
+    expect(ALL_LAYERS.katy_flu.lineLabel.field).toBe("FLU");
+    expect(ALL_LAYERS.katy_zoning.styleFn).toBe(KATY.style);
+    expect(ALL_LAYERS.katy_flu.styleFn).toBe(KATY_FLU.style);
+    expect(ALL_LAYERS.katy_thoroughfare.styleFn).toBe(KATY_TP.style);
+  });
+  it("Katy: three rows of ONE service (layers 11, 15, 25), region `katy`; the future-land-use row never asks for owner, address or parcel number", () => {
+    expect(GIS_SOURCES.katyZoning.serviceUrl).toMatch(/Planning_Map\/FeatureServer\/11$/);
+    expect(GIS_SOURCES.katyFutureLandUse.serviceUrl).toMatch(/Planning_Map\/FeatureServer\/15$/);
+    expect(GIS_SOURCES.katyThoroughfare.serviceUrl).toMatch(/Planning_Map\/FeatureServer\/25$/);
+    expect(ALL_LAYERS.katy_flu.fields).toEqual(["OBJECTID", "FLU", "Jurisdiction"]);
+    expect(ALL_LAYERS.katy_flu.where).toBe("Jurisdiction <> 'NOT IN'");
+    expect(ALL_LAYERS.katy_thoroughfare.where).toMatch(/^ThoroClass IN \('Interstate Freeway','Major','Collector','Proposed Major','Proposed Collector'\)$/);
+    expect(ALL_LAYERS.katy_thoroughfare.role).toBe("line");
+  });
+  it("Katy's legends are headed by Katy with one row per class in view (#50)", () => {
+    expect(ALL_LAYERS.katy_zoning.viewLegend([{ properties: { ZONECODE: "M", ZONDESC: "Industrial District" } }, { properties: { ZONECODE: "M", ZONDESC: "Industrial District" } }]))
+      .toEqual([{ heading: true, label: "Katy" }, { label: "M · Industrial District", color: expect.any(String), row: true }]);
+    const fl = ALL_LAYERS.katy_flu.viewLegend([{ properties: { FLU: "GC" } }]);
+    expect(fl[0]).toEqual({ heading: true, label: "Katy" });
+    expect(fl[1]).toMatchObject({ label: "GC · General Commercial", color: "#f26661" });
+    const tp = ALL_LAYERS.katy_thoroughfare.viewLegend([{ properties: { ThoroClass: "Proposed Major" } }, { properties: { ThoroClass: "Major" } }]);
+    expect(tp.map((r) => r.label)).toEqual(["Katy", "Major Street", "Proposed Major Street"]);
   });
   it("the legend a row publishes is headed by its city (#50)", () => {
     const lg = ALL_LAYERS.stafford_zoning.viewLegend([{ properties: { ZONE_CODE: "RCT", ZONE_DESCR: "RESIDENTIAL, COMMERCIAL, & TECHNOLOGY DISTRICT" } }]);
@@ -139,7 +169,7 @@ describe("every row is registered whole and scoped to its city", () => {
     for (const id of IDS) {
       const f = ALL_LAYERS[id].fields;
       expect(f.some((x) => /^(OBJECTID(_1)?|FID)$/i.test(x)), id).toBe(true);
-      expect(f, id).toContain(ALL_LAYERS[id].lineLabel.field);
+      expect(f, id).toContain(id === "katy_thoroughfare" ? "ThoroClass" : ALL_LAYERS[id].lineLabel.field);
     }
     expect(ALL_LAYERS.webster_zoning.fields).toContain("OBJECTID_1"); // Webster's object-id field (layer 0 also holds a plain integer called OBJECTID)
     expect(ALL_LAYERS.webster_pd.fields).toContain("OBJECTID_1");
@@ -148,7 +178,7 @@ describe("every row is registered whole and scoped to its city", () => {
   });
   it("is in the verified GIS registry with fixtures and notes (the weekly drift job asks about it)", () => {
     expect(auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS).problems).toEqual([]);
-    for (const k of ["richmondZoning", "fulshearZoning", "fulshearZoningNewer", "staffordZoning", "websterZoning", "websterPlannedDev"]) {
+    for (const k of ["richmondZoning", "fulshearZoning", "fulshearZoningNewer", "staffordZoning", "websterZoning", "websterPlannedDev", "katyZoning", "katyFutureLandUse", "katyThoroughfare"]) {
       expect(GIS_SOURCES[k].states).toEqual(["TX"]);
       expect(SOURCE_FIXTURES[k].fixtures.length, k).toBeGreaterThanOrEqual(2);
     }
@@ -192,6 +222,15 @@ describe("requests actually issued — a city's URL fires inside that city and n
     expect((await run(INSIDE.richmond)).built).toEqual([GIS_SOURCES.richmondZoning.serviceUrl]);
     expect((await run(INSIDE.fulshear)).built.sort()).toEqual([GIS_SOURCES.fulshearZoning.serviceUrl, GIS_SOURCES.fulshearZoningNewer.serviceUrl].sort());
     expect((await run(INSIDE.stafford)).built).toEqual([GIS_SOURCES.staffordZoning.serviceUrl]);
+  });
+  it("inside Katy all three of Katy's layers are built, and only those", async () => {
+    expect((await run(INSIDE.katy)).built.sort()).toEqual([GIS_SOURCES.katyZoning.serviceUrl, GIS_SOURCES.katyFutureLandUse.serviceUrl, GIS_SOURCES.katyThoroughfare.serviceUrl].sort());
+  });
+  it("Katy's own points: ETJ ground counts, Brookshire and Houston do not", () => {
+    expect(inRegion("katy", { lat: 29.78851, lng: -95.80908 })).toBe(true); // a C-2 polygon
+    expect(inRegion("katy", { lat: 29.7858, lng: -95.8245 })).toBe(true);
+    expect(inRegion("katy", ELSEWHERE.brookshire)).toBe(false);
+    expect(inRegion("katy", ELSEWHERE.houston)).toBe(false);
   });
   it.each(Object.entries(ELSEWHERE))("at %s: zero requests to any of the cities' services", async (_k, p) => {
     const r = await run(p);
