@@ -85,7 +85,7 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
     // apart — the actual bug being guarded against is "the floor moved (or the threshold crept up)
     // and nobody noticed the two no longer agree," which a pair of independent hardcoded checks
     // would not catch if both were edited to still (wrongly) agree with each other.
-    const floorMatch = seq.match(/ROW_H = Math\.min\(34, Math\.max\((\d+),/);
+    const floorMatch = seq.match(/(?:ROW_H = |setRowH\()Math\.min\(34, Math\.max\((\d+),/);
     const lineHMatch = seq.match(/const DEPCELL_LINE_H = (\d+);/);
     expect(floorMatch, "ROW_H's floor clamp must be findable in source").toBeTruthy();
     expect(lineHMatch, "DEPCELL_LINE_H must be findable in source").toBeTruthy();
