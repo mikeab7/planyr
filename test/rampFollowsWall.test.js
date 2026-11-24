@@ -38,13 +38,22 @@ describe("the owner's Building 4 — the stranded pair heals on open", () => {
     expect(ramps(els).filter((r) => r.ramp.at > 784).map((r) => r.id).sort()).toEqual(["e1455641iklvem", "e1455642iklvem"]);
     expect(onWall(els, B4)).toBe(false);
   });
-  it("the pair is re-seated by the end rule onto the existing 718 pair and dropped: one ramp at each corner of each dock wall", () => {
+  it("the stranded pair is re-seated FLUSH against the end it overshot (owner 2026-11-24: against the bump-out or the building end), clear of the 718 pair", () => {
+    // Before 2026-11-24 the heal snapped to the corner door module (718) and the pair landed on the 718 pair and was dropped. A ramp now defaults flush
+    // against the end (784 − 8 = 776), which is clear of the 718 pair, so nothing is dropped and every ramp is on the wall.
     const dropped = [];
     const out = write(els, els, els, b4ctx({ onDrop: (id) => dropped.push(id) }));
-    expect(dropped.sort()).toEqual(["e1455641iklvem", "e1455642iklvem"]);
-    expect(ramps(out).map((r) => `${r.ramp.side}:${r.ramp.at}`).sort()).toEqual(["left:68.16", "left:718", "right:68.16", "right:718"]);
+    expect(dropped).toEqual([]);
+    expect(ramps(out).map((r) => `${r.ramp.side}:${r.ramp.at}`).sort()).toEqual(["left:68.16", "left:718", "left:776", "right:68.16", "right:718", "right:776"]);
     expect(onWall(out, B4)).toBe(true);
     expect(out.find((e) => e.id === "e1455640iklvem")).toBe(els.find((e) => e.id === "e1455640iklvem"));   // the ramps already on the wall are untouched
+  });
+  it("…and a stranded ramp whose flush spot is taken by a ramp already there is dropped (the overlap rule is unchanged)", () => {
+    const withFlush = [B4, mk("f", B4, "right", 776), mk("s", B4, "right", 850.84)];
+    const dropped = [];
+    const out = write(withFlush, withFlush, withFlush, b4ctx({ onDrop: (id) => dropped.push(id) }));
+    expect(dropped).toEqual(["s"]);
+    expect(ramps(out).map((r) => r.id)).toEqual(["f"]);
   });
   it("the heal is a fixed point and identity-stable once healed", () => {
     const once = write(els, els, els, b4ctx()), again = write(once, once, once, b4ctx());
@@ -129,15 +138,13 @@ describe("shortening / lengthening a dock wall carries the ramps near its ends",
 });
 
 describe("one answer for the end spot: the '+' button and the heal", () => {
-  it("pickRampSpot with and without `taken` agrees with the corner module, and refuses a taken one", () => {
-    const run = B4_RUN;
-    const end = pickRampSpot({ run, L: 784, W: 16, where: "end" }), start = pickRampSpot({ run, L: 784, W: 16, where: "start" });
-    expect(end).toBe(718); expect(start).toBe(68.16);
-    // …and over the REAL door grid (a plain 784-ft wall) the same function lands each end on a clear module inside the wall
-    const real = rampDoorRunOf(B4, "right", [B4], settings), e2 = pickRampSpot({ run: real, L: 784, W: 16, where: "end" });
-    expect(e2).toBeGreaterThan(700); expect(e2 + 8).toBeLessThanOrEqual(784 + 0.01);
-    const taken = [rampSpan(newRampRecord("right", 718), { dockHeightIn: IN })];
-    expect(pickRampSpot({ run, L: 784, W: 16, where: "end", taken })).not.toBe(718);
+  it("pickRampSpot puts the ramp FLUSH against the wall end (no bump-out) and pushes past a ramp already there", () => {
+    expect(pickRampSpot({ L: 784, W: 16, where: "end" })).toBe(776);
+    expect(pickRampSpot({ L: 784, W: 16, where: "start" })).toBe(8);
+    const taken = [rampSpan(newRampRecord("right", 776), { dockHeightIn: IN })];
+    expect(pickRampSpot({ L: 784, W: 16, where: "end", taken })).toBe(760);          // flush against THAT ramp
+    expect(pickRampSpot({ L: 784, W: 16, where: "start", taken })).toBe(8);          // the other end is free
+    expect(pickRampSpot({ L: 20, W: 16, where: "end", taken: [{ u0: 0, u1: 10 }] })).toBeNull();
   });
   it("SitePlanner wires the seam: reseatRamps in setEls, the heal effect, the tombstone flush, and planRampAt through pickRampSpot", () => {
     const src = plannerSource();
@@ -145,6 +152,6 @@ describe("one answer for the end spot: the '+' button and the heal", () => {
     expect(readFileSync(new URL("../src/workspaces/site-planner/lib/elsSeam.js", import.meta.url), "utf8")).toMatch(/refitRamps\(reseatRamps\(gestureBase \|\| prev, prev, next, rampSeatCtx\(\)\)/);
     expect(src).toMatch(/reseatRamps\(prev, prev, prev, rampSeatCtx\(\)\)/);
     expect(src).toMatch(/rampDropQueue\.current/);
-    expect(src).toMatch(/pickRampSpot\(\{ run: isDock/);
+    expect(src).toMatch(/pickRampSpot\(\{ L: wallFrame\(b, side\)\.L, W, where, taken, bumps: bumpSpansOnWall\(els, b, side\) \}\)/);
   });
 });

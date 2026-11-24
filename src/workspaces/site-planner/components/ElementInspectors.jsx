@@ -13,7 +13,7 @@ import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { TYPE, toHex6 } from "../lib/planStyle.js";
 import { offsetPolygon } from "../lib/parcelOffset.js";
 import { buildingNumbers } from "../lib/siteModel.js";
-import { rampSpan, rampLengthFt, rampRiseFt, rampLayout, rampFlags, wallFrame, moduleStops, fitAlongTheWall } from "../lib/driveInRamp.js";
+import { rampSpan, rampLengthFt, rampRiseFt, rampLayout, rampFlags, wallFrame, moduleStops, fitAlongTheWall, bumpSpansOnWall, flushEndOf, flushRampAt } from "../lib/driveInRamp.js";
 import { SQFT_PER_ACRE, polyArea, ringOf, isCenterlineRoad, roadStripRing } from "../lib/siteGeometry.js";
 import { hostAxisExtents } from "../lib/dogEar.js";
 import { calloutStyle } from "../lib/calloutStyle.js";
@@ -368,7 +368,11 @@ export const DriveInRampInspector = memo(function DriveInRampInspector({
                   onPatch={(patch) => {
                     // turning it ALONG the wall, or flipping which way it runs, keeps the footprint on the wall (a door position that would overrun it slides in)
                     const turning = patch.layout === "along" || (rampLayout(rec) === "along" && patch.dir != null);
-                    const fit = turning ? fitAlongTheWall({ ...rec, ...patch }, { L: wallFrame(host, rec.side).L, stops: moduleStops(doorsNow), dockHeightIn: rampDockIn, keepDir: patch.dir != null ? patch.dir : null }) : null;
+                    // a ramp flush against the bump-out / building end (the "+" default, owner 2026-11-24) stays flush against it when turned either way
+                    const L = wallFrame(host, rec.side).L, bumps = bumpSpansOnWall(els, host, rec.side);
+                    const flushEnd = flushEndOf(rec, { L, bumps, dockHeightIn: rampDockIn });
+                    const fit = turning ? fitAlongTheWall({ ...rec, ...patch }, { L, stops: moduleStops(doorsNow), dockHeightIn: rampDockIn, keepDir: patch.dir != null ? patch.dir : null, bumps, flushEnd })
+                      : (patch.layout === "straight" && rampLayout(rec) === "along" && flushEnd ? { at: flushRampAt({ ...rec, ...patch }, { L, bumps, where: flushEnd, dockHeightIn: rampDockIn }) } : null);
                     setRampPatch(selEl.id, fit ? { ...patch, ...fit } : patch);
                   }}
                   onAt={(n) => { const stops = moduleStops(doorsNow); const want = Number.isFinite(n) ? n : rec.at; setRampPatch(selEl.id, { at: Math.round((stops.length ? stops.reduce((b, v) => (Math.abs(v - want) < Math.abs(b - want) ? v : b), stops[0]) : want) * 100) / 100 }); }}

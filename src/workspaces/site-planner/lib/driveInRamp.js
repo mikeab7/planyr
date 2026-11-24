@@ -198,10 +198,13 @@ export function doorsAfterRamps(doors, doorLeafFt, spans) {
 /** Turning a ramp ALONG the wall (or flipping which way it runs): keep the footprint ON the wall. Picks the direction toward the NEARER wall end (so the ramp
  *  lies between its door and the corner — the way a side ramp is built) unless the caller names one, then slides the door position into the range that keeps the
  *  whole footprint within the wall, snapped to a door module. Returns the patch { dir, at }; when the wall is too short for the ramp the position is only clamped. */
-export function fitAlongTheWall(ramp, { L, stops = [], dockHeightIn, keepDir = null } = {}) {
+export function fitAlongTheWall(ramp, { L, stops = [], dockHeightIn, keepDir = null, bumps = [], flushEnd = null } = {}) {
   const len = rampLengthFt(ramp, dockHeightIn), W = rampWidthFt(ramp), at = num(ramp.at) ?? L / 2;
-  const dir = keepDir === 1 || keepDir === -1 ? keepDir : (at <= L / 2 ? -1 : 1);
-  const lo = dir > 0 ? W / 2 : len - W / 2, hi = dir > 0 ? L + W / 2 - len : L - W / 2;
+  const { e0, e1 } = wallFreeEnds(L, bumps);
+  const dir = keepDir === 1 || keepDir === -1 ? keepDir : flushEnd === "start" ? -1 : flushEnd === "end" ? 1 : (at <= L / 2 ? -1 : 1);
+  // a ramp that sat flush against the bump-out / wall end (the "+" default) STAYS flush against it when turned (owner 2026-11-24)
+  if (flushEnd === "start" || flushEnd === "end") return { dir, at: flushRampAt({ ...ramp, layout: "along", dir }, { L, bumps, where: flushEnd, dockHeightIn }) };
+  const lo = dir > 0 ? e0 + W / 2 : e0 + len - W / 2, hi = dir > 0 ? e1 + W / 2 - len : e1 - W / 2;
   if (!(lo <= hi)) return { dir, at: r2(clamp(at, Math.min(lo, hi), Math.max(lo, hi))) };
   const inRange = (stops || []).filter((v) => v >= lo - 1e-6 && v <= hi + 1e-6);
   const want = clamp(at, lo, hi);
@@ -280,7 +283,7 @@ export function refitRamps(els, dockSidesOf, dockHeightIn) {
  *   1. a ramp in the NEARER half of its wall (by the wall length it was placed against) is anchored to that end and keeps its distance from it, so a ramp
  *      near the START stays at the same `at`, one near the END moves with the end; it is then clamped so its footprint is on the wall (a mid-wall ramp that
  *      no longer fits is clamped; a wall shorter than the ramp centres it);
- *   2. a ramp whose DOOR CENTRE is past a wall end (no length history — a plan opened with one already stranded) goes to the door-module spot at the end it
+ *   2. a ramp whose DOOR CENTRE is past a wall end (no length history — a plan opened with one already stranded) goes FLUSH against the bump-out / wall end it
  *      overshoots — the very spot the "+" beside that corner would pick (`pickRampSpot`), so the heal and the button cannot disagree;
  *   3. a re-seated ramp that would sit on another ramp of the same wall is DROPPED (its door modules come back, exactly as Delete ramp does — the belt is
  *      derived from the ramps that exist). Un-moved ramps are never dropped.
@@ -291,18 +294,52 @@ const isRampEl = (e) => !!e && e.type === "driveInRamp" && !!e.ramp && isRampSid
 const plainBuilding = (h) => !!h && h.type === "building" && !h.points && Number.isFinite(h.w) && Number.isFinite(h.h);
 export const wallLengthOf = (host, side) => (side === "top" || side === "bottom" ? host.w : host.h);
 
-/** The door-module position for a ramp at one END of a wall — the ONE answer the "+" button (`taken` = the ramps already there) and the heal (no `taken`) read.
- *  `run` = the wall's door run WITHOUT ramps ({ startF, endF, doors }), or null for a marker wall. Null when nothing clear fits. */
-export function pickRampSpot({ run = null, L, W, where, taken = [] }) {
-  const lo = run ? run.startF : 0, hi = run ? run.endF : L;
-  const clear = (at) => at - W / 2 >= lo - 0.01 && at + W / 2 <= hi + 0.01 && taken.every((t) => at + W / 2 <= t.u0 + 0.01 || at - W / 2 >= t.u1 - 0.01);
-  const want = where === "end" ? hi - W / 2 : lo + W / 2;
-  const stops = run ? moduleStops(run.doors) : [];
-  const grid = [];
-  for (let k = 0; k <= Math.ceil(L / 6); k++) { grid.push(want + k * 6); if (k) grid.push(want - k * 6); }
-  const cands = [...stops.slice().sort((a, c) => Math.abs(a - want) - Math.abs(c - want)), ...(stops.length ? [] : grid)];
-  const found = cands.find(clear);
-  return found == null ? null : found;
+/* ---- a new ramp sits FLUSH against the bump-out, or the end of the building when there is none (owner 2026-11-24) ----------------------------
+ * "the ramp should default against the bumpout or end of the building if theres no bumpout". Before, the "+" snapped the door to the nearest dock-door
+ * module from the door run's start, which left a gap between the ramp and the bump-out (or the corner). Now the corner "+" puts the footprint's near
+ * edge ON the bump-out's inner edge (or the wall end), for either layout, and the stranded-ramp heal lands in the very same spot. */
+const DOGEAR_ALONG_DEFAULT = 55;                       // = dogEar.js DOGEAR_W (kept literal: this module stays import-light)
+/** The along-wall spans [{ u0, u1 }] of the corner bump-outs on one wall of `host` (sign −1 = the wall's START corner, +1 = its END corner). */
+export function bumpSpansOnWall(els, host, side) {
+  if (!Array.isArray(els) || !host) return [];
+  const L = wallLengthOf(host, side);
+  return els.filter((x) => x && x.attachedTo === host.id && x.dogEar && x.dogEar.side === side).map((x) => {
+    const a = Math.max(1, Math.min(num(x.dogEar.along) ?? DOGEAR_ALONG_DEFAULT, L));
+    return x.dogEar.sign < 0 ? { u0: 0, u1: a } : { u0: L - a, u1: L };
+  });
+}
+/** The free stretch of a wall between its two end obstacles (bump-outs): { e0, e1 }. */
+export function wallFreeEnds(L, bumps = []) {
+  let e0 = 0, e1 = L;
+  for (const b of bumps || []) { if (b.u0 <= 0.01) e0 = Math.max(e0, b.u1); if (b.u1 >= L - 0.01) e1 = Math.min(e1, b.u0); }
+  return { e0, e1 };
+}
+/** The door position `at` that puts THIS ramp's footprint flush against the near obstacle at `where` ("start" | "end"), any layout. */
+export function flushRampAt(ramp, { L, bumps = [], where, marker = false, dockHeightIn } = {}) {
+  const { e0, e1 } = wallFreeEnds(L, bumps), z = rampSpan({ ...ramp, at: 0 }, { marker, dockHeightIn });
+  return r2(where === "end" ? e1 - z.u1 : e0 - z.u0);
+}
+/** Which end the footprint is flush against now ("start" | "end" | null), within half a foot. */
+export function flushEndOf(ramp, { L, bumps = [], marker = false, dockHeightIn } = {}) {
+  const { e0, e1 } = wallFreeEnds(L, bumps), sp = rampSpan(ramp, { marker, dockHeightIn });
+  if (Math.abs(sp.u0 - e0) <= 0.5) return "start";
+  if (Math.abs(sp.u1 - e1) <= 0.5) return "end";
+  return null;
+}
+/** The spot for a NEW ramp of along-wall width W at one END of a wall — the ONE answer the corner "+" (`taken` = the ramps already on that wall) and
+ *  the stranded heal read: flush against the bump-out (`bumps`) or the wall end; a ramp already there pushes it along to sit flush against THAT ramp.
+ *  Null when nothing clear fits between the end obstacles. */
+export function pickRampSpot({ L, W, where, taken = [], bumps = [] }) {
+  const { e0, e1 } = wallFreeEnds(L, bumps);
+  const sorted = (taken || []).slice().sort((a, b) => (where === "end" ? b.u1 - a.u1 : a.u0 - b.u0));
+  let at = where === "end" ? e1 - W / 2 : e0 + W / 2;
+  for (let guard = 0; guard <= sorted.length; guard++) {
+    const hit = sorted.find((t) => Math.min(at + W / 2, t.u1) - Math.max(at - W / 2, t.u0) > RAMP_OVERLAP_FT);
+    if (!hit) break;
+    at = where === "end" ? hit.u0 - W / 2 : hit.u1 + W / 2;
+  }
+  if (at - W / 2 < e0 - 0.01 || at + W / 2 > e1 + 0.01) return null;
+  return r2(at);
 }
 /** The door positions that keep the whole footprint on a wall of length L. */
 export function rampFitRange(ramp, L, opt = {}) {
@@ -311,11 +348,11 @@ export function rampFitRange(ramp, L, opt = {}) {
 }
 const fitTo = (at, range) => (range.lo <= range.hi ? clamp(at, range.lo, range.hi) : (range.lo + range.hi) / 2);
 
-/** `ctx`: { dockSidesOf(host) → sides, dockHeightIn, runOf(host, side, els) → the wall's door run without ramps (optional: without it the heal clamps),
+/** `ctx`: { dockSidesOf(host) → sides, dockHeightIn, (runOf is no longer read: the heal lands flush, like the "+"),
  *  onDrop(id) (optional: told of every ramp dropped) }. Returns `next` itself when nothing moved. */
 export function reseatRamps(base, prev, next, ctx = {}) {
   if (!Array.isArray(next) || !next.some(isRampEl)) return next;
-  const { dockSidesOf, dockHeightIn, runOf, onDrop } = ctx;
+  const { dockSidesOf, dockHeightIn, onDrop } = ctx;
   const idx = (a) => { const m = new Map(); if (Array.isArray(a)) for (const e of a) if (e && (e.type === "driveInRamp" || e.type === "building")) m.set(e.id, e); return m; };   // only what is read: ramps and hosts (this runs at every element write)
   const nextBy = idx(next), prevBy = prev === next ? nextBy : idx(prev), baseBy = base === prev ? prevBy : base === next ? nextBy : idx(base);
   const moved = new Map();                               // id → new `at`
@@ -335,8 +372,7 @@ export function reseatRamps(base, prev, next, ctx = {}) {
     }
     if (target == null && (at < -0.01 || at > L + 0.01)) {   // stranded: the door centre is past a wall end, and there is no length history to follow
       const W = marker ? doorSizeOf(e.ramp).w : rampWidthFt(e.ramp);
-      const run = !marker && runOf ? runOf(host, side, next) : null;
-      const spot = pickRampSpot({ run, L, W, where: at > L ? "end" : "start" });
+      const spot = pickRampSpot({ L, W, where: at > L ? "end" : "start", bumps: bumpSpansOnWall(next, host, side) });
       target = fitTo(spot == null ? (at > L ? L : 0) : spot, range);
     }
     if (target != null && !same(target, at)) moved.set(e.id, r2(target));
