@@ -2544,7 +2544,7 @@ const JURISDICTION_LAYERS_RAW = {
   waller: {
     label: "Waller County",
     layers: {},
-    note: "No public GIS is published for Waller County. FEMA, wetlands and TxRRC layers above still apply.",
+    note: "Waller County publishes its own ETJ, city-limit and drainage maps (ArcGIS Online); the site's jurisdiction reads them. FEMA, wetlands and TxRRC layers above still apply.",
   },
 };
 

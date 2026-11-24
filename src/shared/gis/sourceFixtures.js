@@ -978,6 +978,27 @@ export const SOURCE_FIXTURES = {
     { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
   ],
   },
+  /* Waller County (2026-11-22) — points read live from the county's own layers. */
+  etj_waller: {
+  fixtures: [
+    { label: "Brookshire ETJ (Donigan Rd — H-GAC answers nothing here)", point: [-95.98, 29.78], expectMinCount: 1 },
+    { label: "Houston ETJ (H-GAC agrees)", point: [-95.86, 29.79], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris — outside Waller)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  county_waller: {
+  fixtures: [
+    { label: "Brookshire area (inside Waller County)", point: [-95.98, 29.78], expectMinCount: 1 },
+    { label: "Downtown Houston (Harris County — outside)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
+  city_waller: {
+  fixtures: [
+    // No inside-limits point was measured in the sweep brief (only "agrees with TxGIO at the Katy and Brookshire points"); the live check adds one.
+    { label: "Donigan Rd Brookshire-area ETJ point (outside the city limits)", point: [-95.98, 29.78], expectMinCount: 0 },
+    { label: "Downtown Houston (outside Waller)", point: [-95.37, 29.76], expectMinCount: 0 },
+  ],
+  },
   etj_harris: {
   fixtures: [
     { label: "Houston ETJ, north Harris (the owner's sweep point)", point: [-95.75, 30.05], expectMinCount: 1 },

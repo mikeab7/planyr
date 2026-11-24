@@ -1418,6 +1418,60 @@ export const GIS_SOURCES = {
     availability: "live",
     lastVerified: "2026-11-12",
   },
+  /* ⛔ Waller County (sweep 2026-11-22) — THE COUNTY'S OWN ETJ + CITY-LIMIT TABLES, same pattern as Fort Bend. H-GAC's mosaic has no Brookshire ETJ polygon
+   * (a site at 29.78, -95.98 read "unincorporated") and TxGIO has no city there; Waller County's own AGOL org (same one as BKDD) answers BROOKSHIRE ETJ.
+   * Both CORS-open from a planyr.io origin (measured 2026-11-22). `ETJ_WC/FeatureServer/3`: 10 polygons, edited 2026-09-02, `Name` is upper case WITH an
+   * " ETJ" suffix. `City_Limits_Updated/FeatureServer/0`: 7 cities, edited 2025-11-06 (its name column was not recorded in the brief; the jurisdiction row
+   * reads the first of several likely columns — see `nameFallbackFields`; the live check confirms which). */
+  etj_waller: {
+    key: "etj_waller",
+    label: "ETJ — Waller County (county GIS)",
+    provider: "Waller County GIS (ArcGIS Online)",
+    serviceUrl: "https://services1.arcgis.com/BqVKz0o32DERqyE4/arcgis/rest/services/ETJ_WC/FeatureServer/3",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Name" },
+    nameStrip: ["\\s+ETJ$"],
+    coverage: "metro",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-22",
+    dataLastEdited: "2026-09-02",
+    roster: ["PRAIRIE VIEW", "SIMONTON", "PINE ISLAND", "HEMPSTEAD", "KATY", "FULSHEAR", "BROOKSHIRE", "PATTISON", "WALLER", "HOUSTON"],
+    rosterCheckedAt: "2026-11-22",
+  },
+  /* The Waller County line, used ONLY to cut H-GAC's polygons out of the drawn ETJ layer inside the county (the drawn half of `etj_waller`'s
+   * `supersedes`). It is the statewide TxDOT county layer filtered to Waller (`where`), so no second county service is invented. */
+  county_waller: {
+    key: "county_waller",
+    label: "County line — Waller County (TxDOT statewide, filtered)",
+    provider: "TxDOT TPP (statewide)",
+    serviceUrl: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CNTY_NM" },
+    where: "UPPER(CNTY_NM) = 'WALLER'",
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-22",
+  },
+  city_waller: {
+    key: "city_waller",
+    label: "City limits — Waller County (county GIS)",
+    provider: "Waller County GIS (ArcGIS Online)",
+    serviceUrl: "https://services1.arcgis.com/BqVKz0o32DERqyE4/arcgis/rest/services/City_Limits_Updated/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CityName" },
+    /* The county's table is its incorporated limits (7 cities); no class column was recorded, so it is read as full-purpose limits like Fort Bend's. */
+    fullPurposeOnly: true,
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-11-22",
+    dataLastEdited: "2025-11-06",
+  },
   /* ⛔ NEW-2 (Harris, 2026-11-12) — HARRIS COUNTY'S OWN ETJ TABLE, the fallback when H-GAC answers nothing. The county GIS office
    * (`gis.hctx.net`, layer description: "obtained from ITC Repository database, H-GAC, City of Katy GIS Hub, and FOIA requests through Deer Park and
    * Laporte") publishes eight cities' ETJ across Harris County: BAYTOWN, DEER PARK, HOUSTON, KATY, LA PORTE, PASADENA, PEARLAND, WALLER. CORS-clean
@@ -2435,7 +2489,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], etj_fortbend: ["TX"], etj_release_fortbend: ["TX"], city_fortbend: ["TX"], county_fortbend: ["TX"], etj_harris: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], etj_fortbend: ["TX"], etj_waller: ["TX"], county_waller: ["TX"], city_waller: ["TX"], etj_release_fortbend: ["TX"], city_fortbend: ["TX"], county_fortbend: ["TX"], etj_harris: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -2671,6 +2725,9 @@ export const SOURCE_FIXTURE_REACH = {
   etj_release_fortbend: ["regional", "Fort Bend County's recorded ETJ releases and removals — one county."],
   county_fortbend: ["regional", "The Fort Bend County line — one polygon."],
   city_fortbend: ["regional", "Fort Bend County's city-limits table — one county."],
+  etj_waller: ["regional", "Waller County's City ETJs table — one county."],
+  county_waller: ["regional", "The Waller County line — one polygon."],
+  city_waller: ["regional", "Waller County's city-limits table — one county."],
   etj_harris: ["regional", "Harris County's City ETJ table — one county; eight cities."],
   etj_baytown: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
   // NEW-1 (2026-11-12) — Chambers County. Mont Belvieu's own ETJ is one polygon a few km across; its copy of the neighbours' lines is three small rings (Beach City, Cove, Old River-Winfree).

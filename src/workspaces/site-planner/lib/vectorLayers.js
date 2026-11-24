@@ -1148,7 +1148,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
       if (targets.length) {
         let county = null;
         try {
-          const j = await opts.fetchJson(buildQueryUrl(row.supersedeClipUrl + "/query", { where: "1=1", outFields: "OBJECTID", returnGeometry: "true", outSR: 4326, geometryPrecision: 4, maxAllowableOffset: 0.0002, f: "json" }));
+          const j = await opts.fetchJson(buildQueryUrl(row.supersedeClipUrl + "/query", { where: row.supersedeClipWhere || "1=1", outFields: "OBJECTID", returnGeometry: "true", outSR: 4326, geometryPrecision: 4, maxAllowableOffset: 0.0002, f: "json" }));
           county = (j && !j.error && j.features) || null;
         } catch (_) { county = null; }
         if (county && county.length) for (const t of targets) outs[t] = cutEtjBy(outs[t], county, { ref: refOf }).features;
