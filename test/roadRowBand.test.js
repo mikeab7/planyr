@@ -1,3 +1,5 @@
+// Pure logic for the road right-of-way band (B2671334). The in-browser counterpart is ui-audit/verify-road-row-band.mjs
+// (underlay order, grips, typing, drag + undo, export), run against a local preview build.
 import { describe, it, expect } from "vitest";
 import {
   makeXSection, xsectionFromRoad, designatedRowSides, designatedRowFt, rowShiftOf, withRowSide, withRowSides, withRowWidth, rowMarginsBySide, rowMarginFt,

@@ -57,6 +57,7 @@ await page.screenshot({ path: OUT + "01-three-roads.png" });
 const read = () => page.evaluate(() => {
   const u = document.querySelector('[data-testid="row-underlay"]');
   const svg = document.querySelector('[data-testid="planner-canvas"] svg') || document.querySelector("svg");
+  // el-tier: the FIRST drawn element node is the yardstick for paint order (the underlay must precede it), not a census.
   const firstEl = document.querySelector("[data-el-id]");
   const bands = u ? [...u.querySelectorAll("[data-row-band]")].map((p) => p.getAttribute("data-row-band")) : [];
   const lines = {};
