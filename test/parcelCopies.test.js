@@ -164,3 +164,10 @@ describe("a live-date copy county (Fort Bend) shows the date the service reports
     expect(src).not.toMatch(/is refreshed daily/);
   });
 });
+
+describe("NEW-4 (Meriwether GA, 2026-11) — a 2023 copy from an unidentified account says so", () => {
+  it("is an unverified copy row dated 2023-06, never labelled as the county's own", () => {
+    expect(COUNTY_VERIFICATION.ga_meriwether.publisher).toBe("unverified");
+    expect(PARCEL_COPIES.ga_meriwether).toEqual([null, "2023-06"]);
+  });
+});

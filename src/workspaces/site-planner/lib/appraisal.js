@@ -459,6 +459,8 @@ export const APPR_FIELDS = [
   [/^wd_?link$/i, "Warranty deed"],
   [/^fema_?link$/i, "FEMA map"],
   [/^tax_?info$/i, "Tax info"],
+  // NEW-3 (Meriwether GA, 2026-11) — qPublic (Schneider) per-parcel report link, shown as a short "Assessor" link (#45: never the raw URL; `InfoRow` renders an http(s) value as a link).
+  [/^q_?pub_?link$/i, "Assessor"],
   [/^tax_?map$/i, "Tax map"],
   // NEW-3 (Bartow GA, 2026-11) — the county tax district's NAME (`Tax_District_Desc`, "Bartow County"; the bare `Tax_District` is a code and is not shown) and the SUBDIVISION name (`Subdivision_Name`, "COM - CASS WHITE CORRIDOR"),
   // which is a neighbourhood tag and was being titled "Legal". Exact-name matches, so no other county's SUBDIVISION column (a real legal line on Rutherford TN) is relabelled.

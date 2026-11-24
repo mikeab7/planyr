@@ -621,8 +621,9 @@ export const COUNTY_VERIFICATION = {
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,968 parcel polygons, last edited 2025-12. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_meriwether: {
-    publisher: "own",
-    publisherName: "Meriwether County, GA",
+    // NEW-4 (2026-11-24) — NOT the county's own: the service sits in a single-service AGOL org owned by `mbrown619` (identity not established), item "Meriwether County Georgia Parcels", last edited 2023-06-11. A fresher official source was NOT found: this build environment's egress policy blocks services5.arcgis.com, so the "Meriwether County" item by `jbburke` (services5.arcgis.com/dGslO4qyszb2lMSq, edited 2026-04-10) and the county's qPublic map are still UNINSPECTED — a session with network reach should check them and re-point this row if one carries parcels. Three Rivers RC (services1.arcgis.com/Ug5xGQbHsD8zuZzM) publishes Manchester zoning but no parcels.
+    publisher: "unverified",
+    publisherName: "AGOL individual account mbrown619 — affiliation not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,511 parcel polygons, last edited 2023-06. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },

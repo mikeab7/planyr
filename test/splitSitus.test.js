@@ -212,3 +212,33 @@ describe("registry health — every declared column exists on the live layer", (
     }
   });
 });
+
+describe("NEW-2/3 — Meriwether GA (2026-11): split situs, house_no 0 = none, an Assessor link, mailing columns never situs", () => {
+  // RECONSTRUCTED from the 2026-11-22 sweep's readings (services9.arcgis.com is blocked in the sandbox): the situs columns and values the sweep named.
+  const c = COUNTIES.ga_meriwether;
+  const MER_META = { fields: ["Parcel_No", "house_no", "stdirect", "street_nam", "sttype", "extension", "unit", "zip", "address1", "city", "state", "qPub_Link"].map((name) => ({ name, type: name === "house_no" ? "esriFieldTypeInteger" : "esriFieldTypeString" })) };
+  const GOLD = { Parcel_No: "023    012", house_no: 0, stdirect: " ", street_nam: "GOLD MINE", sttype: "RD", zip: " ", address1: "PO BOX 1", city: "SEATTLE", state: "WA", qPub_Link: "https://qpublic.schneidercorp.com/Application.aspx?App=meriwetherCountyGA&Layer=Parcels&PageType=Report&KeyValue=023%20%20%20%20012" };
+  const ROOSEVELT = { Parcel_No: "069A   009", house_no: 27092, stdirect: "", street_nam: "ROOSEVELT", sttype: "HWY", zip: "30222", address1: "27092 ROOSEVELT HWY", city: "WARM SPRINGS", state: "GA" };
+
+  it("declares the split situs (and never the mailing columns)", () => {
+    expect(c.addrParts).toEqual({ num: "house_no", dir: "stdirect", name: "street_nam", sfx: "sttype", zip: "zip" });
+    expect(JSON.stringify(c.addrParts)).not.toMatch(/address1|city|state/);
+    expect(missingDeclaredColumns(c, MER_META.fields.map((f) => f.name))).toEqual([]);
+  });
+  it("house_no 0 is no number; a real number leads", () => {
+    expect(situsFor("ga_meriwether", GOLD)).toBe("GOLD MINE RD");
+    expect(situsFor("ga_meriwether", ROOSEVELT)).toBe("27092 ROOSEVELT HWY, 30222");
+    expect(countyRecord(ROOSEVELT, { idField: c.idField, addrParts: c.addrParts }).address).toBe("27092 ROOSEVELT HWY, 30222");
+  });
+  it("address search runs on the split columns", () => {
+    const w = (value) => buildParcelWhere({ meta: MER_META, mode: "address", value, idField: c.idField, addrField: null, addrParts: c.addrParts });
+    expect(w("27092 Roosevelt Hwy")).toBe("house_no = 27092 AND UPPER(street_nam) LIKE UPPER('%ROOSEVELT%')");
+    expect(w("Gold Mine")).toBe("UPPER(street_nam) LIKE UPPER('%GOLD MINE%')");
+    expect(w("Whitehouse")).toBe("UPPER(street_nam) LIKE UPPER('%WHITEHOUSE%')");
+  });
+  it("the qPublic link is a short 'Assessor' row, not the raw URL as a label", () => {
+    const row = apprRows(GOLD).find((r) => r.label === "Assessor");
+    expect(row?.value).toMatch(/^https:\/\/qpublic\.schneidercorp\.com\//);
+    expect(apprRows(ROOSEVELT).some((r) => r.label === "Assessor")).toBe(false);
+  });
+});
