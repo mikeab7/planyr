@@ -2,6 +2,7 @@
  * /food, the map finder and the planner all read it from there. These tests fail if anyone re-inlines
  * a copy, break the Hybrid layer stack, or break the remembered-choice default. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -38,7 +39,7 @@ describe("one definition of the Site Plan map", () => {
   });
 
   it("the map finder and planner take their defaults from the shared object, with no re-inlined tile URL", () => {
-    const finder = stripComments(read("src/workspaces/site-planner/MapFinder.jsx"));
+    const finder = stripComments(mapFinderSource());
     expect(finder).not.toMatch(/arcgisonline|openfreemap/);
     expect(finder).toMatch(/addVectorLabels\(/);
     expect(finder).toMatch(/useState\(SITE_PLAN_BASEMAP\.imageryKey\)/);
@@ -47,7 +48,7 @@ describe("one definition of the Site Plan map", () => {
 
   it("Food and the map finder use the SAME vector-label helper (never a Food-only copy)", () => {
     const food = stripComments(read("src/workspaces/food/components/FoodMap.jsx"));
-    const finder = stripComments(read("src/workspaces/site-planner/MapFinder.jsx"));
+    const finder = stripComments(mapFinderSource());
     for (const code of [food, finder]) expect(code).toMatch(/(from |import\()"(\.\.\/)+shared\/basemaps\/vectorLabelLayer\.js"/);
     expect(food).not.toMatch(/maplibre|buildVectorStyle/);
   });

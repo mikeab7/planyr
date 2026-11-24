@@ -1,6 +1,7 @@
 /* selectParcelsHint — NEW-1: the Select-parcels bottom hint is ONE short line per stage, from ONE source (owner-approved copy 2026-10-22).
  * Red on the pre-change tree: the module did not exist and MapFinder carried the long sentences inline. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { selectParcelsHintFor, SELECT_PARCELS_HINT } from "../src/workspaces/site-planner/lib/selectParcelsHint.js";
@@ -61,7 +62,7 @@ describe("selectParcelsHintFor — stage → copy", () => {
 });
 
 describe("the banner reads ONLY this module", () => {
-  const src = read("src/workspaces/site-planner/MapFinder.jsx");
+  const src = mapFinderSource();
   it("MapFinder asks selectParcelsHintFor and carries none of the old sentences", () => {
     expect(src).toMatch(/selectParcelsHintFor\(/);
     for (const old of ["even before the purple outlines", "Zoom in a little to see the lines", "Add several, then Plan", "Hover an added lot and click to remove", "Showing larger lots.", "part of this view could not be loaded"]) {

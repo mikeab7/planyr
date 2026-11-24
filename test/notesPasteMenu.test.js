@@ -11,6 +11,7 @@
  *     effect that has no DOM here);
  *   · both harnesses are in the build's gate list. */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import fs from "node:fs";
 import path from "node:path";
 import { checkPasteOption } from "../ui-audit/lib/pasteBank.mjs";
@@ -77,7 +78,7 @@ describe("the pure readers the fix added", () => {
 });
 
 describe("the wiring that made the bug stays gone", () => {
-  const editor = read("src/workspaces/notes/components/NoteEditor.jsx");
+  const editor = noteEditorSource();
   const keyEffect = editor.slice(editor.indexOf("A LONE CTRL TAP OPENS THE FLYOUT"), editor.indexOf("Ctrl/Cmd+Shift+V, and the right-click menu's item"));
   it("Control on its own opens the menu on the KEY UP, never the keydown (a keydown made Ctrl+V / Ctrl+C / Ctrl+Z all pop it)", () => {
     expect(keyEffect.length).toBeGreaterThan(500);

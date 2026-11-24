@@ -3,6 +3,7 @@
  * be a true no-op when unarmed (the guard the owner explicitly asked to be proven before shipping
  * this as its own PR, separate from the still-unresolved B831600). */
 import { describe, it, expect } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -89,7 +90,7 @@ describe("recording — the read-only sink", () => {
 });
 
 describe("source guard — the gate is read at CALL time, never at mount", () => {
-  const NE = readFileSync(fileURLToPath(new URL("../src/workspaces/notes/components/NoteEditor.jsx", import.meta.url)), "utf8");
+  const NE = noteEditorSource();
 
   it("applyToolbarDelta checks isToolbarDiagArmed() itself, not a flag threaded in from a mount-time read", () => {
     expect(NE).toMatch(/const applyToolbarDelta = useCallback\(\(nextHeight, trigger\) => \{\s*const diagOn = isToolbarDiagArmed\(\);/);

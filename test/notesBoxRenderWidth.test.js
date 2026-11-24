@@ -2,6 +2,7 @@
  * 873-wide box to 386 because the render fit clamped it to the SCREEN pane's unscaled width (a number
  * unrelated to the page the view then scales). The render must never be handed a host width. */
 import { describe, expect, it } from "vitest";
+import { noteEditorSource } from "./helpers/noteEditorSource.js";
 import { readFileSync } from "node:fs";
 import { fitAnchorBox } from "../src/workspaces/notes/lib/notesAnchorNode.js";
 
@@ -14,7 +15,7 @@ describe("a box renders at its stored width", () => {
     expect(fitAnchorBox({ x: 0, w: 873, hostWidth: 390 }).w).toBe(386);
   });
   it("NoteEditor's layout fit never passes a host width — the screen pane is not the page", () => {
-    const src = readFileSync(new URL("../src/workspaces/notes/components/NoteEditor.jsx", import.meta.url), "utf8");
+    const src = noteEditorSource();
     const calls = [...src.matchAll(/fitAnchorBox\(\{([^}]*)\}\)/g)].map((m) => m[1]);
     expect(calls.length).toBeGreaterThan(0);
     for (const args of calls) expect(args, `fitAnchorBox({${args}}) must not carry hostWidth`).not.toMatch(/hostWidth/);

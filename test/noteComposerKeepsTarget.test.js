@@ -5,9 +5,10 @@
  * composer opened, which emptied the selection (the highlight) and removed the decide bar — the reported
  * "what I just clicked on disappeared". Each case below pins one half of the contract. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
-const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+const finder = mapFinderSource();
 const editor = readFileSync(new URL("../src/shared/mapNotes/components/MapNoteEditor.jsx", import.meta.url), "utf8");
 const noteVerb = () => finder.slice(finder.indexOf('key: "note"'), finder.indexOf('key: "note"') + 2000);
 const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");

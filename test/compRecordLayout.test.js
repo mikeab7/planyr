@@ -3,6 +3,7 @@
  * "Zoomed out too far" sentence, no empty rows. Pure model + the real CompDetail render + source
  * guards on SitePlansSection (whose Documents block shares the panel). */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
@@ -114,7 +115,7 @@ describe("SitePlansSection — the Documents block", () => {
   // menu instead. The restore path must keep existing: removing the list without it would be silent data loss.
   it("the All comps list carries no deleted-site-plans section; the restore moved to the plan menu", () => {
     expect(src).not.toMatch(/showPlanTrash|trashBlock|fetchDeletedOverlays|restoreOverlay|permanentlyDeleteOverlay/);
-    const mf = readFileSync("src/workspaces/site-planner/MapFinder.jsx", "utf8");
+    const mf = mapFinderSource();
     expect(mf).not.toContain("showPlanTrash");
     const sp = plannerSource();
     expect(sp).toContain("listDeletedSitePlanFiles");

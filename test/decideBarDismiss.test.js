@@ -10,9 +10,10 @@
  * "Selecting… Drop a pin Cancel" bar on screen instead of dismissing.
  */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
-const finder = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+const finder = mapFinderSource();
 
 describe("finishGroundAction — the ONE way a decide-bar verb returns the map to AT-REST", () => {
   it("exists, and does both halves: clears the selection AND exits select mode", () => {

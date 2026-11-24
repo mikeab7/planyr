@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import fs from "node:fs";
 import { pinClusterOffsets, pinOffsetsSig, slotOffset } from "../src/workspaces/site-planner/lib/pinCluster.js";
 
@@ -30,7 +31,7 @@ describe("pinClusterOffsets", () => {
     expect(pinOffsetsSig(pinClusterOffsets(pts))).toBe(pinOffsetsSig(pinClusterOffsets(pts)));
   });
   it("source guard: the comp and note markers shift their anchor by the cluster offset", () => {
-    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).toMatch(/shiftAnchor\(anchor, `comp:\$\{c\.id\}`\)/);
     expect(src).toMatch(/shiftAnchor\(iconAnchor, `note:\$\{n\.id\}`\)/);
   });

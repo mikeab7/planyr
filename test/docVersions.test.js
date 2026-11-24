@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { versionList, saveVersion, restoreVersion, packSource, copyFileName, earlierVersionLabel, fmtVersionSize, canOpenEarlier } from "../src/workspaces/doc-review/lib/docVersions.js";
 
@@ -139,7 +140,7 @@ describe("adjacent cases", () => {
 });
 
 describe("wiring guards", () => {
-  const dr = readFileSync(new URL("../src/workspaces/doc-review/DocReview.jsx", import.meta.url), "utf8");
+  const dr = docReviewSource();
   it("DocReview persists the save stamp (packSource) and saves/restores through the shared ops", () => {
     expect(dr).toMatch(/saveVersion\(/); expect(dr).toMatch(/restoreVersion\(/); expect(dr).toMatch(/packSource\(/);
   });

@@ -10,6 +10,7 @@
  *      so a future grid editor added without it fails CI instead of shipping the bug again,
  *   4. asserts the auth/login/signup forms are deliberately EXCLUDED (real autofill must work). */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -133,7 +134,7 @@ describe("B2308848 amended — contact / address fields keep browser suggestions
     expect(seq).toMatch(/contactField\("name"\)\} autoFocus value=\{editName\}|contactField\("name"\)\} value=\{editName\}/);
     expect(read("src/workspaces/site-planner/components/SetLocationDialog.jsx")).toContain('{...contactField("street")}');
     expect(read("src/workspaces/site-planner/components/TeamPanel.jsx")).toContain('{...contactField("email")}');
-    expect(read("src/workspaces/site-planner/MapFinder.jsx")).toMatch(/<input \{\.\.\.NO_AUTOFILL\} value=\{nameFilter\}/);
+    expect(mapFinderSource()).toMatch(/<input \{\.\.\.NO_AUTOFILL\} value=\{nameFilter\}/);
     expect(read("src/workspaces/site-planner/components/ParcelsPanel.jsx")).toMatch(/\{\.\.\.NO_AUTOFILL\} value=\{filter\}/);
     // Planyr's own live-suggestion boxes keep "off": a second (Chrome) dropdown would collide with theirs
     expect(read("src/workspaces/site-planner/components/PlaceSearchField.jsx")).toContain('autoComplete="off"');

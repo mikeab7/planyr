@@ -43,6 +43,7 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   over the record's `sources[1..]` (each entry stamped `savedAt`/`savedBy`; append-only, no new table); the sheet only lists and asks.
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
+  Audit batch L4 moved three self-contained groups out of `DocReview.jsx` into hooks: `useReviewRail.js` (rail width/collapse + the VIEWPORT-STABLE canvas compensation), `useReviewHistory.js` (undo/redo), `useReviewPinch.js` (two-finger pinch); source-scan tests read them together via the `docReviewSource()` test helper.
 - `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the
   `resolveResume` boot-candidate ordering (B667; pointers are captured at first render and
   writes arm only after boot — the resume self-clobber fix).

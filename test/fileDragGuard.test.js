@@ -10,6 +10,8 @@
  * the ABSENCE of a wire, which a unit test of the module cannot see.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
+import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -141,11 +143,11 @@ describe("wiring (the defect is a MISSING wire — a unit test of the module can
   });
   it("no surface keeps its own enter/leave depth counter for the overlay any more", () => {
     expect(read("src/workspaces/library/components/FileBrowser.jsx")).not.toMatch(/dragDepth/);
-    expect(read("src/workspaces/doc-review/DocReview.jsx")).not.toMatch(/dragDepth/);
-    expect(read("src/workspaces/site-planner/MapFinder.jsx")).not.toMatch(/fileDragDepth/);
+    expect(docReviewSource()).not.toMatch(/dragDepth/);
+    expect(mapFinderSource()).not.toMatch(/fileDragDepth/);
   });
   it("the Map's window-level drop handler is gated on the ACTIVE workspace, not just its map mode (the hidden-view leak)", () => {
-    const mf = read("src/workspaces/site-planner/MapFinder.jsx");
+    const mf = mapFinderSource();
     expect(mf).toMatch(/const dropLive = !!\(visible && isActive\)/);
     expect(mf).toMatch(/useFileDragActive\(dropLive\)/);
     expect(mf).not.toMatch(/if \(!visible \|\| !isFileDrag\(e\)\) return;/);
@@ -153,7 +155,7 @@ describe("wiring (the defect is a MISSING wire — a unit test of the module can
   it("Library, Map, Site and Review read the shared tracker", () => {
     expect(read("src/workspaces/library/components/FileBrowser.jsx")).toMatch(/useFileDragActive\(isActive\)/);
         expect(plannerSource()).toMatch(/useFileDragActive\(true\)/);
-    expect(read("src/workspaces/doc-review/DocReview.jsx")).toMatch(/useFileDragActive\(isActive && !narrow\)/);
+    expect(docReviewSource()).toMatch(/useFileDragActive\(isActive && !narrow\)/);
   });
   it("the Library catches a drop ANYWHERE on its view (window level) and the home refuses out loud", () => {
     const fb = read("src/workspaces/library/components/FileBrowser.jsx");

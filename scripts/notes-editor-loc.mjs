@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 const LIB = "src/workspaces/notes/lib/";
 const COMP = "src/workspaces/notes/components/";
 export const EDITOR_FILES = [
-  `${COMP}NoteEditor.jsx`, `${COMP}NoteToolbar.jsx`, `${COMP}NoteSlashMenu.jsx`, `${COMP}PasteIcons.jsx`,
+  `${COMP}NoteEditor.jsx`, `${COMP}noteEditorCss.js`, `${COMP}NoteEditorBars.jsx`, `${COMP}PasteOptions.jsx`, `${COMP}MiniBar.jsx`, `${COMP}DocMenu.jsx`, `${COMP}useNoteE2EHook.js`, `${COMP}NoteToolbar.jsx`, `${COMP}NoteSlashMenu.jsx`, `${COMP}PasteIcons.jsx`,
   ...[
     "notesExtensions", "notesAnchorNode", "notesAnchorPrune", "notesArrows", "notesAttachNode", "notesBlankPaper", "notesBlockKeys",
     "notesBoxResize", "notesCalloutNode", "notesEnterInherit", "notesFakeBullets", "notesFontFamily", "notesFormatPalette",
