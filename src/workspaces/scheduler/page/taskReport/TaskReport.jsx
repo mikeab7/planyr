@@ -1077,7 +1077,7 @@ export function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
               ...gRows.map((t,gri) => {
                 const ri = sortedRows.indexOf(t);
                 return (
-                <tr key={`${t.projId}-${t.id}`} style={{background:t.rowColor||(gri%2?"#f8fafc":"var(--bg)")}}>
+                <tr key={`${t.projId}-${t.id}`} style={{background:t.rowColor||(gri%2?"var(--row-alt)":"var(--bg)")}}>
                   {renderJumpCell(t)}
                   {displayCols.map(col => renderCell(t, col, ri))}
                   <td style={{padding:0,borderBottom:"1px solid var(--bd)"}} />
@@ -1088,7 +1088,7 @@ export function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             });
           })()
           : sortedRows.map((t, ri) => (
-            <tr key={`${t.projId}-${t.id}`} style={{background:t.rowColor||(ri%2?"#f8fafc":"var(--bg)")}}>
+            <tr key={`${t.projId}-${t.id}`} style={{background:t.rowColor||(ri%2?"var(--row-alt)":"var(--bg)")}}>
               {renderJumpCell(t)}
               {displayCols.map(col => renderCell(t, col, ri))}
               <td style={{padding:0,borderBottom:"1px solid var(--bd)"}} />

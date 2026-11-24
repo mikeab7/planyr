@@ -154,7 +154,7 @@ export const DRAWING_SURFACE_FILES = [
 // The Schedule page (audit batch J3) moved from public/sequence/index.html into src/workspaces/scheduler/page/. It is a
 // standalone iframe with its own stylesheet and hand-typed colours / sizes / radii that were never counted (the old file
 // sat outside src/). Counting them now would jump the ceiling for code nobody touched, so the folder is exempt as a whole
-// until the page adopts the shared tokens (owner-approved 2026-11-24; the J3 colour-tokens step removes this line).
+// until the page adopts the shared tokens (owner-approved 2026-11-24; tracked as B2671325, which removes this line; the grid / Gantt / Task Report ROW colours are already tokens).
 const LEGACY_PAGE_DIR = "src/workspaces/scheduler/page/";
 const EXEMPT_FILES = new Set([...TOKEN_LAYER_FILES, ...DRAWING_SURFACE_FILES]);
 

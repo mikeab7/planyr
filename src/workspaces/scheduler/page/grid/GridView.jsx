@@ -1168,7 +1168,7 @@ export function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, p
             const dateDisp = iso => { if (!iso) return ""; const [y,m,d] = iso.split('-'); return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
             const creating = !!(rv && rv.isCreate);
             return (
-              <div key="__rvprop" className="drow rv-prow" style={{top:ri*ROW_H, height:ROW_H, minWidth:totalW, background: creating ? "#ecfdf3" : "#f3f0ff", borderLeft: creating ? "2px solid #16a34a" : "2px solid var(--amber)"}}>
+              <div key="__rvprop" className="drow rv-prow" style={{top:ri*ROW_H, height:ROW_H, minWidth:totalW, background: creating ? "var(--row-create)" : "var(--row-target)", borderLeft: creating ? "2px solid #16a34a" : "2px solid var(--amber)"}}>
                 {orderedCols.map(c => {
                   const w = dispW[c.k];
                   let inner = <span style={cs} />;
@@ -1208,7 +1208,7 @@ export function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, p
                         onKeyDown={e => { if (e.key==="Enter"){ e.preventDefault(); if(rv.onOwner) rv.onOwner(e.target.value); setRvEdit(null); } else if (e.key==="Escape"){ setRvEdit(null); } }} />
                     : <span style={{...cs, color: rv.propOwner ? "var(--txt)" : "var(--mut)", cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("owner")}>{rv.propOwner||""}</span>;
                   const wrap = {width:w, flexShrink:0, height:ROW_H, position:"relative", overflow: c.k==="health" ? "visible" : "hidden", borderRight:GRID_LINE, borderBottom:GRID_LINE,
-                    ...(pinStyle(c.k, [creating ? "#ecfdf3" : "#f3f0ff"], 5) || {})};
+                    ...(pinStyle(c.k, [creating ? "var(--row-create)" : "var(--row-target)"], 5) || {})};
                   return <div key={c.k} data-row-line className={pinCls(c.k) || undefined} style={wrap}>{inner}</div>;
                 })}
                 <div data-grid-strip style={{flex:"1 1 0", minWidth:0, height:ROW_H, position:"relative", borderBottom:GRID_LINE}} />
@@ -1224,7 +1224,7 @@ export function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, p
             ? (rolledHealthMap?.[task.id] || task.health)
             : computeDisplayHealth(task, data.settings, taskById);
           const isExpandedParent = task.hasChildren && task.isExpanded;
-          const rowBg = task.__rvMover ? "#fff8ee" : task.__rvTarget ? "#f3f0ff" : (task.rowColor || (isExpandedParent ? (ri%2?"#f8fafc":"var(--bg)") : (displayHealth==="red"?"#ffdfdf":displayHealth==="yellow"?"#fff7b9":displayHealth==="green"?"#d6fae2":displayHealth==="paused"?"#f3f4f6":ri%2?"#f8fafc":"var(--bg)")));
+          const rowBg = task.__rvMover ? "var(--row-mover)" : task.__rvTarget ? "var(--row-target)" : (task.rowColor || (isExpandedParent ? (ri%2?"var(--row-alt)":"var(--bg)") : (displayHealth==="red"?"var(--row-red)":displayHealth==="yellow"?"var(--row-yellow)":displayHealth==="green"?"var(--row-green)":displayHealth==="paused"?"var(--row-paused)":ri%2?"var(--row-alt)":"var(--bg)")));
           return (
             <div key={task.id} className="drow" data-task-row={task.id} data-row-sel={(isFocused && !hasRange) ? "1" : undefined}
               style={{top:ri*ROW_H, height:ROW_H,
@@ -1314,11 +1314,11 @@ export function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, p
               onClick={ri===tasks.length ? ()=>addTask() : undefined}
               style={{top:ri*ROW_H, height:ROW_H,
                 borderLeft: isNewTaskFocused ? "2px solid var(--blue)" : "2px solid transparent",
-                background: isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)"),
+                background: isNewTaskFocused ? "var(--row-focus)" : (ri%2?"var(--row-alt)":"var(--bg)"),
                 cursor:ri===tasks.length?"pointer":"default"}}>
               {orderedCols.map(c => (
                 <div key={c.k} data-row-line className={pinCls(c.k) || undefined} style={{width:dispW[c.k],flexShrink:0,borderRight:GRID_LINE,borderBottom:GRID_LINE,height:ROW_H,position:"relative",
-                  ...(pinStyle(c.k, [isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)")], 5) || {}),
+                  ...(pinStyle(c.k, [isNewTaskFocused ? "var(--row-focus)" : (ri%2?"var(--row-alt)":"var(--bg)")], 5) || {}),
                   ...(ri===tasks.length && c.k==="name" ? {
                     color: isNewTaskFocused ? "var(--blue)" : "var(--mut)",
                     fontSize:11,display:"flex",alignItems:"center",paddingLeft:8,
