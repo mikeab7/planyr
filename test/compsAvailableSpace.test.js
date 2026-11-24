@@ -167,3 +167,24 @@ describe("available space in the sheet, filters, map and the Log supply menu", (
     expect(sql).not.toMatch(/create policy/i);
   });
 });
+
+describe("supply columns on a deal row stay in Notes (QA review 2026-11-24)", () => {
+  it("a sale sheet's % Leased and a lease sheet's Delivery date are kept, not swallowed", () => {
+    const sale = parsePasteBlock("Type\tTitle\tPrice\tSize\t% Leased\nBldg Sale\tR45\t9000000\t100000\t95%");
+    expect(sale[0].draft.compType).toBe("building_sale");
+    expect(sale[0].draft.notes || "").toMatch(/% Leased: 95%/);
+    const lease = parsePasteBlock("Type\tTitle\tRate\tPer\tSize\tDelivery\tStatus\nLease\tR46\t0.75\tMO\t50000\t3/1/27\tUnder construction");
+    expect(lease[0].draft.compType).toBe("lease");
+    expect(lease[0].draft.notes || "").toMatch(/Delivery: 3\/1\/27/);
+    expect(lease[0].draft.notes || "").toMatch(/Status: Under construction/);
+  });
+  it("on its own type's row the same columns fill the fields and do not repeat in Notes", () => {
+    const uc = parsePasteBlock("Type\tTitle\tSize\tDelivery\tStatus\tPre-lsd (%)\nUnder construction\tR47\t200000\t3/1/27\tUnder construction\t40");
+    expect(uc[0].draft.ucDeliveryDate).toBe("2027-03-01");
+    expect(uc[0].draft.ucPreleasedPct).toBe("40");
+    expect(uc[0].draft.notes || "").not.toMatch(/Delivery|Status|Pre-lsd/);
+    const av = parsePasteBlock("Type\tTitle\tSize\tSpace\tAvail.\nAvailable\tR48\t50000\tSublease\t1/1/27");
+    expect(av[0].draft.avKind).toBe("sublease");
+    expect(av[0].draft.notes || "").not.toMatch(/Space|Avail/);
+  });
+});
