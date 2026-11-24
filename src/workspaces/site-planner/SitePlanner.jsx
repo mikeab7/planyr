@@ -269,6 +269,7 @@ import { makeParcelDisplayLayer, ADD_CURSOR } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { wideViewReady } from "./lib/parcelAreaFieldsLazy.js"; // NEW-1 (Add parcels) — the larger-lots band, so a site-scale zoom draws county lot lines
 import { geocodeAddress } from "./lib/geocode.js";
+import { looksLikeParcelNumber } from "./lib/parcelNumberShape.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle } from "./lib/planStyle.js";
 // NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
 import { resolveParcelLook, parcelPatchFor, parcelResetPatch, validateLook, ptToPx } from "./lib/parcelLook.js";
@@ -15687,6 +15688,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ensureBasemapOn(); setJurInfo(null);
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
+      /* NEW-1 (Meriwether GA, 2026-11-24) — a typed parcel NUMBER ("023 012", "069A 009") is looked up in the county the plan sits in (lib/viewParcelId.js, the same front door as the Map's search)
+       * and the lot added; a miss says where it looked, a server that did not answer says so. Anything that is not a number goes to the geocoder as before. */
+      if (looksLikeParcelNumber(q)) {
+        const { resolveViewParcelId, viewParcelIdMessage } = await import("./lib/viewParcelId.js");
+        const vr = await resolveViewParcelId(q, { lat: origin.lat, lng: origin.lon });
+        if (vr.status === "found") {
+          const [fp] = lngLatRingToFeet([[vr.point.lng, vr.point.lat]], origin.lon, origin.lat);
+          setAddrQuery("");
+          await quickAddAt(fp);
+          return;
+        }
+        if (vr.status === "notfound" || vr.status === "unavailable") { setIdentifyRes({ error: viewParcelIdMessage(vr, q) }); return; }
+      }
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
       if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
@@ -21015,7 +21029,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} countyState={(COUNTIES[restored?.county] || {}).state || null} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} addrParts={parcelAddrParts} countyState={(COUNTIES[restored?.county] || {}).state || null} county={restored?.county || null} />
     );
   };
   /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is

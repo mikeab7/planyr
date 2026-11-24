@@ -6,6 +6,7 @@
  */
 
 import { looksLikeTnParcelId } from "./tnParcelId.js";
+import { looksLikeParcelNumber } from "./parcelNumberShape.js";
 
 /** Build the list of rows to render below the field, given the current fetch status. `status` is
  * one of 'idle' | 'loading' | 'ready' | 'nomatch' | 'unavailable' (see PlaceSearchField.jsx).
@@ -21,7 +22,9 @@ export function buildPlaceRows(status, results, text) {
   const t = (text || "").trim();
   /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel id leads with its own row: the geocoder has nothing useful to say about a
    * number, and a no-match note ("No matches for 156-027.00-000") would be false — the id search is exactly what Enter runs. */
-  const idRow = t && looksLikeTnParcelId(t) ? [{ kind: "parcelId", text: t }] : [];
+  /* NEW-1 (Meriwether GA, 2026-11-24) — any typed parcel NUMBER leads with the row (Enter asks the county the map is looking at); "· Tennessee" is said only for text that is unmistakably a Tennessee id. */
+  const tnShaped = !!t && looksLikeTnParcelId(t) && (/\./.test(t) || t.replace(/\D/g, "").length >= 11);
+  const idRow = t && (looksLikeTnParcelId(t) || looksLikeParcelNumber(t)) ? [{ kind: "parcelId", text: t, tn: tnShaped }] : [];
   if (status === "nomatch") {
     return {
       rows: [...idRow, { kind: "searchAnyway", text: t }, { kind: "dropPin" }],

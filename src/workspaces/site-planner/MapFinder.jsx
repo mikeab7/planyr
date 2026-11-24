@@ -106,6 +106,7 @@ import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
 import { idAttrFor, situsFor } from "./lib/parcelQuery.js";
 import { looksLikeTnParcelId } from "./lib/tnParcelId.js";
+import { looksLikeParcelNumber } from "./lib/parcelNumberShape.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
  * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
  * no layout to reserve (the card is absolutely positioned over the map, which is also why the
@@ -3777,7 +3778,32 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       /* NEW-2 (TN, 2026-10-21) — text that reads as a Tennessee parcel ID ("156-027.00-000", "156 027.00 000", an 11-digit Metro Nashville
        * number) is looked up on the counties' own layers and lands on THAT lot, selected. A miss is a plain sentence naming where it looked
        * (never a silent no-op, never a geocoder guess at a number); an address or place never reaches this branch (`looksLikeTnParcelId`). */
-      if (looksLikeTnParcelId(q)) {
+      /* NEW-1 (Meriwether GA, 2026-11-24) — a typed parcel NUMBER first asks the county the MAP IS LOOKING AT (any wired county with an id column), so "023 012" in Meriwether finds
+       * Meriwether lot 023 012 instead of being read as a Tennessee id. Only a miss on text that is unmistakably a Tennessee id (a "." part or 11+ digits) goes on to the Tennessee path;
+       * any other miss says plainly where it looked. A server that did not answer is "didn't answer", never "not found". */
+      let viewIdTried = false;
+      if (looksLikeParcelNumber(q) && mapRef.current) {
+        const { resolveViewParcelId, viewParcelIdMessage } = await import("./lib/viewParcelId.js");
+        const c0 = mapRef.current.getCenter();
+        const vr = await resolveViewParcelId(q, { lat: c0.lat, lng: c0.lng });
+        if (tok !== addrTokRef.current) return;
+        if (vr.status === "found") {
+          mapRef.current.flyTo([vr.point.lat, vr.point.lng], 18, { duration: 0.75 });
+          await selectParcelAt(vr.point, vr.label, tok);
+          return;
+        }
+        if (vr.status === "notfound" || vr.status === "unavailable") {
+          viewIdTried = true;
+          const tnShaped = /\./.test(q) || q.replace(/\D/g, "").length >= 11;
+          if (!tnShaped || vr.status === "unavailable") {
+            const msg = viewParcelIdMessage(vr, q);
+            setErr(msg);
+            setErrRetry(vr.status === "unavailable" ? { message: msg, run: () => goAddress(q) } : null);
+            return;
+          }
+        }
+      }
+      if (looksLikeTnParcelId(q) && (!viewIdTried || /\./.test(q) || q.replace(/\D/g, "").length >= 11)) {
         const { resolveParcelId, parcelIdMessage } = await import("./lib/parcelIdSearch.js");
         const mc = mapRef.current ? mapRef.current.getCenter() : null; // an id repeated across counties lands on the one nearest the map
         stopSlow = watchSlow(() => { if (tok === addrTokRef.current) setLookupNote(stillLookingMessage("Tennessee")); });
