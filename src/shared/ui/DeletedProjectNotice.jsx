@@ -10,6 +10,7 @@
  *   status="deleted" — the project existed and was removed; offers Restore.
  *   status="missing" — the id names no row this account can see at all; Dashboard only.
  */
+import { useDashboardOwner, dashboardCopy } from "./dashboardAccess.js";
 import { useState } from "react";
 import { RADIUS } from "./radius.js";
 import { relTime, DELETED_RETENTION_DAYS } from "../projects/projectModel.js";
@@ -31,6 +32,7 @@ const secondaryBtn = { ...btnBase, border: "1px solid var(--border-default)", ba
 const primaryBtn = { ...btnBase, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)" };
 
 export default function DeletedProjectNotice({ status, name, deletedAt, scope = "project", onRestore, onDashboard }) {
+  const dashOwner = useDashboardOwner();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const deleted = status === "deleted";
@@ -97,7 +99,7 @@ export default function DeletedProjectNotice({ status, name, deletedAt, scope = 
           <div style={{ fontSize: FONT_CONTROL, color: "var(--warn-text)", marginBottom: 12 }}>{error}</div>
         )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" style={secondaryBtn} onClick={onDashboard}>Go to Dashboard</button>
+          <button type="button" style={secondaryBtn} onClick={onDashboard}>Go to {dashboardCopy("Dashboard", dashOwner)}</button>
           {deleted && (
             <button type="button" style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} aria-busy={busy ? "true" : undefined} onClick={restore}>
               {busy ? "Restoring…" : (isPlan ? "Restore plan" : "Restore project")}

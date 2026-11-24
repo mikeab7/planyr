@@ -72,24 +72,24 @@
     },
     "library": {
       "light": {
-        "approvedAt": "2026-11-10",
-        "approvedCommit": "d77355216",
-        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
+        "approvedAt": "2026-11-24",
+        "approvedCommit": "c86c5c410",
+        "note": "B2671320: the Dashboard is owner-only, so a signed-out visitor's first breadcrumb on Library reads Map instead of Dashboard (intentional, constraint #62). Only the Library surface's breadcrumb text region changes. [CI-authored by run 45331324373 on c86c5c410abd8d39b93cbfc86fc8ab194ba2a983]"
       },
       "dark": {
-        "approvedAt": "2026-11-10",
-        "approvedCommit": "d77355216",
-        "note": "B2671209: the Site Planner left module rail is 8px wider on desktop (62 instead of 54: a reserved scrollbar strip so a classic scrollbar no longer covers the labels or scrolls the rail sideways), so the canvas beside it starts 8px further right. Intentional; touches only the two Site Planner surfaces' desktop pictures. [CI-authored by run 42749734639 on d7735521683d9bf1248ee862943d589d85de213f]"
+        "approvedAt": "2026-11-24",
+        "approvedCommit": "c86c5c410",
+        "note": "B2671320: the Dashboard is owner-only, so a signed-out visitor's first breadcrumb on Library reads Map instead of Dashboard (intentional, constraint #62). Only the Library surface's breadcrumb text region changes. [CI-authored by run 45331324373 on c86c5c410abd8d39b93cbfc86fc8ab194ba2a983]"
       },
       "light--phone": {
-        "approvedAt": "2026-11-02",
-        "approvedCommit": "f351045d3",
-        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
+        "approvedAt": "2026-11-24",
+        "approvedCommit": "c86c5c410",
+        "note": "B2671320: the Dashboard is owner-only, so a signed-out visitor's first breadcrumb on Library reads Map instead of Dashboard (intentional, constraint #62). Only the Library surface's breadcrumb text region changes. [CI-authored by run 45331324373 on c86c5c410abd8d39b93cbfc86fc8ab194ba2a983]"
       },
       "dark--phone": {
-        "approvedAt": "2026-11-02",
-        "approvedCommit": "f351045d3",
-        "note": "B2625552: Library's signed-out empty state no longer says to sign in 'from the Site Planner' — it now reads 'use Sign in at the top right' (intentional copy change, one sentence) [CI-authored by run 41533551439 on f351045d35bd829feb76edb6cc44c2f172a2ef25]"
+        "approvedAt": "2026-11-24",
+        "approvedCommit": "c86c5c410",
+        "note": "B2671320: the Dashboard is owner-only, so a signed-out visitor's first breadcrumb on Library reads Map instead of Dashboard (intentional, constraint #62). Only the Library surface's breadcrumb text region changes. [CI-authored by run 45331324373 on c86c5c410abd8d39b93cbfc86fc8ab194ba2a983]"
       }
     }
   }

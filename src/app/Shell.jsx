@@ -3,7 +3,7 @@
  * workspace-specific toolbar content). The shell's job is auth, module
  * switching state, and building the auth-control slot that AppHeader needs.
  */
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange, getUser } from "../workspaces/site-planner/lib/auth.js";
 import { authReturn, authReturnNotice } from "../shared/auth/authReturn.js";
@@ -24,6 +24,8 @@ import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule, reportClientEvent } from "../shared/telemetry/clientErrors.js";
 import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
+import { dashboardGate, dashboardTarget, setDashboardOwner } from "../shared/ui/dashboardAccess.js";
+import { useIsAdmin } from "../workspaces/admin/lib/useIsAdmin.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute, pointerForRoute } from "./lastRoute.js";
@@ -110,9 +112,6 @@ const WORKSPACES = [
 // Chrome color is a theme token so the shell themes WITH the app (B318). (The account
 // pill/dropdown styling moved into AccountControl.jsx with the control itself — B734.)
 const CHROME = "var(--chrome-bg)";
-
-// NEW-1 (B1213312) — the Dashboard's canonical hash (see route.js's isDashboardRoute + buildHash).
-const DASHBOARD_HASH = "#/";
 
 // B113/B485's existing phone breakpoint (760px, matchMedia), reused verbatim rather than a
 // third one — same value AppHeader.jsx's own `useNarrow` and Notes.jsx/FoodMap.jsx's local
@@ -271,7 +270,6 @@ export default function Shell() {
   // build 00ac52e). The account menu has already asked, so for an allowlisted account the answer is
   // known BEFORE the click. Still keyed on a confirmed "admin" for THIS user — never on the hash alone.
   const adminKnown = isAdminHash && user?.id != null && adminStatusStore.peek(user.id) === "admin";
-  const active = isDashboardHash || (isAdminHash && (adminShown || adminKnown)) ? null : routedModule;
   // NEW-1 — `user` starts null on every load and only resolves once Supabase's auth listener
   // reports back, so a signed-in visitor briefly sees the SIGNED-OUT "Sign in" pill before the
   // real, usually wider, named account pill replaces it. AccountControl's rendered width is part
@@ -281,6 +279,18 @@ export default function Shell() {
   // (event:click-swallowed, "moved": true). `authKnown` lets AccountControl hold a neutral,
   // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
   const [authKnown, setAuthKnown] = useState(false);
+  // OWNER-ONLY DASHBOARD (2026-11-24) — one gate, the same is_admin() answer the admin page uses.
+  // "wait" = identity/admin answer not in yet (neutral loader, nothing fetched); "redirect" = anyone
+  // but the owner, sent to the Map; "show" = the owner. `active` stays null only while waiting or
+  // showing, so a non-owner never mounts the Dashboard chunk (and none of its cards' fetches).
+  const { status: adminStatus } = useIsAdmin(user);
+  const isOwner = user != null && adminStatus === "admin";
+  const dashGate = dashboardGate({ isDashboardHash, authKnown, user, adminStatus });
+  useLayoutEffect(() => { setDashboardOwner(isOwner); }, [isOwner]);
+  useEffect(() => {
+    if (dashGate === "redirect") { try { window.location.replace(dashboardTarget(false)); } catch (_) { /* hash stays; nothing renders */ } }
+  }, [dashGate]);
+  const active = (dashGate === "show" || dashGate === "wait") || (isAdminHash && (adminShown || adminKnown)) ? null : routedModule;
   const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
   const [hasAuthLink] = useState(() => typeof window !== "undefined" && /[?&]authlink=/.test(window.location.search || "")); // captured before AuthLinkLanding strips it
   // NEW-1 (follow-up to B2619760): the e-mail link the person just followed was read from the URL at module load
@@ -344,7 +354,8 @@ export default function Shell() {
   // of those pages always fires a real hashchange, and clicking the wordmark while already on
   // the Dashboard is a correct, silent no-op.
   const goDashboard = () => {
-    if (typeof window !== "undefined" && window.location.hash !== DASHBOARD_HASH) window.location.hash = DASHBOARD_HASH;
+    const target = dashboardTarget(isOwner); // non-owner: the Map, never the Dashboard
+    if (typeof window !== "undefined" && window.location.hash !== target) window.location.hash = target;
   };
   // "New project" from anywhere: land in the Site Planner and tell it to start a blank
   // site. A monotonic tick (not a project id — the blank isn't saved yet) re-fires on
@@ -1024,7 +1035,10 @@ export default function Shell() {
             as the admin/design blocks above, so it unmounts the instant you leave and a fresh
             mount re-fetches its cards' data on every visit rather than showing a stale snapshot
             from whenever it first mounted. */}
-        {isDashboardHash && (
+        {dashGate === "wait" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}><ModuleLoader module="dashboard" /></div>
+        )}
+        {dashGate === "show" && (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
             <ErrorBoundary label="Dashboard">
               <Suspense fallback={<ModuleLoader module="dashboard" />}>

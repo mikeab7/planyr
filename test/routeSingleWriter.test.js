@@ -80,7 +80,7 @@ const ALLOWED = [
     // header comment), so it writes the literal hash directly. Guarded against re-writing an
     // UNCHANGED hash (the `!==` check), which is what makes leaving admin/design always fire a
     // real hashchange while re-clicking the wordmark while already on the Dashboard is a no-op.
-    match: /if \(typeof window !== "undefined" && window\.location\.hash !== DASHBOARD_HASH\) window\.location\.hash = DASHBOARD_HASH;/,
+    match: /if \(typeof window !== "undefined" && window\.location\.hash !== target\) window\.location\.hash = target;/,
   },
   {
     file: "src/app/AccountControl.jsx",
