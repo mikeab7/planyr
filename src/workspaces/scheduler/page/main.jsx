@@ -1,4 +1,6 @@
 import "../../../shared/schedule/engine/pageEntry.js";
+import { installPinSchedCursor } from "./pinCursor.js";
+installPinSchedCursor();
 import { OWNER_KIND_ORG, OWNER_KIND_SITE, crossScheduleLabel, ownerOf, pruneScheduleRefs, scheduleLabelParts, setSiteNameResolver } from "../../../shared/schedule/scheduleOwnership.js";
 import { OWNER_CAP, ownerDisplayParts, ownerHas, ownerJoin, ownerKey, ownerListOf, removeOwnerFrom, renameOwnerIn } from "../../../shared/schedule/engine/owners.js";
 import { DEFAULT_HOLIDAYS, DEFAULT_SETTINGS, HOLIDAY_DEFS, HOLIDAY_SET, NOW, addD, buildHolidaySet, dif, difBD, fd, fdLocal, pd, setHolidaySet, setNOW } from "../../../shared/schedule/engine/calendar.js";
