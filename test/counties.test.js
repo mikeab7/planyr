@@ -1,4 +1,5 @@
 import { GA_ROWS } from "../src/workspaces/site-planner/lib/gaParcels.js";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
@@ -342,7 +343,7 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
   });
 
   it("is actually WIRED into the click path (B1120 — an unused export ships nothing)", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    const src = mapFinderSource();
     expect(src).toMatch(/import \{[^}]*countyIdentity[^}]*\} from "\.\/lib\/counties\.js"/s);
     expect(src).toMatch(/parcelGapNotice\(countyIdentity\(/);
   });

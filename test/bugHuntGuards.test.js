@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { docReviewSource } from "./helpers/docReviewSource.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -164,7 +165,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/reachedAny/);
     expect(src).toMatch(/return reachedAny \? null : \{ error:/);
     // both callers handle the { error } shape
-    expect(read("../src/workspaces/site-planner/MapFinder.jsx")).toMatch(/hit && hit\.error/);
+    expect(mapFinderSource()).toMatch(/hit && hit\.error/);
     expect(plannerSource()).toMatch(/hit && hit\.error/);
   });
 
@@ -184,7 +185,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B545: MapFinder address search is guarded by a request-token (no stale-response clobber)", () => {
-    const src = read("../src/workspaces/site-planner/MapFinder.jsx");
+    const src = mapFinderSource();
     expect(src).toMatch(/addrTokRef = useRef\(0\)/);
     expect(src).toMatch(/const tok = \+\+addrTokRef\.current/);
     expect(src).toMatch(/if \(tok !== addrTokRef\.current\) return/);
@@ -933,7 +934,7 @@ describe("B869/V352 (2026-07-19 verification handoff): the SITE-BASED suggested 
  * The pure half — that Taylor and Livonia really do produce an empty list, and that Las Vegas and
  * Columbus do not — is in test/cityScopes.test.js and test/countyStatewideDerivation.test.js. */
 describe("B1597232 — MapFinder never explains an empty candidate list without consulting countyIdentity", () => {
-  const src = read("../src/workspaces/site-planner/MapFinder.jsx");
+  const src = mapFinderSource();
 
   it("finds both empty-candidate branches — the click and the address search", () => {
     // A rename that loses a branch would make the assertions below vacuously pass.

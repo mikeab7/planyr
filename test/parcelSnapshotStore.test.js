@@ -1,6 +1,7 @@
 /* B2092656 ×3 — a county's parcel saved copy is stored in CHUNKS, never as one IndexedDB value (one value was a
  * 227–254 ms main-thread deserialise per county — Michael's two long frames turning Select parcels on). */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import fs from "node:fs";
 import {
   chunkFeatures, readStoredSnapshot, writeStoredSnapshot,
@@ -85,7 +86,7 @@ describe("housekeeping", () => {
 
 describe("source guards", () => {
   const snapSrc = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/parcelSnapshot.js", import.meta.url), "utf8");
-  const mapSrc = fs.readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+  const mapSrc = mapFinderSource();
   it("parcelSnapshot.js no longer stores or reads a whole county as ONE IndexedDB value", () => {
     expect(snapSrc).not.toMatch(/idbGet\(|idbPut\(/);
   });

@@ -2,6 +2,7 @@
  * The browser half (real timers, real Leaflet layers, the owner's exact banner text) is
  * e2e/parcel-outage-context.spec.js; this file pins the truth table and that every banner site consults it. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "../src/workspaces/site-planner/lib/parcelOutageGate.js";
 
@@ -34,7 +35,7 @@ describe("countyOutageMessage — names statewide outlines only where they exist
 });
 
 describe("wiring — every parcel banner site in MapFinder passes the gate (source guard; red on the pre-fix file)", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+  const src = mapFinderSource();
   it("the county hang handler, the statewide error handler and both slow timers consult parcelNoticeAllowed", () => {
     expect((src.match(/parcelNoticeAllowed\(fl\)/g) || []).length).toBeGreaterThanOrEqual(4);
   });

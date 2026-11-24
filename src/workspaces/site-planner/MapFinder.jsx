@@ -1,5 +1,9 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useFileDragActive, isFileDrag, markDropHandled } from "../../shared/files/fileDrag.js";
+import { useMapFileDrop } from "./lib/useMapFileDrop.js";
+import { useMapFocusRequests } from "./lib/useMapFocusRequests.js";
+import { useMyTeams } from "./lib/useMyTeams.js";
+import { useMapEscapeKeys } from "./lib/useMapEscapeKeys.js";
+import { useCalibrationMarkers } from "./lib/useCalibrationMarkers.js";
 import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
@@ -64,7 +68,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { calibrationAfterClick, calibrationUndo, calibrationPrompt, matchPairsOf } from "../../shared/sitePlans/lib/overlayCalibration.js";
+import { calibrationAfterClick, calibrationUndo, calibrationPrompt } from "../../shared/sitePlans/lib/overlayCalibration.js";
 import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
@@ -138,13 +142,12 @@ import { statusToken } from "../../shared/ui/statusTokens.js";
    SitePlanner.jsx and SitePlannerApp.jsx import it too, so moving it here alone would
    save nothing.) */
 const sharingLib = () => import("./lib/sharing.js");
-import { listMyTeams, currentIdentity } from "./lib/teams.js";
 import { sharedWithDisplay } from "./lib/sharedWithTeam.js";
 import { lastEditedLabel } from "./lib/siteRecency.js";
 // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's cross-device arrangement (group
 // order, collapse state, pinned sites, row sort) lives in the SAME account-scope store Standards'
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
-import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
+import { updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { attachPlaceNames } from "./lib/placeNamesGate.js";
 import { cityNamesEffective, countiesCitiesOn } from "./lib/placeNamesSuppress.js";
@@ -1125,84 +1128,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
 
-  // ---- Drag-and-drop a brochure straight onto the map (NEW-2, second amendment) ------------
-  // The owner's explicit ask: this is the PRIMARY way a brochure gets in (they arrive as email
-  // attachments dragged out of Downloads), and the file-picker inside SitePlansSection stays
-  // only as the fallback. THE GOTCHA: a browser's default reaction to a dropped file is to
-  // navigate the whole tab to it — miss the drop zone by a pixel and the app is gone, unsaved
-  // state included. `preventDefault` on a drop zone alone does not stop that; it has to happen
-  // on `dragover` AND `drop` at the WINDOW level, gated on `dataTransfer.types.includes("Files")`
-  // so a file drag is never confused with the map's own pan-by-drag, the planner's element drag,
-  // or the schedule's row drag — none of which use the browser's HTML5 Drag and Drop API, so
-  // none of them can trip this gate.
-  const dropIntakeRef = useRef(null); // set by SitePlansSection; called with (fileList, dropPlacement)
-  // NEW-2: the overlay follows the ONE shared file-drag tracker (cleared by every end-of-drag path,
-  // incl. leaving the window, a failed drop, Escape, blur, a view change) and shows only while the
-  // portfolio map is the visible view — no per-element enter/leave counter to strand.
-  // ⛔ `visible` is only the map↔plan MODE inside the Site workspace; the workspace itself stays mounted
-  // behind display:none, so it must ALSO be the active workspace — otherwise this window-level handler
-  // swallowed every file dropped on the Library/Review/Notes and routed it into the site-plan intake
-  // (NEW-1/NEW-2: the Map pill and the Library overlay "appearing together").
-  const dropLive = !!(visible && isActive);
-  const fileDragActive = useFileDragActive(dropLive);
-  const onRejectDroppedFile = (name, reason) => setErr(`Couldn't add "${name}" — ${reason}.`);
+  const { dropIntakeRef, fileDragActive, onRejectDroppedFile } = useMapFileDrop({ visible, isActive, mapRef, setErr, setPanelTab, sitesPanelOpen, toggleSitesPanel });
 
-  useEffect(() => {
-    const onDragOver = (e) => {
-      if (!dropLive || !isFileDrag(e)) return;
-      e.preventDefault(); // the whole point — without this the browser navigates the tab to the file
-      e.dataTransfer.dropEffect = "copy";
-    };
-    const onDrop = (e) => {
-      if (!dropLive || !isFileDrag(e)) return;
-      e.preventDefault(); // stop the tab-navigation gotcha on the actual drop too, not just dragover
-      markDropHandled(e);
-      const files = e.dataTransfer.files;
-      if (!files || !files.length) return;
-      // B850016 (NEW-11) — dropping a file is a direct enough action that the Comps tab should
-      // surface to show it (`setPanelTab`). NEW-1 (2026-09-08) — it used to also arm the retired
-      // centre `mode`; there is no mode to arm any more, and this drop lands straight in the site
-      // plan upload flow regardless, so nothing here needed replacing.
-      setPanelTab("comp");
-      if (!sitesPanelOpen) toggleSitesPanel();
-      // NEW-17 — this is a DROP POINT only (a {lat,lng} center override), never a full placement
-      // on its own: it carries no scale, because the dropped file's own pixel dimensions aren't
-      // known until it's rasterized. `confirmPage` merges it into `suggestPlacement`'s full,
-      // always-scaled placement rather than using it standalone.
-      let dropPlacement = null;
-      const m = mapRef.current;
-      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { lat: ll.lat, lng: ll.lng }; }
-      dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
-    };
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("drop", onDrop);
-    };
-  }, [dropLive, sitesPanelOpen]);
 
-  // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
-  // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.
-  // B850016 (NEW-11) — this used to also force `mode` (the search-create toggle) to "comp", which
-  // was the SAME coupling NEW-11 reports from the other direction: merely clicking an existing
-  // comp marker silently rearmed what an address search creates. Selecting a specific comp should
-  // surface its detail (the panel tab) — it should not decide what a future search does.
-  useEffect(() => {
-    if (!pendingCompAnchor && !focusCompId) return;
-    setPanelTab("comp");
-    setSitesPanelOpen(true);
-  }, [pendingCompAnchor, focusCompId]);
-  // LOCATIONS-MAP-CARD FIX — same shape as the effect above: a request arriving from outside
-  // this component switches the rail to the relevant tab and opens the panel. Re-fires the
-  // filter (never toggles it off) on a repeat click from the Dashboard, same convention as
-  // `focusCompId` re-firing on a repeat click of the same comp.
-  useEffect(() => {
-    if (focusMissingLocations == null) return;
-    setPanelTab("site");
-    setSitesPanelOpen(true);
-    setLocationFilterOnly(true);
-  }, [focusMissingLocations]);
+  useMapFocusRequests({ pendingCompAnchor, focusCompId, focusMissingLocations, setPanelTab, setSitesPanelOpen, setLocationFilterOnly });
   // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
   // covering the search bar; desktop keeps it always-open as before.
   /* B427409 — the panel's open state now PERSISTS, on the `sitesPanelClosed` pattern one state
@@ -1431,8 +1360,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   }, [renaming]);
 
   // ── Team sharing (share a project with a team) ──────────────────────────────
-  const [myUid, setMyUid] = useState(null);
-  const [myTeams, setMyTeams] = useState([]);
+  const { myUid, myTeams, refreshTeams, teamName } = useMyTeams();
   // NEW-COMPS-CARD — Michael's own "per year / per month" choice (the Dashboard Comps card's
   // toggle), read here so a comp marker's map tooltip never disagrees with it. Read-only: this
   // map carries no second toggle of its own. Re-runs once `myUid` resolves from null -> a real
@@ -1456,79 +1384,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     setShareNotice(msg);
     shareNoticeTimer.current = setTimeout(() => setShareNotice(null), 6000);
   };
-  const teamName = (id) => { const t = myTeams.find((x) => x.id === id); return t ? t.name : "a team"; };
-  const refreshTeams = async () => {
-    const { uid } = await currentIdentity();
-    setMyUid(uid);
-    if (!uid) { setMyTeams([]); return; }
-    try { setMyTeams(await listMyTeams()); } catch (_) { /* keep prior list on transient error */ }
-  };
-  useEffect(() => { let live = true; (async () => { const { uid } = await currentIdentity(); if (!live) return; setMyUid(uid); if (uid) { try { const t = await listMyTeams(); if (live) setMyTeams(t); } catch (_) {} } })(); return () => { live = false; }; }, []);
-  // B855952/B855953/B855954 — replace the local mirror with the real cross-device Sites-panel
-  // arrangement once the account row loads (mirrors SitePlanner.jsx's identical `userPrefs` load).
-  // Re-runs once `myUid` resolves from null → a real id (or stays null, signed out — the local
-  // mirror / signed-out default is what `loadUserPrefs` already returns for that case).
-  useEffect(() => {
-    loadUserPrefs(myUid).then(() => { /* the load writes the shared mirror; subscribers re-render */ });
-  }, [myUid]);
   // Open the per-project menu and refresh the team list so newly-created teams appear.
   const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
-  // Escape closes the open project menu, matching click-outside (B158 acceptance:
-  // the right-click menu dismisses on click-outside, Escape, or selecting an option).
-  useEffect(() => {
-    if (!statusMenu) return;
-    const onKey = (e) => { if (e.key === "Escape") setStatusMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [statusMenu]);
-  // Escape also closes the right-click comp-marker menu (site-record KMZ export, B711329).
-  useEffect(() => {
-    if (!compMenu) return;
-    const onKey = (e) => { if (e.key === "Escape") setCompMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [compMenu]);
-  // NEW-7 — Escape leaves calibration; the clicked points are drawn on the map (drawing points in the comp
-  // accent, their map spots in a contrasting ring, joined by a line) and the cursor says "click here".
-  useEffect(() => {
-    if (!calibration) return undefined;
-    const onKey = (e) => { if (e.key === "Escape") setCalibration(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [calibration?.id, calibration?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !calibration) return undefined;
-    const g = L.layerGroup().addTo(map);
-    const pts = calibration.pts;
-    const dot = (p, fill, ring) => L.circleMarker([p.lat, p.lng], { radius: 6, color: ring, weight: 2, fillColor: fill, fillOpacity: 1, interactive: false }).addTo(g);
-    if (calibration.kind === "trace") {
-      pts.forEach((p) => dot(p, COMP_ACCENT, ON_COMP_ACCENT));
-      if (pts.length === 2) L.polyline([[pts[0].lat, pts[0].lng], [pts[1].lat, pts[1].lng]], { color: COMP_ACCENT, weight: 3, interactive: false }).addTo(g);
-    } else {
-      matchPairsOf(pts).forEach((pr) => {
-        dot(pr.from, COMP_ACCENT, ON_COMP_ACCENT);
-        if (pr.to) {
-          dot(pr.to, ON_COMP_ACCENT, COMP_ACCENT);
-          L.polyline([[pr.from.lat, pr.from.lng], [pr.to.lat, pr.to.lng]], { color: COMP_ACCENT, weight: 2, dashArray: "5 5", interactive: false }).addTo(g);
-        }
-      });
-    }
-    return () => { g.remove(); };
-  }, [calibration]);  
-  // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
-  // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
-  // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
-  // capture-phase and calls L.DomEvent.stop, which calls the native stopPropagation — per the DOM
-  // dispatch algorithm that keeps this bubble-phase window listener (same node, later path entry)
-  // from ever firing for the SAME keypress, so a mid-drag Escape only cancels the drag, and a
-  // second, separate Escape (nothing in flight) is what actually leaves the mode.
-  useEffect(() => {
-    if (!activeOverlayId) return undefined;
-    const onKey = (e) => { if (e.key === "Escape") setActiveOverlayId(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [activeOverlayId]);
+  useMapEscapeKeys({ statusMenu, setStatusMenu, compMenu, setCompMenu, calibration, setCalibration, activeOverlayId, setActiveOverlayId });
+  useCalibrationMarkers({ mapRef, calibration, COMP_ACCENT, ON_COMP_ACCENT });
   // A comp's county key -> "County, ST" (mirrors CompsPanel.jsx's own countyEntry/countyDisplayName
   // — kept as a small local copy rather than a cross-component import, same as that file's own
   // note on why this stays self-contained).

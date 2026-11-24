@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 /* B2010352 — NEW-1 / NEW-2 / NEW-3 (owner-measured 2026-10-01 on a throwaway parcel-anchored lease
  * comp, APN 0481850000004, 22.48 AC, near 9800 Telephone Rd, Houston 77075): the KMZ comp balloon
  * read "Location: <the APN>", said "Executed" twice, and exported the parcel outline under Comps
@@ -76,7 +77,7 @@ describe("NEW-1 — one Location resolver for panel and export", () => {
   });
   it("source guard: the panel hook and the export both read compLocationFor; the export no longer calls parcelLocationText", () => {
     const panel = fs.readFileSync("src/shared/comps/components/CompsPanel.jsx", "utf8");
-    const mf = fs.readFileSync("src/workspaces/site-planner/MapFinder.jsx", "utf8");
+    const mf = mapFinderSource();
     expect(panel).toContain("compLocationFor(");
     expect(mf).toContain("compLocationFor(");
     expect(mf).not.toMatch(/parcelLocationText\(/);

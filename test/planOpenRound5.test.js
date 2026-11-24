@@ -2,11 +2,12 @@
  * is hidden, and the project switcher builds its rows only while open. Each is a cheap structural guard (the measured proof is ui-audit perf-plan-open, `reload-onto-plan` and
  * `open-map-after-reload`); each says what it protects so a "tidy-up" cannot quietly put the cost back. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const app = read("../src/workspaces/site-planner/SitePlannerApp.jsx");
-const finder = read("../src/workspaces/site-planner/MapFinder.jsx");
+const finder = mapFinderSource();
 const crumb = read("../src/shared/ui/ProjectBreadcrumb.jsx");
 
 describe("Map mode is built when first shown, then kept (SitePlannerApp)", () => {

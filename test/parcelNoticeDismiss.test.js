@@ -3,9 +3,10 @@
  * This file pins the wiring that spec cannot see on every run and that must not rot: the shared slot, the labelled ✕,
  * the dismissal flag's lifetime (session of the tool, never persisted) and that unrelated messages keep the old slot. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 
-const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+const src = mapFinderSource();
 
 describe("parcel-source banner — bottom centre, removable (owner 2026-10-16)", () => {
   it("renders through the shared FloatingNotice slot, not the bottom-left stack", () => {

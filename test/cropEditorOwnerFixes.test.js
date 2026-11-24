@@ -2,6 +2,7 @@
  * ui-audit/verify-crop-editor-ux.mjs (layout, right-click, reset, layering on the Site tab) and the signed-in
  * verify-crop-editor-live.mjs (the Map/Comps modal, the Adjust panel, lock, scale). */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import {
   nearestEdgeIndex, addPointAtNearestEdge, deletePointAt, canDeletePoint, MIN_POLY_VERTICES, MAX_POLY_VERTICES,
@@ -180,7 +181,7 @@ describe("NEW-7 — scale is reachable from the Adjust site plan panel", () => {
     expect(section).toMatch(/await commitPlacement\(o\.id, planned\.patch, \{ explicit: true \}\)/);
   });
   it("MapFinder claims every click while calibrating and hides click-select on the overlays", () => {
-    const mf = readFileSync("src/workspaces/site-planner/MapFinder.jsx", "utf8");
+    const mf = mapFinderSource();
     expect(mf).toMatch(/if \(calibRef\.current\) \{ calibClickRef\.current && calibClickRef\.current\(e\.latlng\); return; \}/);
     expect(mf).toMatch(/calibrating: !!calibration/);
   });

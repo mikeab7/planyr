@@ -5,7 +5,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 
 **Slimmed 2026-11-23 (audit batch H): the long per-file notes moved VERBATIM into `docs/site-planner/*.md`. This file is only a signpost. Read the topic note before editing a file listed under it** (the notes carry the owner decisions, the failure each rule came from and its guards; the guards still run in CI whether or not you read them).
 
-**Entry points** — `SitePlannerApp.jsx` (workspace root, lazy chunk), `MapFinder.jsx` (map and site picker), `SitePlanner.jsx` (the hand-rolled SVG planner canvas).
+**Entry points** — `SitePlannerApp.jsx` (workspace root, lazy chunk), `MapFinder.jsx` (map and site picker; audit batch L2 moved its brochure-drop, focus-request, team, Escape-key and calibration-marker groups to `lib/useMapFileDrop.js`, `useMapFocusRequests.js`, `useMyTeams.js`, `useMapEscapeKeys.js`, `useCalibrationMarkers.js`, read together in tests via the `mapFinderSource()` helper), `SitePlanner.jsx` (the hand-rolled SVG planner canvas).
 - **The plan editor is its own LAZY chunk (B329408, owner decision 2026-11-09).** Reach it only through `lib/plannerChunk.js`; never add a static import of `SitePlanner.jsx` where an always-loaded module can reach it (guard: repo-root `test/` **lazyPlanner**). A source-scan test reads the planner through the **plannerSource** helper, never `SitePlanner.jsx` alone. Full text: [entry-points-and-chunks](/docs/site-planner/entry-points-and-chunks.md).
 
 **Topic notes (verbatim; files named are the entries' lead files)**

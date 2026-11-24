@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import {
   landingView, clusterSites, densestCluster, milesBetween, boundsOf, fitZoom, clampedFitZoom,
@@ -256,7 +257,7 @@ describe("clustering is deterministic and order-independent", () => {
 /* Source guard — the whole point of this item is that the landing view is DERIVED. A future
  * refactor that quietly puts a fixed county back is the regression to catch in CI, not live. */
 describe("MapFinder no longer hardcodes a landing view (source guard)", () => {
-  const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+  const src = mapFinderSource();
 
   it("creates its map from landingView(), not from a county config", () => {
     // NEW-MAPCTRL-2 — the "back to your sites" affordance pulls milesBetween/CLUSTER_RADIUS_MI

@@ -4,6 +4,7 @@
  * city names, no road lines; /food = edge-to-edge thick road bands. "I don't understand why they differ."
  * Source guards below fail if either surface grows a private gate again. */
 import { describe, it, expect } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { siteStack, SITE_PLAN_BASEMAP, SITE_ROADS_FROM, resolveBasemapChoice } from "../src/shared/basemaps/basemaps.js";
@@ -44,7 +45,7 @@ describe("both surfaces read the one stack", () => {
     expect(strip(read("src/workspaces/food/components/FoodMap.jsx"))).not.toMatch(/attachSiteLabelStack|siteStack/);
   });
   it("the map finder reads siteStack — it keeps no private zoom literal", () => {
-    const finder = strip(read("src/workspaces/site-planner/MapFinder.jsx"));
+    const finder = strip(mapFinderSource());
     expect(finder).toMatch(/siteStack\(zoom, \{ roads: labels, cityNames \}\)/);
     expect(finder).toMatch(/siteStack\(zoom\)\.includes\("cityNames"\)/);
     expect(finder).not.toMatch(/getZoom\(\)\s*>=\s*\d+/);

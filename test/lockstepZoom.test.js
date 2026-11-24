@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mapFinderSource } from "./helpers/mapFinderSource.js";
 import { readFileSync } from "node:fs";
 import { cubicBezier, LEAFLET_ZOOM_EASE, parseTransform, tween, formatTransform, lockstepZoomAnimation } from "../src/shared/map/lockstepZoom.js";
 
@@ -124,6 +125,6 @@ describe("lockstepZoomAnimation — one loop moves every animated element; Leafl
     expect(map._animateZoom).toBe(base);
   });
   it("the Map view installs it", () => {
-    expect(readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8")).toMatch(/lockstepZoomAnimation\(map\)/);
+    expect(mapFinderSource()).toMatch(/lockstepZoomAnimation\(map\)/);
   });
 });
