@@ -270,6 +270,15 @@ export function detectCompType(text) {
  * lease-only vocabulary; a cap rate or NOI is sale-only; an acre-denominated size is land; a
  * price alongside a non-acre size reads as a building sale (TYPE INFERENCE table, B986096 ×9).
  * Returns null — never a type — when even the captured fields don't say. */
+/* A parsed SUPPLY-type cell (under construction / available space) also goes to Notes, tagged with its type, so a
+ * row of any OTHER type keeps the fact; the row's own type strips it again once the type is known. */
+function supplyNote(ctx, type, col, val) {
+  if (!ctx.supplyNotes) return;
+  const note = `${col.label}: ${val}`;
+  ctx.extras.push(note);
+  ctx.supplyNotes.push({ type, note });
+}
+
 function inferTypeFromCapturedFields(g) {
   if (g.rate != null || g.ti != null || g.freeRentMonths != null || g.opex != null) return "lease";
   if (g.capRate != null || g.noi != null) return "building_sale";
@@ -1968,34 +1977,34 @@ function assignHeaderCell(generic, flags, ctx, col, val) {
     case "ucStatus": {
       const t = String(val).toLowerCase();
       const st = /deliver|complete|finish/.test(t) ? "delivered" : /under|constr|build|progress|ongoing/.test(t) ? "under_construction" : /plan|propos|entitle|future/.test(t) ? "planned" : null;
-      if (st) generic.ucStatus = st; else ctx.extras.push(`${col.label}: ${val}`);
+      if (st) { generic.ucStatus = st; supplyNote(ctx, "under_construction", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "ucDeliveryKind": {
       const t = String(val).toLowerCase();
       const kind = /\bbts\b|build.?to.?suit/.test(t) ? "bts" : /\bspec/.test(t) ? "spec" : null;
-      if (kind) generic.ucDeliveryKind = kind; else ctx.extras.push(`${col.label}: ${val}`);
+      if (kind) { generic.ucDeliveryKind = kind; supplyNote(ctx, "under_construction", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "ucPreleasedPct": {
       const x = cellNumber(String(val).replace(/%/g, ""));
-      if (x != null && x >= 0 && x <= 100) generic.ucPreleasedPct = x; else ctx.extras.push(`${col.label}: ${val}`);
+      if (x != null && x >= 0 && x <= 100) { generic.ucPreleasedPct = x; supplyNote(ctx, "under_construction", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "avKind": {
       const t = String(val).toLowerCase();
       const kind = /\bsub/.test(t) ? "sublease" : /direct/.test(t) ? "direct" : null;
-      if (kind) generic.avKind = kind; else ctx.extras.push(`${col.label}: ${val}`);
+      if (kind) { generic.avKind = kind; supplyNote(ctx, "available", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "avDate": {
       const dt = findDateToken(val);
-      if (dt) generic.avDate = dt.iso; else ctx.extras.push(`${col.label}: ${val}`);
+      if (dt) { generic.avDate = dt.iso; supplyNote(ctx, "available", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "ucStartDate": case "ucDeliveryDate": {
       const dt = findDateToken(val);
-      if (dt) generic[col.key === "ucStartDate" ? "ucStartDate" : "ucDeliveryDate"] = dt.iso; else ctx.extras.push(`${col.label}: ${val}`);
+      if (dt) { generic[col.key === "ucStartDate" ? "ucStartDate" : "ucDeliveryDate"] = dt.iso; supplyNote(ctx, "under_construction", col, val); } else ctx.extras.push(`${col.label}: ${val}`);
       break;
     }
     case "powerAmps": { const x = cellNumber(String(val).replace(/\s*a(mps?)?$/i, "")); if (x != null && x > 0) generic.powerAmps = x; else ctx.extras.push(`${col.label}: ${val}`); break; }
@@ -2029,7 +2038,7 @@ function assignHeaderCell(generic, flags, ctx, col, val) {
 function parseSpreadsheetRow(cells, headerMap, sheetType) {
   const generic = emptyGeneric();
   const flags = {};
-  const ctx = { extras: [], notes: [], title: null, address: null, propertyName: null, lat: null, lon: null };
+  const ctx = { extras: [], notes: [], supplyNotes: [], title: null, address: null, propertyName: null, lat: null, lon: null };
   const cols = headerMap || DEFAULT_COLUMN_ORDER;
   cells.forEach((raw, i) => {
     const col = cols[i];
@@ -2073,6 +2082,13 @@ function parseSpreadsheetRow(cells, headerMap, sheetType) {
       const inferred = inferTypeFromCapturedFields(generic);
       if (inferred) { generic.compType = inferred; flags.compType = { level: "soft", reason: "Type wasn't a column — guessed from which figures were given." }; }
     }
+  }
+  // A supply column (Status, Delivery, % Leased, Avail. …) is a FIELD only on its own type's row. On any other row
+  // (a sale sheet's "% Leased" occupancy, a lease sheet's "Delivery" date) it stays in Notes — never dropped.
+  // On its own type's row the note is removed, because the field now holds it.
+  if (ctx.supplyNotes.length && generic.notes) {
+    const own = new Set(ctx.supplyNotes.filter((x) => x.type === generic.compType).map((x) => x.note));
+    if (own.size) generic.notes = generic.notes.split("; ").filter((x) => !own.has(x)).join("; ") || null;
   }
   // The Bldg SF column is the building size on an Available row, so it is not repeated in Notes there.
   if (generic.compType === "available" && generic.buildingSf != null && generic.buildingSfNote && generic.notes) {
