@@ -1,13 +1,11 @@
-/* B2671333 — the Compose exhibit sheet has NO empty bands: the plan fills the plan window, and the site sits in the middle of it.
+/* B2671333 — a NEW exhibit frame is centred on the PROPERTY LINE, so the site sits in the middle of the printed sheet.
  *
- * Owner report (Goose Creek, "PII - TAS R3", Letter landscape, Scale to fit): white bands between the title block and the aerial and
- * at the bottom, and the property line not centred. Root cause: the compose screen kept the frame's own shape and nested the picture
- * "meet" into a plan window of a DIFFERENT shape, so the shorter side was letterboxed in white. The frame is now grown (never
- * shrunk, centre kept) to the window's shape, and a new frame is seeded on the development AND the property lines together.
+ * Owner (2026-11-24, Goose Creek "PII - TAS R3"): "why is this not centered when it prints". The frame used to be seeded on the buildings' extent,
+ * which is not the property line's centre, so the property line printed off-centre. Michael does NOT want the sheet's white margin removed (it is
+ * what keeps the picture centred), so the frame keeps its own shape and the picture is still nested "meet" in the plan window.
  *
- * Drives the REAL compose screen and reads the REAL preview sheet (the same buildComposedSheet the PDF rasterizes) for every
- * paper size and orientation, with the summary strip and buildings table each on and off: the nested plan's picture shape must
- * equal its window's shape (no letterbox), and the drawn site (parcels + elements) must sit centred in that window. */
+ * Drives the REAL compose screen and reads the REAL preview sheet (the same buildComposedSheet the PDF rasterizes) for every paper size and
+ * orientation, with the summary strip and buildings table each on and off: the parcel outline must sit centred in the plan window. */
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { armPlannerHooks } from "./helpers.js";
@@ -32,7 +30,7 @@ async function loadPlan(page) {
   await page.goto("/#/site");
   if (!(await canvas(page).isVisible().catch(() => false))) await page.getByText("Goose Creek", { exact: true }).first().click();
   await expect(canvas(page)).toBeVisible();
-  /* el-tier: readiness gate only — waits for the building band to be on the canvas; the sheet itself is measured over every [data-feature] below. */
+  /* el-tier: readiness gate only — waits for the building band to be on the canvas; the sheet itself is measured over the parcel outline below. */
   await expect.poll(async () => page.locator("[data-el-id]").count(), { timeout: 20_000 }).toBeGreaterThan(10);
   await page.waitForTimeout(1000);
 }
@@ -60,7 +58,7 @@ async function measurePreview(page) {
       if (!plan) return { error: "no nested plan svg" };
       const [, , vw, vh] = plan.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
       const W = parseFloat(plan.getAttribute("width")), H = parseFloat(plan.getAttribute("height"));
-      const feats = [...plan.querySelectorAll("[data-feature], [data-el-id]")].filter((n) => !n.closest("[data-export='skip']"));
+      const feats = [...plan.querySelectorAll('[data-feature^="parcel:"]')].filter((n) => !n.closest("[data-export='skip']") && !n.hasAttribute("data-chrome"));
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       feats.forEach((n) => { const b = n.getBoundingClientRect(); if (b.width + b.height === 0) return; x0 = Math.min(x0, b.left); y0 = Math.min(y0, b.top); x1 = Math.max(x1, b.right); y1 = Math.max(y1, b.bottom); });
       const pr = plan.getBoundingClientRect();
@@ -74,8 +72,8 @@ async function measurePreview(page) {
 }
 
 const PAPERS = [["8.5 × 11", "Letter"], ["11 × 17", "Half"], ["24 × 36", "Full"]];
-test.describe("Compose exhibit — no empty bands, site centred (B2671333)", () => {
-  test("every paper × orientation × summary strip × buildings table fills the window and centres the site", async ({ page }) => {
+test.describe("Compose exhibit — property line centred (B2671333)", () => {
+  test("every paper × orientation × summary strip × buildings table centres the property line", async ({ page }) => {
     test.setTimeout(240_000);
     await loadPlan(page);
     await openCompose(page);
@@ -91,9 +89,7 @@ test.describe("Compose exhibit — no empty bands, site centred (B2671333)", () 
           const m = await measurePreview(page);
           const tag = `${label} ${orient} strip=${strip} table=${table}`;
           expect(m.error, tag).toBeUndefined();
-          expect(Math.abs(m.windowAspect - m.frameAspect) / m.windowAspect, `${tag}: picture shape must equal its window (no letterbox)`).toBeLessThan(0.01);
-          expect(m.picFillX, `${tag}: fills window width`).toBeGreaterThan(0.99);
-          expect(m.picFillY, `${tag}: fills window height`).toBeGreaterThan(0.99);
+          expect(m.n, `${tag}: the parcel outline is in the sheet`).toBeGreaterThan(0);
           expect(Math.abs(m.dx), `${tag}: site centred horizontally`).toBeLessThan(0.08);
           expect(Math.abs(m.dy), `${tag}: site centred vertically`).toBeLessThan(0.08);
           report.push(`${tag} dx=${m.dx.toFixed(3)} dy=${m.dy.toFixed(3)} n=${m.n}`);
@@ -102,17 +98,17 @@ test.describe("Compose exhibit — no empty bands, site centred (B2671333)", () 
     }
     console.log(report.join("\n"));
   });
-  test("a fixed scale still fills the window, and Reposition → Continue keeps it filled", async ({ page }) => {
+  test("a fixed scale and Reposition → Continue keep the property line centred", async ({ page }) => {
     await loadPlan(page);
     await openCompose(page);
     const panel = page.locator('[data-testid="print-compose"]');
     await panel.locator("select").first().selectOption({ index: 3 }); // a fixed engineering scale
     let m = await measurePreview(page);
-    expect(Math.abs(m.windowAspect - m.frameAspect) / m.windowAspect).toBeLessThan(0.01);
+    expect(Math.abs(m.dx)).toBeLessThan(0.08); expect(Math.abs(m.dy)).toBeLessThan(0.08);
     await panel.getByRole("button", { name: /Reposition/ }).click();
     await page.locator('button:has-text("Continue")').click();
     await expect(panel).toBeVisible();
     m = await measurePreview(page);
-    expect(Math.abs(m.windowAspect - m.frameAspect) / m.windowAspect).toBeLessThan(0.01);
+    expect(Math.abs(m.dx)).toBeLessThan(0.08); expect(Math.abs(m.dy)).toBeLessThan(0.08);
   });
 });
