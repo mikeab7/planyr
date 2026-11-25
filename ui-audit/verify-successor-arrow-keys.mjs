@@ -1,3 +1,4 @@
+// one-off — run by hand after touching the successor prompt keyboard handling (PR #3089); not a CI gate.
 /* The successor prompt is fully keyboard-drivable: Left/Right walk the status choices of the active
  * row (wrapping at both ends), Up/Down change row (wrapping), Enter applies, Escape dismisses, and
  * the arrows never reach the schedule grid behind. Run: node ui-audit/verify-successor-arrow-keys.mjs */
