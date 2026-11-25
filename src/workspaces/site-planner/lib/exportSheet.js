@@ -46,6 +46,8 @@ import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, p
 export { pageSizeForFit };
 import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity, overlayLabelFontSize, overlayLabelHalo } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
+import { ROAD_NAMES_TILES } from "../../../shared/basemaps/basemaps.js";
+import { roadNamesSnapshotPlan, renderRoadNamesSnapshot } from "../../../shared/basemaps/roadNamesSnapshot.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriPrintFeatures, esriLineLabels, esriZoneLabels, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
@@ -87,6 +89,7 @@ export function createExportSheet(ctx) {
     svgRef, stateRef, overlayRefs, geoMapRef,
     // --- map + layer state ------------------------------------------------------
     basemapOn, basemapSrc, overlays, layerStatus,
+    roadNamesOn = false, roadNamesOpacity = 1, // NEW-1 (2026-11-25) — the Layers panel's Road Names row: the sheet prints the map's street names exactly when the map shows them
     showAerial = true, // B2589680 — the PLAN-LEVEL aerial toggle (map View ▾ / Overlays): the sheet carries the aerial exactly when the map shows it
     // --- presentation -----------------------------------------------------------
     PAL, f0,
@@ -308,6 +311,23 @@ export function createExportSheet(ctx) {
           // stitched data: URL (B839 fast path succeeded → no fetch, no fallback needed).
           if (a.fallbackSrc) im.setAttribute("data-fallback-href", a.fallbackSrc);
         }
+        root.insertBefore(im, anchor.nextSibling);
+        anchor = im;
+      }
+      // NEW-1 (2026-11-25) — the map's street names right above the aerial and below every GIS layer and the plan, the screen's own
+      // order (Leaflet's vector-label pane sits over the imagery and under the overlay pane). Only with the live aerial it came with.
+      const rn = exportAerial && exportAerial.roadNames;
+      if (rn && aerials.some((x) => x.a === exportAerial)) {
+        const tl = f2p({ x: rn.x, y: rn.y });
+        const im = document.createElementNS(NS, "image");
+        im.setAttribute("href", rn.src);
+        im.setAttributeNS("http://www.w3.org/1999/xlink", "href", rn.src);
+        im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
+        im.setAttribute("width", rn.wFt * view.ppf);
+        im.setAttribute("height", rn.hFt * view.ppf);
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("opacity", rn.opacity ?? 1);
+        im.setAttribute("data-export-roadnames", rn.fallback ? "raster" : "vector");
         root.insertBefore(im, anchor.nextSibling);
         anchor = im;
       }
@@ -720,7 +740,7 @@ export function createExportSheet(ctx) {
   // sharp tiles land within budget are drawn over the (upscaled) base image; any that don't are left
   // as the base — never a hole, never a wait past the budget, and a no-op (zero extra fetches) once
   // the base pick is already at the source's native ceiling (deepenZoomFor → null).
-  const stitchAerialDataUrl = async (bm, bbox) => {
+  const stitchAerialDataUrl = async (bm, bbox, mime = "image/jpeg") => { // mime: a TRANSPARENT layer (the road-names fallback) stitches to PNG
     try {
       const z = pickAerialTileZoom(bbox, { maxNative: bm.maxNative, maxPx: 3072 });
       const grid = aerialTileGrid(bbox, z);
@@ -764,14 +784,14 @@ export function createExportSheet(ctx) {
           if (sctx) {
             sctx.drawImage(canvas, 0, 0, sc.width, sc.height); // base, upscaled — covers every cell the sharp fetch missed
             for (const { t, img } of arrived) sctx.drawImage(img, Math.round(t.dx), Math.round(t.dy), 256, 256);
-            const sharpOut = sc.toDataURL("image/jpeg", 0.92);
+            const sharpOut = sc.toDataURL(mime, 0.92);
             releaseCanvas(canvas); releaseCanvas(sc);
             return sharpOut;
           }
         }
       }
       // NEW-5 — the stitched aerial can run to many megapixels; encode, then hand the buffer back.
-      const out = canvas.toDataURL("image/jpeg", 0.92);
+      const out = canvas.toDataURL(mime, 0.92);
       releaseCanvas(canvas);
       return out;
     } catch (_) { return null; }
@@ -788,8 +808,9 @@ export function createExportSheet(ctx) {
   // A source that's genuinely unreachable still ends in a dropped aerial + a loud warning (never a
   // silent white sheet — LOUD-FAILURE). Returns null when there's no live basemap to capture (then
   // buildExportSvg falls back to any dropped/from-map underlay). Async (B839 tile fetches).
-  const exportAerialForFrame = async (frame) => {
+  const exportAerialForFrame = async (frame, labelPpf = null) => {
     if (!origin || !basemapOn || !aerialWantedOnSheet(showAerial)) return null; // B2589680 — no fetch/stitch for an aerial the map is not showing
+    const withRoads = async (aerial) => (aerial ? { ...aerial, roadNames: await exportRoadNamesForFrame(frame, labelPpf) } : aerial);
     const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
     // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
     // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
@@ -807,10 +828,41 @@ export function createExportSheet(ctx) {
     const altBm = BASEMAPS[altKey];
     // B839 fast path: stitch cached tiles (active source, then alternate) into a data: URL.
     const stitched = (await stitchAerialDataUrl(bm, bbox)) || (altBm ? await stitchAerialDataUrl(altBm, bbox) : null);
-    if (stitched) return { ...placement, src: stitched, opacity: 1, fromMap: true };
+    if (stitched) return withRoads({ ...placement, src: stitched, opacity: 1, fromMap: true });
     // Fallback: dynamic /export URL + the alternate source as the inline retry (B840).
     const altSrc = altBm ? aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: altBm.export, maxPx: 2400 }).src : null;
-    return { ...placement, opacity: 1, fromMap: true, fallbackSrc: altSrc };
+    return withRoads({ ...placement, opacity: 1, fromMap: true, fallbackSrc: altSrc });
+  };
+  /* NEW-1 (2026-11-25) — the map's public street names (and the road lines drawn with them) on the sheet, exactly when the Site Plan
+     map shows them: Layers → Map Base → Road Names on AND the aerial showing (the same two facts that put them on screen; there is no
+     print-only switch). On screen they are a WebGL canvas the SVG clone cannot capture, so the sheet renders its own copy with the SAME
+     style at the SHEET's scale (`labelPpf`, the label tier's px-per-foot) — see shared/basemaps/roadNamesSnapshot.js. If the vector
+     source cannot be reached the sheet falls back to the same Esri road-names raster the screen falls back to; if that fails too the
+     sheet prints without them and SAYS so (LOUD-FAILURE). Returns { x, y, wFt, hFt, src, opacity, fallback } in plan feet, or null. */
+  const exportRoadNamesForFrame = async (frame, labelPpf) => {
+    if (!roadNamesOn || !origin) return null;
+    const ext = exportFeetExtent(frame);
+    if (!ext) return null;
+    const ppf = labelPpf > 0 ? labelPpf : view.ppf;
+    const plan = roadNamesSnapshotPlan({ extentWft: ext.maxX - ext.minX, extentHft: ext.maxY - ext.minY, labelPpf: ppf, lat: origin.lat });
+    if (!plan) return null; // a frame too wide for the Site Plan map to draw roads at all (the screen's own zoom gate)
+    const opacity = Number.isFinite(roadNamesOpacity) ? roadNamesOpacity : 1;
+    try {
+      const [cLat, cLon] = feetToLatLng({ x: (ext.minX + ext.maxX) / 2, y: (ext.minY + ext.maxY) / 2 }, origin.lat, origin.lon);
+      const snap = await renderRoadNamesSnapshot({ center: { lat: cLat, lon: cLon }, plan });
+      const [nw, se] = lngLatRingToFeet([[snap.bounds.west, snap.bounds.north], [snap.bounds.east, snap.bounds.south]], origin.lon, origin.lat);
+      return { x: Math.min(nw.x, se.x), y: Math.min(nw.y, se.y), wFt: Math.abs(se.x - nw.x), hFt: Math.abs(se.y - nw.y), src: snap.src, opacity, fallback: false };
+    } catch (e) {
+      console.error("[export] road names: vector render failed — trying the raster road names", e);
+    }
+    const bbox = feetExtentToBbox(ext, origin.lat, origin.lon);
+    const stitched = await stitchAerialDataUrl({ tiles: ROAD_NAMES_TILES.url, maxNative: ROAD_NAMES_TILES.maxNative }, bbox, "image/png");
+    if (stitched) {
+      const p = aerialPlacement(bbox, origin.lon, origin.lat, { maxPx: 2400 });
+      return { x: p.x, y: p.y, wFt: p.imgW * p.ftPerPx, hFt: p.imgH * (p.ftPerPxY || p.ftPerPx), src: stitched, opacity, fallback: true };
+    }
+    flashWarn("⚠ Couldn't load the street names from the map, so this sheet was exported without them. Your plan and the aerial are included.", 8000);
+    return null;
   };
   // Synthesize frame-exact images for the LIVE GIS overlay layers (FEMA floodplain, TxRRC
   // pipelines, wetlands, utilities, ground relief …) so they print, same as the aerial (B739).
@@ -1101,7 +1153,7 @@ export function createExportSheet(ctx) {
 
   const exportPNG = async () => {
     await ensureLayersForOverlays(overlays); // batch K stage 1 — a layer that is ON but whose per-state file has not loaded yet must be in the registry before the export enumerates it (a failed load REJECTS: the export stops loudly rather than printing without the layer)
-    const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback)
+    const exportAerial = await exportAerialForFrame(printFrame, sheetLabelPpfFor(printFrame)); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback) + its street names at the sheet's scale
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
@@ -1181,7 +1233,7 @@ export function createExportSheet(ctx) {
     // from the frame alone, so Bluebeam / Acrobat still calibrate with the bar off.
     const titleScale = includeScaleBar === false ? "" : scaleLabelText;
     await ensureLayersForOverlays(overlays); // batch K stage 1 — a layer that is ON but whose per-state file has not loaded yet must be in the registry before the export enumerates it (a failed load REJECTS: the export stops loudly rather than printing without the layer)
-    const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
+    const exportAerial = await exportAerialForFrame(printFrame, sheetLabelPpfFor(printFrame, paper, orient, includeMetricsBand, pageOverride)); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback; + its street names at this sheet's scale (NEW-1)
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
