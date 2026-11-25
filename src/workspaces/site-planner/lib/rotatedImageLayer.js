@@ -54,6 +54,14 @@ export function createRotatedImageLayer(map) {
   // there the instant the gesture starts — see onZoomAnim below for why that instant write is
   // otherwise a jump, not a lag.
   img.classList.add("leaflet-zoom-animated");
+  // GHOST-ON-ZOOM — an <img> with no transform and no CSS size paints at its NATURAL pixel size at the
+  // pane's origin (the "big, opaque, bottom-left" flash). That is what a fresh layer is until its first
+  // good placement, and what a layer stays whenever the placement cannot be solved (no image size, or a
+  // non-finite matrix). So the image is HIDDEN until `update()` has written a finite transform AND a size,
+  // and is hidden again the moment it cannot. `transition: none` on that first write stops Leaflet's
+  // zoom-ease from animating a layer that is created mid-zoom out of its natural-size identity state.
+  img.style.visibility = "hidden";
+  img.style.transition = "none";
   pane.appendChild(img);
 
   let corners = null, imgW = 0, imgH = 0, clickHandler = null;
@@ -102,11 +110,25 @@ export function createRotatedImageLayer(map) {
     return `matrix(${a},${b},${c},${d},${p0.x},${p0.y})`;
   };
 
+  let placedOnce = false;
+  // Writes `transform`, or hides the image when the matrix is not finite (never leaves the previous or
+  // the natural-size state on screen). The first good write is un-eased; later ones ease via leaflet.css.
+  const writeTransform = (m) => {
+    if (!/^matrix\((-?[\d.]+(e[-+]?\d+)?,){5}-?[\d.]+(e[-+]?\d+)?\)$/i.test(m)) { img.style.visibility = "hidden"; return; }
+    img.style.transform = m;
+    if (!placedOnce) {
+      placedOnce = true;
+      void img.offsetWidth; // commit the un-eased first position before the transition is re-enabled
+      img.style.transition = "";
+    }
+    img.style.visibility = "";
+  };
+
   const update = () => {
-    if (!corners || !imgW || !imgH) return;
+    if (!corners || !imgW || !imgH) { img.style.visibility = "hidden"; return; }
     img.style.width = `${imgW}px`;
     img.style.height = `${imgH}px`;
-    img.style.transform = matrixFor((ll) => map.latLngToLayerPoint(ll));
+    writeTransform(matrixFor((ll) => map.latLngToLayerPoint(ll)));
   };
 
   // B849841/NEW-2 — without this, the overlay only ever repositions on "move zoom viewreset",
@@ -121,7 +143,7 @@ export function createRotatedImageLayer(map) {
   // — hence this second, explicit handler rather than relying on `update()` alone.
   const onZoomAnim = (e) => {
     if (!corners || !imgW || !imgH) return;
-    img.style.transform = matrixFor((ll) => map._latLngToNewLayerPoint(ll, e.zoom, e.center));
+    writeTransform(matrixFor((ll) => map._latLngToNewLayerPoint(ll, e.zoom, e.center)));
   };
 
   // B1134754 NEW-21, extended NEW-1 (polygon crop) — non-destructive crop. `clip-path` is
@@ -147,6 +169,7 @@ export function createRotatedImageLayer(map) {
     L.DomEvent.stop(e); // consume it — the plan is the target, not the map underneath
     clickHandler(map.mouseEventToLatLng(e));
   };
+  img.addEventListener("load", update); // belt and braces: re-solve once the bytes are really there
   img.addEventListener("pointerdown", onImgPointerDown);
   img.addEventListener("click", onImgClick);
 
@@ -162,6 +185,7 @@ export function createRotatedImageLayer(map) {
     destroy() {
       map.off("move zoom viewreset", update);
       map.off("zoomanim", onZoomAnim);
+      img.removeEventListener("load", update);
       img.removeEventListener("pointerdown", onImgPointerDown);
       img.removeEventListener("click", onImgClick);
       onWindowUp();

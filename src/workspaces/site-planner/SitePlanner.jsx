@@ -21314,7 +21314,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const scallopD = cloudScallopPath(screenPts, cloudArcPx(m.arcFt, rppf, labelK)); // NEW-1 (2026-11-06): never drawn smaller than a readable scallop
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
-                      <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
+                      {/* 2026-11-25 — the grab follows the SCALLOPED line the person sees, not the bare polygon under it: the
+                          bulges stand out past the polygon edge, so an edge-centred hit band missed the crest of every arc. */}
+                      <path d={scallopD} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
                       <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visibleStroke} {...visFill} pointerEvents="none" />
                     </g>
                   );
