@@ -5,7 +5,7 @@
  * the warn-amber accent bar. Non-blocking by design: with per-element last-write-wins nothing is
  * lost, so a toast informs (and offers an action like Restore) — it never gates editing.
  *
- * Anatomy: fixed stack (bottom-center), max TOAST_CAP visible + a "+n more" line; each toast
+ * Anatomy: fixed stack (bottom-center), max TOAST_CAP visible + a "+n more" button that expands the stack; each toast
  * auto-dismisses after ttlMs, HOVER-HOLD pauses its timer (mouse over = keep it while reading);
  * an optional action button (e.g. "Restore", "Show") rides on the right. role="status" so screen
  * readers announce without stealing focus.
@@ -13,8 +13,9 @@
  * Pure helpers (pushToast/visibleToasts) are exported for unit tests; the host component is
  * MODULE-SCOPE (never define components inside a render body — the remount/focus-loss class).
  */
-import { useRef, useState, useEffect, useCallback, useSyncExternalStore } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react";
 import { RADIUS } from "./radius.js";
+import { FONT_SIZE } from "./designTokens.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 
 export const TOAST_TTL_MS = 8000;
@@ -66,10 +67,16 @@ export function countByDedupeKey(list, key) {
   return (list || []).filter((t) => t && t.dedupeKey === key).length;
 }
 
-// Pure: what renders — the first CAP toasts plus how many are hidden behind "+n more".
-export function visibleToasts(list, cap = TOAST_CAP) {
+// Pure: what renders — the first CAP toasts plus how many are hidden behind "+n more". With
+// `expanded` (the person pressed "+n more", NEW-1 2026-11-25) EVERY toast renders and `canCollapse`
+// says whether a "Show fewer" control belongs under them. Expansion only means something while the
+// list is longer than the cap: once expiry/dismissal brings it back to the cap or below, the stack
+// is simply collapsed again (`expanded` false) so the NEXT overflow starts as the short strip.
+export function visibleToasts(list, cap = TOAST_CAP, expanded = false) {
   const l = list || [];
-  return { shown: l.slice(0, cap), more: Math.max(0, l.length - cap) };
+  const over = l.length > cap;
+  if (expanded && over) return { shown: l, more: 0, expanded: true, canCollapse: true };
+  return { shown: l.slice(0, cap), more: Math.max(0, l.length - cap), expanded: false, canCollapse: false };
 }
 
 // Hook: the toast list + push/dismiss. Auto-dismiss timing lives in the item component so
@@ -164,20 +171,50 @@ function ToastItem({ toast, onDismiss }) {
   );
 }
 
+/* NEW-1 (2026-11-25, owner screenshot: two "Deleted Parcel N [Undo] ✕" toasts and a "+1 more" pill
+ * that "says one more, but it won't let me click on it to open it"). The pill was a plain <div> with
+ * no handler: it announced hidden toasts and gave no way to reach them, so the hidden toast's Undo was
+ * unreachable. It is now a real button that EXPANDS the stack to every toast; expanded, a "Show fewer"
+ * button collapses it, and the stack collapses on its own once expiry/dismissal brings it back to the
+ * cap. An expanded stack scrolls inside a capped height (TOAST_EXPANDED_MAX_H) rather than growing up
+ * the canvas over the map's own controls. */
+export const TOAST_EXPANDED_MAX_H = "min(45vh, 340px)";
+const pillStyle = {
+  background: "var(--surface-overlay)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+  borderRadius: RADIUS.md, padding: "3px 10px", fontSize: FONT_SIZE.control, fontWeight: 700, pointerEvents: "auto",
+  cursor: "pointer", fontFamily: "inherit",
+};
 export function ToastHost({ toasts, onDismiss }) {
-  const { shown, more } = visibleToasts(toasts);
+  const [expandedWant, setExpanded] = useState(false);
+  const { shown, more, expanded, canCollapse } = visibleToasts(toasts, TOAST_CAP, expandedWant);
+  // Back at (or under) the cap → forget the expansion, so the next overflow starts collapsed.
+  useEffect(() => { if (expandedWant && !expanded) setExpanded(false); }, [expandedWant, expanded]);
+  // Opening the list lands on the NEWEST notice (the bottom, next to the button just pressed), not the oldest.
+  const listRef = useRef(null);
+  useLayoutEffect(() => { if (expanded && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight; }, [expanded]);
   if (!shown.length) return null;
   return (
     <FloatingNotice testId="sync-toast-host" pointerEvents="none">
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", pointerEvents: "none" }}>
+      <div
+        ref={listRef}
+        data-toast-expanded={expanded ? "1" : undefined}
+        style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", pointerEvents: "none",
+          ...(expanded ? { maxHeight: TOAST_EXPANDED_MAX_H, overflowY: "auto", pointerEvents: "auto", padding: "2px 4px" } : null) }}
+      >
         {shown.map((t) => <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />)}
-        {more > 0 && (
-          <div style={{ background: "var(--surface-overlay)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-            borderRadius: 8, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, pointerEvents: "auto" }}>
-            +{more} more
-          </div>
-        )}
       </div>
+      {more > 0 && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 8, pointerEvents: "none" }}>
+          <button type="button" data-testid="toast-more" aria-expanded="false" title="Show every notice"
+            onClick={() => setExpanded(true)} style={pillStyle}>+{more} more</button>
+        </div>
+      )}
+      {canCollapse && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 8, pointerEvents: "none" }}>
+          <button type="button" data-testid="toast-fewer" aria-expanded="true"
+            onClick={() => setExpanded(false)} style={pillStyle}>Show fewer</button>
+        </div>
+      )}
     </FloatingNotice>
   );
 }
