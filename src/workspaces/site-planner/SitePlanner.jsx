@@ -484,6 +484,7 @@ import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printS
 import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
 import { normalizeRules, effectiveBuildingProps, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+import { UNDO_TOAST_KEY, UNDO_TOAST_TTL_MS, nextUndoEntry, undoToastWords } from "./lib/undoToast.js";
 import { carryKeyOf, graftOverlaySrc, stashMemory, takeMemory, persistDisk, loadDisk } from "./lib/historyCarry.js"; // NEW-1 (2026-11-13) — undo history survives leaving a plan
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
@@ -4935,6 +4936,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     applyRedoN(n);
   };
 
+  /* ⛔ ONE UNDO TOAST, AND IT NEVER LIES (owner pick "A", 2026-11-25; model + rules in lib/undoToast.js).
+   * Every action that offers Undo calls `pushUndoToast` RIGHT AFTER its pushHistory(): it names that action by
+   * the frame the push recorded, merges a run of the same kind ("Deleted 3 parcels · Undo all 3"), and the button
+   * reverses exactly the steps it names (applyUndoN), never "whatever was last". The effect below withdraws the
+   * toast the moment its actions stop being the newest real steps (Ctrl+Z, another edit), and the press re-checks. */
+  const undoToastRef = useRef(null);
+  const undoToastShowing = () => toasts.some((t) => t && t.dedupeKey === UNDO_TOAST_KEY);
+  const undoFromToast = (entry) => {
+    undoToastRef.current = null;
+    if (!histRef.current.stepsAreTop(entry.frames, stateRef.current)) { // LOUD-FAILURE: never reverse something the toast does not name
+      flashWarn("That can't be undone from the banner any more, because something changed after it. Use Ctrl+Z or the undo list.", 6000);
+      return;
+    }
+    const n = entry.frames.length;
+    const name = riskName();
+    if (name) { pushToast({ text: `The next undo would reverse ${name}'s change, not yours. Undo it anyway?`, action: { label: "Undo anyway", onClick: () => applyUndoN(n) } }); return; }
+    applyUndoN(n);
+  };
+  const pushUndoToast = ({ mergeKey = null, count = 1, names = [], text, many = null }) => {
+    const frame = histRef.current.top();
+    if (!frame) { pushToast({ text }); return; } // nothing recorded → nothing honest to offer
+    const prev = undoToastShowing() ? undoToastRef.current : null;
+    const entry = nextUndoEntry(prev, { mergeKey, frame, count, names, text, many }, (fr) => histRef.current.stepsAreTop(fr, null));
+    undoToastRef.current = entry;
+    const w = undoToastWords(entry);
+    pushToast({
+      dedupeKey: UNDO_TOAST_KEY, renew: true, countdown: true, ttlMs: UNDO_TOAST_TTL_MS,
+      text: w.text, detail: w.detail, action: { label: w.label, onClick: () => undoFromToast(entry) },
+      onClose: () => { undoToastRef.current = null; },
+    });
+  };
+  // Withdraw the undo toast once its actions are no longer the newest real steps. Reference checks only (cheap),
+  // and only while one is up.
+  useEffect(() => {
+    const entry = undoToastRef.current;
+    if (!entry) return;
+    if (!undoToastShowing()) { undoToastRef.current = null; return; }
+    if (!histRef.current.stepsAreTop(entry.frames, stateRef.current)) { undoToastRef.current = null; dismissToastByKey(UNDO_TOAST_KEY); }
+  });
+
   /* ── NEW-1 / NEW-2 — LOCATE A PLAN + DEED PROMOTION, loaded on demand ─────────────────────────
    *
    * The bodies live in `lib/plannerPlacementCmds.js`. Measured: kept inline they added 9.9 KB to
@@ -6565,7 +6606,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // return, so the key stayed dead until an unrelated click happened to reset it.
     setSel(null); setMulti([]); setDrillId(null); setSelVtx(null);
     tombstone(plan.tombstones);
-    if (pcIds.length) pushToast({ text: `Deleted ${plan.count} items`, action: { label: "Undo", onClick: undo } }); // a mixed selection that included parcels still offers Undo
+    if (pcIds.length) pushUndoToast({ mergeKey: "delete-items", count: plan.count, text: `Deleted ${plan.count} items`, many: (n) => `Deleted ${n} items` }); // a mixed selection that included parcels still offers Undo
     reportClientEvent("delete-outcome", `${entry} → removed ${plan.label}`, {
       entry, result: "removed", n: plan.count, removed: plan.tombstones.length, locked: plan.lockedCount,
       ids: plan.tombstones.slice(0, 20),
@@ -7495,7 +7536,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (clashes.length) notes.push(`heads up: “${clashes[0][1].name}” is now the name of ${clashes.length > 2 ? "several parcels" : "two parcels"} on this plan — rename one`);
     if (notes.length) flashWarn(`${notes.join(" — ")}.`, 9000);
     const pieceNames = made.map((m) => m.splitName);
-    pushToast({ text: `Split ${parentName} into ${pieceNames.length === 2 ? `${pieceNames[0].split(" · ").pop()} and ${pieceNames[1].split(" · ").pop()}` : `${pieceNames.length} pieces`}`, action: { label: "Undo", onClick: undo } });
+    pushUndoToast({ text: `Split ${parentName} into ${pieceNames.length === 2 ? `${pieceNames[0].split(" · ").pop()} and ${pieceNames[1].split(" · ").pop()}` : `${pieceNames.length} pieces`}` });
     return plan;
   };
   // Restore the original of a split / the originals of a combine — durable, unlike Undo (which is
@@ -7507,7 +7548,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone(plan.removeIds);
     setParcels(plan.parcels);
     setSel({ kind: "parcel", id: plan.restored.id });
-    pushToast({ text: `Restored the original from ${plan.count} pieces${plan.edited ? " — edits made to the pieces since the split were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
+    pushUndoToast({ text: `Restored the original from ${plan.count} pieces${plan.edited ? " — edits made to the pieces since the split were not kept" : ""}` });
     return plan;
   };
   const restoreCombinedOriginals = (tractId) => {
@@ -7517,7 +7558,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone(plan.removeIds);
     setParcels(plan.parcels);
     setSel({ kind: "parcel", id: plan.restored[0].id });
-    pushToast({ text: `Restored ${plan.restored.length} originals from ${plan.name}${plan.edited ? " — edits made to the tract since it was combined were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
+    pushUndoToast({ text: `Restored ${plan.restored.length} originals from ${plan.name}${plan.edited ? " — edits made to the tract since it was combined were not kept" : ""}` });
     return plan;
   };
 
@@ -7593,7 +7634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "parcel", id: plan.tract.id });
     setParcelOpen((o) => ({ id: plan.tract.id, n: (o?.n || 0) + 1 })); // its detail card opens by itself
     setTool("select");
-    pushToast({ text: `Combined ${plan.count} parcels into ${plan.name}`, action: { label: "Undo", onClick: undo } });
+    pushUndoToast({ text: `Combined ${plan.count} parcels into ${plan.name}` });
     return plan;
   };
   const mergeParcels = () => combineParcelsAction(combineSel);
@@ -11158,7 +11199,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (parcelPageRef.current && gone.has(parcelPageRef.current)) { setParcelPageId(null); setSelSectionKey(null); } // its Properties page must not outlive it
     if (splitTarget && gone.has(splitTarget)) cancelPanelSplit();
     tombstone(plan.ids);
-    pushToast({ text: plan.toast, action: { label: "Undo", onClick: undo } });
+    pushUndoToast({ mergeKey: "delete-parcel", count: plan.ids.length, names: plan.names, text: plan.toast, many: (n) => `Deleted ${n} parcels` });
     reportClientEvent("delete-outcome", `${entry} → removed ${plan.ids.length === 1 ? "parcel" : `${plan.ids.length} parcels`}`, { entry, result: "removed", n: plan.ids.length, locked: plan.lockedCount, ids: plan.ids.slice(0, 20), stale: plan.stale.length });
     return plan;
   };
@@ -11870,7 +11911,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const pc = parcels.find((p) => p.id === id); if (!pc) return;
       const nm = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
       toggleParcelLock(id);
-      pushToast({ text: `${pc.locked ? "Unlocked" : "Locked"} ${nm}`, action: { label: "Undo", onClick: undo } });
+      pushUndoToast({ text: `${pc.locked ? "Unlocked" : "Locked"} ${nm}` });
     },
     onToggleAllLock: toggleAllParcelsLock,
     onZoom: (id) => zoomToElements([{ kind: "parcel", id }]),
@@ -20165,7 +20206,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = selParcel; if (!pc || !hasPaving(pc)) return;
     pushHistory();
     setParcels((a) => a.map((p) => { if (p.id !== pc.id) return p; const { pavingSetbacks: _gone, ...rest } = p; return rest; }));
-    pushToast({ text: "Paving setback removed", action: { label: "Undo", onClick: undo } }); // the building setback is untouched; Undo brings the paving back
+    pushUndoToast({ text: "Paving setback removed" }); // the building setback is untouched; Undo brings the paving back
   };
   const pavingSectionValue2 = (sec, v) => {
     const pc = selParcel; if (!pc || !hasPaving(pc)) return;

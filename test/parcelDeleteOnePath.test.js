@@ -89,7 +89,7 @@ describe("ONE delete function — no second implementation can grow back", () =>
     const fn = body.slice(0, body.indexOf("\n  };"));
     expect(fn).toMatch(/pushHistory\("delete"\)/);                       // ONE history step for however many
     expect(fn).toMatch(/tombstone\(plan\.ids\)/);                        // TOMBSTONE-DELETES, all of them
-    expect(fn).toMatch(/pushToast\(\{ text: plan\.toast, action: \{ label: "Undo"/); // toast + Undo on EVERY route
+    expect(fn).toMatch(/pushUndoToast\(\{ mergeKey: "delete-parcel",[^\n]*text: plan\.toast/); // the ONE undo toast + Undo on EVERY route (lib/undoToast.js)
     expect(fn).toMatch(/reportClientEvent\("delete-outcome"/);           // the event stays on every route
     expect(fn).toMatch(/flashWarn\(plan\.message/);                      // stale / empty → loud
     expect(fn).toMatch(/setParcelPageId\(null\)/);                       // the Properties page of a deleted parcel closes
@@ -112,7 +112,8 @@ describe("no 'are you sure' step", () => {
     expect(menuUi).not.toMatch(/confirm|Are you sure/i);
   });
   it("Undo is the net: the toast text 'Delete parcel' is a single click away from gone, with an Undo action", () => {
-    expect(src).toMatch(/action: \{ label: "Undo", onClick: undo \}/);
+    // 2026-11-25: every Undo toast goes through pushUndoToast, whose button reverses exactly the steps it names.
+    expect(src).toMatch(/action: \{ label: w\.label, onClick: \(\) => undoFromToast\(entry\) \}/);
   });
 });
 
