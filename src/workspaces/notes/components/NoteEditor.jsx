@@ -1657,6 +1657,12 @@ const NoteEditor = forwardRef(function NoteEditor({
     const was = viewRef.current;
     viewRef.current = v;
     if (byUser) viewTouchedRef.current = true;
+    /* ⛔ THE PASTE TAB DOES NOT SURVIVE A MOVE OF THE VIEW (owner report 2026-11-25: zoomed out after a paste and the "(Ctrl)" tab
+     * hung in mid-air, no longer at the paste). It is placed once in mat pixels, so any zoom or pan strands it: retire the offer.
+     * Not within the first moments — the editor's own reveal-the-caret scroll after a paste is part of the paste, not the person
+     * moving the page. */
+    const offerNow = pasteRef.current;
+    if (offerNow && (v.x !== was.x || v.y !== was.y || v.z !== was.z) && Date.now() - offerNow.at > 700) setPasteOffer(null);
     applyView();
     if (v.z !== was.z) setZoomPct(v.z);
     if (persist) persistView();
@@ -4438,6 +4444,8 @@ const NoteEditor = forwardRef(function NoteEditor({
         else setPasteOffer(null);
         return;
       }
+      /* Moving the caret with the keyboard also leaves the paste behind (the menu's own arrows only count while it is open). */
+      if (!pasteExpanded && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key) && !pasteMenuHasFocus()) { setPasteOffer(null); return; }
       if (!pasteExpanded || e.ctrlKey || e.metaKey || e.altKey) return;
       const hit = modeForKey(set, e.key);
       if (hit) { e.preventDefault(); e.stopPropagation(); applyPasteMode(hit); }
@@ -4451,9 +4459,10 @@ const NoteEditor = forwardRef(function NoteEditor({
     };
     const onDown = (e) => {
       disarm();
-      if (!pasteExpanded) return;
       if (e.target instanceof Element && e.target.closest("[data-testid='note-paste-options']")) return;
-      closePasteMenu(false);
+      /* A press anywhere else — the caret going elsewhere, another box, the toolbar — ends the offer (Word's tab does the same). */
+      if (pasteExpanded) closePasteMenu(false);
+      setPasteOffer(null);
     };
     const onWheel = (e) => { if (e.ctrlKey) disarm(); };
     document.addEventListener("keydown", onKey, true);
