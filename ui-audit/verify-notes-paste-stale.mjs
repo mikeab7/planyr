@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
-import { checkPasteOption, runsOf, summariseDoc } from "./lib/pasteBank.mjs";
+
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:5199";
 const EXEC = process.env.PW_CHROME || undefined;
@@ -93,51 +93,42 @@ const ctrlTap = async () => { await page.keyboard.down("Control"); await page.ke
 
 
 const chip = () => page.evaluate(() => !!document.querySelector('[data-testid="note-paste-options"]'));
-const SRC = TEXT_SOURCES["browser block styles"];
-async function fresh() { await landInBox(); await paste(SRC); }
-async function arm(label) { await fresh(); if (!(await chip())) await void_(`no tab after a paste (${label})`); }
-
-await arm("start");
-ok("the tab shows after a paste", await chip());
-await wait(2500);
-ok("…and is still there a few seconds later", await chip());
-await page.keyboard.down("Control"); await page.keyboard.up("Control"); await wait(250);
-ok("used right away: a Ctrl tap opens the menu", await page.evaluate(() => !!document.querySelector('[data-testid="note-paste-options"][data-paste-kind]')));
-await page.keyboard.press("Escape"); await wait(200);
-
-await arm("zoom out");
-await page.keyboard.down("Control"); await page.keyboard.press("-"); await page.keyboard.up("Control"); await wait(500);
-ok("Ctrl+− (zoom out) removes the tab", !(await chip()));
-
-await arm("wheel zoom");
-await page.mouse.move(700, 500); await page.mouse.wheel(0, 300); await wait(500);
-ok("a wheel zoom removes the tab", !(await chip()));
-
-await arm("pan");
-await page.mouse.move(700, 500); await page.keyboard.down("Shift"); await page.mouse.wheel(0, 200); await page.keyboard.up("Shift"); await wait(500);
-ok("a sideways pan removes the tab", !(await chip()));
-
-await arm("click elsewhere");
-await page.mouse.click(1300, 700); await wait(400);
-ok("a press elsewhere removes the tab", !(await chip()));
-
-await arm("arrow");
-await page.keyboard.press("ArrowLeft"); await wait(300);
-ok("moving the caret with an arrow removes the tab", !(await chip()));
-
-await arm("type");
-await page.keyboard.type("z"); await wait(300);
-ok("typing removes the tab", !(await chip()));
-
-await arm("undo");
-await page.keyboard.down("Control"); await page.keyboard.press("z"); await page.keyboard.up("Control"); await wait(400);
-ok("undoing the paste removes the tab", !(await chip()));
-
-await arm("pick");
-await page.click('[data-testid="note-paste-badge"]'); await wait(300);
-await page.click('[data-testid="note-paste-text"]'); await wait(400);
-ok("clicking the tab then an option still works (menu closed, tab gone after the pick or kept, no error)", errs.length === 0);
-
+const CELLS = { html: "<table><tr><td><b>aa</b></td><td style='color:#c00000'>bb</td></tr><tr><td>cc</td><td>dd</td></tr></table>", text: "aa\tbb\ncc\tdd" };
+const SCENES = {
+  "text paste in a box": async () => { await landInBox(); await paste(TEXT_SOURCES["browser block styles"]); },
+  "table paste (Excel range) in a box": async () => { await landInBox(); await paste(EXCEL); },
+  "grid pasted into a table's cells": async () => { await seed([box("b1", [grid(4, 4)]), para("")]); await enter("r1c1"); await paste(CELLS); },
+};
+const ACTIONS = {
+  "Ctrl+− zoom out": async () => { await page.keyboard.down("Control"); await page.keyboard.press("-"); await page.keyboard.up("Control"); },
+  "wheel zoom": async () => { await page.mouse.move(700, 500); await page.mouse.wheel(0, 300); },
+  "sideways pan": async () => { await page.mouse.move(700, 500); await page.keyboard.down("Shift"); await page.mouse.wheel(0, 200); await page.keyboard.up("Shift"); },
+  "a press elsewhere": async () => { await page.mouse.click(1300, 700); },
+  "an arrow key": async () => { await page.keyboard.press("ArrowLeft"); },
+  "typing": async () => { await page.keyboard.type("z"); },
+  "undo of the paste": async () => { await page.keyboard.down("Control"); await page.keyboard.press("z"); await page.keyboard.up("Control"); },
+};
+for (const [scene, setup] of Object.entries(SCENES)) {
+  console.log(`\n=== ${scene} ===`);
+  await setup();
+  if (!(await chip())) await void_(`no tab after a paste (${scene})`);
+  ok("the tab shows after a paste", true);
+  await wait(2500);
+  ok("…and is still there a few seconds later", await chip());
+  await page.keyboard.down("Control"); await page.keyboard.up("Control"); await wait(250);
+  ok("used right away: a Ctrl tap opens the menu", await page.evaluate(() => !!document.querySelector('[data-testid="note-paste-options"][data-paste-kind]')));
+  await page.keyboard.press("Escape"); await wait(200);
+  for (const [name, act] of Object.entries(ACTIONS)) {
+    await setup();
+    if (!(await chip())) await void_(`no tab after a paste (${scene} / ${name})`);
+    await act(); await wait(500);
+    ok(`${name} removes the tab`, !(await chip()));
+  }
+  await setup();
+  await page.click('[data-testid="note-paste-badge"]'); await wait(300);
+  await page.click(scene.startsWith("text") ? '[data-testid="note-paste-text"]' : '[data-testid="note-paste-values"]'); await wait(500);
+  ok("clicking the tab then a second option works (menu closes)", !(await page.evaluate(() => !!document.querySelector('[data-testid="note-paste-options"][data-paste-kind]'))));
+}
 ok("no page error", errs.length === 0, errs.join(" | "));
 console.log(`\n${passN} passed, ${failN} failed`);
 await browser.close();
