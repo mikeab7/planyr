@@ -34,10 +34,16 @@ async function loadPlan(page) {
   await expect.poll(async () => page.locator("[data-el-id]").count(), { timeout: 20_000 }).toBeGreaterThan(10);
   await page.waitForTimeout(1000);
 }
-async function openCompose(page) {
+async function openCompose(page, crop = null) {
   await page.locator('button:has-text("File")').first().click();
   await page.locator('button:has-text("Download PDF / pick frame")').click();
   await expect(page.locator('[data-testid="print-frame"]')).toBeVisible({ timeout: 15_000 });
+  // a hand-drawn PARTIAL crop (the owner's Phase 2 exhibit was a wide landscape piece): drag one mid-edge grip in
+  if (crop) {
+    const b = await page.getByTestId("print-frame").boundingBox();
+    const [sx, sy, ex, ey] = crop === "wide" ? [b.x + b.width / 2, b.y + b.height, b.x + b.width / 2, b.y + b.height * 0.5] : [b.x + b.width, b.y + b.height / 2, b.x + b.width * 0.45, b.y + b.height / 2];
+    await page.mouse.move(sx, sy); await page.mouse.down(); await page.mouse.move(ex, ey, { steps: 8 }); await page.mouse.up();
+  }
   await page.locator('button:has-text("Continue")').click();
   await expect(page.locator('[data-testid="print-compose"]')).toBeVisible({ timeout: 15_000 });
 }
@@ -64,7 +70,17 @@ async function measurePreview(page) {
       const pr = plan.getBoundingClientRect();
       const scale = Math.min(pr.width / vw, pr.height / vh); // meet fit of viewBox into the box
       const picW = vw * scale, picH = vh * scale;
-      return { windowAspect: W / H, frameAspect: vw / vh, picFillX: picW / pr.width, picFillY: picH / pr.height, n: feats.length,
+      // white above and below the PICTURE, in sheet units: from the title block's bottom rule down to the picture, and from the picture down
+      // to the lower edge of the area it lives in (the summary strip's top when it is on, else the sheet's inner border)
+      const vb = root.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
+      const ruleY = parseFloat(root.querySelector("line").getAttribute("y1"));
+      const inner = [...root.children].find((n) => n.tagName === "rect" && n.getAttribute("stroke-width") === "1.5");
+      // the picture's place from the nested svg's OWN attributes (its window x/y/width/height and the frame's viewBox shape, fitted "meet", centred)
+      const wy = parseFloat(plan.getAttribute("y")), ww = parseFloat(plan.getAttribute("width")), wh = parseFloat(plan.getAttribute("height"));
+      const pH = Math.min(wh, ww * vh / vw);
+      const picTopU = wy + (wh - pH) / 2, picBotU = picTopU + pH;
+      const lowerEdgeU = parseFloat(inner.getAttribute("y")) + parseFloat(inner.getAttribute("height"));
+      return { pageH: vb[3], whiteAbove: picTopU - ruleY, whiteBelowBorder: lowerEdgeU - picBotU, windowAspect: W / H, frameAspect: vw / vh, picFillX: picW / pr.width, picFillY: picH / pr.height, n: feats.length,
         // site centre relative to the window centre, as a fraction of the window size
         dx: ((x0 + x1) / 2 - (pr.left + pr.width / 2)) / pr.width, dy: ((y0 + y1) / 2 - (pr.top + pr.height / 2)) / pr.height };
     } finally { host.remove(); }
@@ -90,6 +106,8 @@ test.describe("Compose exhibit — property line centred (B2671333)", () => {
           const tag = `${label} ${orient} strip=${strip} table=${table}`;
           expect(m.error, tag).toBeUndefined();
           expect(m.n, `${tag}: the parcel outline is in the sheet`).toBeGreaterThan(0);
+          // owner's clouded redline: with the strip off the white above the picture (under the title block) equals the white below it (to the border)
+          if (!strip) expect(Math.abs(m.whiteAbove - m.whiteBelowBorder) / m.pageH, `${tag}: white above ${m.whiteAbove.toFixed(1)} vs below ${m.whiteBelowBorder.toFixed(1)}`).toBeLessThan(0.0035); // old asymmetry was 14 units (0.6%+ of the page height); the rest is browser rounding
           expect(Math.abs(m.dx), `${tag}: site centred horizontally`).toBeLessThan(0.08);
           expect(Math.abs(m.dy), `${tag}: site centred vertically`).toBeLessThan(0.08);
           report.push(`${tag} dx=${m.dx.toFixed(3)} dy=${m.dy.toFixed(3)} n=${m.n}`);
@@ -110,5 +128,21 @@ test.describe("Compose exhibit — property line centred (B2671333)", () => {
     await expect(panel).toBeVisible();
     m = await measurePreview(page);
     expect(Math.abs(m.dx)).toBeLessThan(0.08); expect(Math.abs(m.dy)).toBeLessThan(0.08);
+  });
+  test("a hand-drawn wide or tall partial crop: the white above the picture equals the white below it", async ({ page }) => {
+    test.setTimeout(150_000);
+    await loadPlan(page);
+    for (const crop of ["wide", "tall"]) {
+      if (crop === "tall") { await page.reload(); await expect(canvas(page)).toBeVisible(); await expect.poll(async () => page.locator("[data-feature]").count(), { timeout: 20_000 }).toBeGreaterThan(10); }
+      await openCompose(page, crop);
+      const panel = page.locator('[data-testid="print-compose"]');
+      const c = panel.getByRole("checkbox", { name: /Site summary strip/ }); if (await c.isChecked()) await c.setChecked(false);
+      for (const orient of ["Landscape", "Portrait"]) {
+        await panel.getByRole("button", { name: orient }).click();
+        const m = await measurePreview(page);
+        expect(Math.abs(m.whiteAbove - m.whiteBelowBorder) / m.pageH, `${crop} crop, ${orient}: white above ${m.whiteAbove.toFixed(1)} vs below ${m.whiteBelowBorder.toFixed(1)}`).toBeLessThan(0.0035);
+      }
+      await panel.getByRole("button", { name: /Cancel/ }).click();
+    }
   });
 });

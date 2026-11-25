@@ -169,10 +169,10 @@ describe("NEW-2 — the print menu's 'Site summary strip' toggle: printSheetLayo
     const off = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9, includeMetrics: false });
     expect(off.metrics).toBe(null);
     expect(off.plan.h).toBeGreaterThan(on.plan.h);
-    // the plan gains exactly what the band + its gap used to take, and its bottom edge
-    // now sits flush with the inner border — no leftover gap where the band used to be.
-    expect(off.plan.y + off.plan.h).toBe(off.inner.y + off.inner.h);
-    expect(off.plan.h - on.plan.h).toBe(on.metrics.h + 14); // 14 = the gap constant between content and the band
+    // B2671333 — the plan gains what the band used to take, but keeps the SAME gap under it as it has under the title
+    // block, so the white above and below the picture match (owner's clouded redline, 2026-11-25).
+    expect(off.inner.y + off.inner.h - (off.plan.y + off.plan.h)).toBe(off.plan.y - (off.title.y + off.title.h));
+    expect(off.plan.h - on.plan.h).toBe(on.metrics.h); // the band's own height; its two gaps become the one bottom gap
   });
   it("off with a stormwater strip present still reserves nothing — the whole band goes together", () => {
     const off = printSheetLayout({ metricsCount: 9, stormwaterBars: 2, includeMetrics: false });
@@ -185,6 +185,13 @@ describe("NEW-2 — the print menu's 'Site summary strip' toggle: printSheetLayo
         expect(L.metrics).toBe(null);
         expect(L.plan.h).toBeGreaterThan(0);
         expect(L.plan.y + L.plan.h).toBeLessThanOrEqual(L.page.h + 1e-6);
+        // equal white above and below the plan window on every sheet, strip on or off, with or without the scale row
+        for (const includeMetrics of [true, false]) for (const titleBlockExtra of [false, true]) {
+          const M = printSheetLayout({ paper: p.key, orient, metricsCount: 9, includeMetrics, titleBlockExtra });
+          const above = M.plan.y - (M.title.y + M.title.h);
+          const below = includeMetrics ? M.metrics.y - (M.plan.y + M.plan.h) : M.inner.y + M.inner.h - (M.plan.y + M.plan.h);
+          expect(below).toBe(above);
+        }
       }
     }
   });
