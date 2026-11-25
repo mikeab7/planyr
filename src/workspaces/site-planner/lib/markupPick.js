@@ -26,6 +26,7 @@
 // foot), so the grab feel is identical at every zoom. Pure + Node-testable (test/markupPick.test.js).
 
 import { pointInRing, ringArea } from "./ringMath.js";
+import { clampCloudArcFt } from "./cloudGeometry.js";
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const DEG = Math.PI / 180;
@@ -93,8 +94,8 @@ export function markupHitModel(m) {
   switch (m.kind) {
     case "line": return { path: [m.a, m.b], closed: false, filled: false, area: 0 };
     case "polyline": return { path: m.pts || [], closed: false, filled: false, area: 0 };
-    case "polygon":
-    case "cloud": return { ring: m.pts || [], closed: true, filled: grabsWholeBody(m), area: ringArea(m.pts || []) };
+    case "polygon": return { ring: m.pts || [], closed: true, filled: grabsWholeBody(m), area: ringArea(m.pts || []) };
+    case "cloud": return { ring: m.pts || [], closed: true, filled: grabsWholeBody(m), area: ringArea(m.pts || []), reach: clampCloudArcFt(m.arcFt) };
     case "rect": return { ring: boxCorners(m), closed: true, filled: grabsWholeBody(m), area: Math.abs((m.w || 0) * (m.h || 0)) };
     case "ellipse": return { ring: ellipseRing(m), closed: true, filled: grabsWholeBody(m), area: Math.abs(Math.PI * (m.w || 0) * (m.h || 0) / 4) };
     case "encumbrance":
@@ -144,6 +145,9 @@ export function markupUnderPoint(m, p, tol) {
   const g = markupHitModel(m);
   if (!g) return null;
   if (g.closed) {
+    // A cloud's scallops bulge OUTWARD past its polygon edge by about one arc radius, so the visible line sits
+    // up to that far outside the ring: widen the outline reach by it (2026-11-25) or the arc crests are ungrabbable.
+    tol += g.reach || 0;
     const ring = g.ring;
     if (!ring || ring.length < 3) return null;
     if (g.filled) {
