@@ -13890,6 +13890,23 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       return m;
     });
     const changeCount = Object.values(pending).filter((v) => v !== null).length;
+    const rowOrder = [...readyToStart, ...alreadyActive];
+    const [activeId, setActiveId] = React.useState(rowOrder[0]?.id);
+    const modalRef = React.useRef(null);
+    const choicesFor = (t) => (t.health === "gray" ? [] : [null]).concat(["gray", "yellow", "red", "green"]);
+    function moveChoice(dx) {
+      const t = rowOrder.find((r) => r.id === activeId) || rowOrder[0];
+      if (!t) return;
+      const list = choicesFor(t);
+      const i = Math.max(0, list.indexOf(pending[t.id]));
+      const next = list[(i + dx + list.length) % list.length];
+      setPending((p) => ({ ...p, [t.id]: next }));
+    }
+    function moveRow(dy) {
+      if (rowOrder.length < 2) return;
+      const i = Math.max(0, rowOrder.findIndex((r) => r.id === activeId));
+      setActiveId(rowOrder[(i + dy + rowOrder.length) % rowOrder.length].id);
+    }
     function apply() {
       Object.entries(pending).forEach(([tid, hk]) => {
         if (hk !== null) updateTask(Number(tid), { health: hk }, projId);
@@ -13905,12 +13922,21 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
       ];
       const cur = pending[task.id];
       const isGray = task.health === "gray";
+      const rowActive = activeId === task.id;
+      const pick = (k) => {
+        setPending((p) => ({ ...p, [task.id]: k }));
+        setActiveId(task.id);
+        modalRef.current?.focus();
+      };
+      const ring = (on) => on && rowActive ? { outline: "2px solid #4f46e5", outlineOffset: 2, boxShadow: "0 0 0 4px rgba(79,70,229,.22)" } : {};
       return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 6 } }, !isGray && /* @__PURE__ */ React.createElement(
         "button",
         {
           "data-successor-pill": "nochange",
-          onClick: () => setPending((p) => ({ ...p, [task.id]: null })),
+          tabIndex: -1,
+          onClick: () => pick(null),
           style: {
+            ...ring(cur === null),
             fontSize: 10,
             padding: "3px 8px",
             borderRadius: 12,
@@ -13931,8 +13957,10 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
           {
             key: o.k,
             "data-successor-pill": o.k,
-            onClick: () => setPending((p) => ({ ...p, [task.id]: o.k })),
+            tabIndex: -1,
+            onClick: () => pick(o.k),
             style: {
+              ...ring(sel),
               display: "flex",
               alignItems: "center",
               gap: 5,
@@ -13960,35 +13988,47 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
     }
     function TaskRow({ task, accent }) {
       const h = HEALTH[task.health] || HEALTH.gray;
-      return /* @__PURE__ */ React.createElement("div", { "data-successor-row": task.id, style: {
-        padding: "10px 14px",
-        borderRadius: 7,
-        marginBottom: 8,
-        background: accent ? "#fafbff" : "#f9fafb",
-        border: `1px solid ${accent ? "#e0e4f8" : "#e5e7eb"}`
-      } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: {
-        fontWeight: 500,
-        fontSize: 13,
-        color: "#1f2328",
-        flex: 1,
-        minWidth: 0,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }, title: task.name }, task.name), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: {
-        width: 7,
-        height: 7,
-        borderRadius: "50%",
-        background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
-      } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" } }, h.label))), /* @__PURE__ */ React.createElement(StatusPills, { task }), onOpenTask && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 7 } }, /* @__PURE__ */ React.createElement(
-        "span",
+      return /* @__PURE__ */ React.createElement(
+        "div",
         {
-          onClick: () => onOpenTask(projId, task.id),
-          style: { fontSize: 11, color: "#4f46e5", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 500 }
+          "data-successor-row": task.id,
+          "data-successor-active": activeId === task.id ? "1" : void 0,
+          onMouseDown: () => setActiveId(task.id),
+          style: {
+            padding: "10px 14px",
+            borderRadius: 7,
+            marginBottom: 8,
+            background: accent ? "#fafbff" : "#f9fafb",
+            border: `1px solid ${accent ? "#e0e4f8" : "#e5e7eb"}`,
+            borderLeft: activeId === task.id && rowOrder.length > 1 ? "3px solid #4f46e5" : void 0
+          }
         },
-        "Open in Projects",
-        /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "9 18 15 12 9 6" }))
-      )));
+        /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: {
+          fontWeight: 500,
+          fontSize: 13,
+          color: "#1f2328",
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap"
+        }, title: task.name }, task.name), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: {
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: h.dot === "#ffffff" ? "#d1d5db" : h.dot
+        } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#6b7280", whiteSpace: "nowrap" } }, h.label))),
+        /* @__PURE__ */ React.createElement(StatusPills, { task }),
+        onOpenTask && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 7 } }, /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            onClick: () => onOpenTask(projId, task.id),
+            style: { fontSize: 11, color: "#4f46e5", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 500 }
+          },
+          "Open in Projects",
+          /* @__PURE__ */ React.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "9 18 15 12 9 6" }))
+        ))
+      );
     }
     return /* @__PURE__ */ React.createElement(
       "div",
@@ -14022,10 +14062,21 @@ Click to drop the duplicate lag (keeps the predecessor link and the meeting bind
             overflow: "hidden"
           },
           tabIndex: -1,
-          ref: (el) => el?.focus(),
+          ref: (el) => {
+            modalRef.current = el;
+            el?.focus();
+          },
           onKeyDown: (e) => {
             if (e.key === "Escape") {
               onClose();
+              return;
+            }
+            if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.key === "ArrowLeft") moveChoice(-1);
+              else if (e.key === "ArrowRight") moveChoice(1);
+              else moveRow(e.key === "ArrowUp" ? -1 : 1);
               return;
             }
             if (e.key === "Enter" && changeCount > 0) apply();
