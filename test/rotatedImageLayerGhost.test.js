@@ -1,3 +1,4 @@
+// source-scan: the layer drives a real Leaflet map and DOM, which cannot run in node; behaviour was measured in a browser harness (see PR #3090).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
