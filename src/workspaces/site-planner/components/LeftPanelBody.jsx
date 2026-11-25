@@ -1013,7 +1013,7 @@ export const LeftPanelBody = memo(function LeftPanelBody({
             <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
             {/* NEW-1 (road-traced parking, owner 2026-11-25: "keep parking 5 feet off of roads … a plan-wide setting") — the ONE keep-back every road gets
                 (lib/parkingRoadTrim.js parkSetbackFor): no stall within this of a road's curb (or its right-of-way line when one is set). 0 = right up to the curb. */}
-            <Field label="Keep parking off roads (ft)"><NumInput style={numInput} value={settings.parkSetbackFt ?? PARK_SETBACK_DEFAULT_FT} min={0} onCommit={(n) => setSettings((s) => ({ ...s, parkSetbackFt: n }))} /></Field>
+            <Field label="Parking off road (ft)"><NumInput style={numInput} value={settings.parkSetbackFt ?? PARK_SETBACK_DEFAULT_FT} min={0} onCommit={(n) => setSettings((s) => ({ ...s, parkSetbackFt: n }))} /></Field>
             <Field label="Road widths (ft)">
               <input {...NO_AUTOFILL} style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
