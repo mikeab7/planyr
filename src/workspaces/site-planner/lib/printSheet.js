@@ -156,7 +156,10 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", metri
   const metricsH = includeMetrics ? 18 + metricRows * 17 + 12 + stormwaterBandH(stormwaterBars) : 0;
   const gap = 14;
   const contentTop = inner.y + titleH + gap;
-  const contentBot = includeMetrics ? inner.y + inner.h - metricsH - gap : inner.y + inner.h;
+  // B2671333 (owner 2026-11-25, clouded redline: "this is obviously uneven"): the plan window keeps the SAME gap below it as above it.
+  // With the strip off the window used to run flush to the bottom border while a gap sat under the title block, so a picture that
+  // filled the window had white only on top. Now top and bottom white match whether or not the strip is on.
+  const contentBot = includeMetrics ? inner.y + inner.h - metricsH - gap : inner.y + inner.h - gap;
   const contentH = Math.max(0, contentBot - contentTop);
   // NEW-2 (B1804993) — the right-hand buildings table is gone; the plan always takes the
   // full inner width instead of giving up a column for it.
