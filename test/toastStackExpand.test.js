@@ -1,3 +1,4 @@
+// source-scan: the "+n more" pill must stay a real <button> with a click handler; the component cannot be rendered in node.
 // NEW-1 (2026-11-25): the "+n more" pill under the toast stack must open the hidden toasts.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
