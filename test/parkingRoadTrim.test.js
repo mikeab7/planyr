@@ -3,7 +3,7 @@
  * straight and curved roads, either side and the end, rotation, moving the road / field (the trim recomputes), the right-of-way, trailers, the count, the area. */
 import { describe, it, expect } from "vitest";
 import { makeField, SETTINGS, netOf, fieldWorld } from "./helpers/driveMatrix.js";
-import { roadTrimOf, stallFieldLayout, rowRingOf, clipSegmentToRings, parkSetbackFor, PARK_SETBACK_DEFAULTS, TRIM_TOUCH_FRACTION, MIN_RUN_CAR } from "../src/workspaces/site-planner/lib/parkingRoadTrim.js";
+import { roadTrimOf, stallFieldLayout, rowRingOf, clipSegmentToRings, parkSetbackFor, PARK_SETBACK_DEFAULT_FT, TRIM_TOUCH_FRACTION, MIN_RUN_CAR } from "../src/workspaces/site-planner/lib/parkingRoadTrim.js";
 import { siteMetrics } from "../src/workspaces/site-planner/lib/siteMetrics.js";
 import { roadStripRing } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 import ClipperLib from "clipper-lib";
@@ -13,7 +13,7 @@ function roadThrough(f, localPts, o = {}) {
   const W = fieldWorld(f);
   const pts = localPts.map((p) => W(p.x, p.y));
   const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
-  const r = { id: o.id || "R", type: "road", z: 1, pts, vtx: pts.map(() => ({})), travelW: o.travelW ?? 26, curb: 0.5, roadClass: o.roadClass || "aisle",
+  const r = { id: o.id || "R", type: "road", z: 1, pts, vtx: pts.map(() => ({})), travelW: o.travelW ?? 26, curb: 0.5, roadClass: "aisle",
     cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: (Math.min(...ys) + Math.max(...ys)) / 2, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys), rot: 0 };
   if (o.row) r.xsection = { rowDesignFt: o.row };
   if (o.parkSetbackFt != null) r.parkSetbackFt = o.parkSetbackFt;
@@ -37,12 +37,18 @@ const keptCells = (f, trim) => { const gone = new Set(trim.removed.map((r) => `$
 const cellRing = (c) => [{ x: c.x0, y: c.y0 }, { x: c.x1, y: c.y0 }, { x: c.x1, y: c.y1 }, { x: c.x0, y: c.y1 }];
 const inRings = (p, rings) => { let i = false; for (const r of rings) for (let a = 0, b = r.length - 1; a < r.length; b = a++) if ((r[a].y > p.y) !== (r[b].y > p.y) && p.x < ((r[b].x - r[a].x) * (p.y - r[a].y)) / (r[b].y - r[a].y) + r[a].x) i = !i; return i; };
 
-describe("a road that only SKIMS a field leaves it exactly as it was", () => {
-  it("a road lapping a foot over the outer row: no trim, no clip, the full count", async () => {
+describe("a road that only SKIMS a field", () => {
+  it("with the keep-back at 0: a road lapping a foot over the outer row leaves the field exactly as it was (no trim, no clip, the full count)", async () => {
+    const st0 = { ...SETTINGS, parkSetbackFt: 0 };
+    const f = makeField(FIELD), r = roadThrough(f, [{ x: -80, y: -13.5 + 1 }, { x: 560, y: -13.5 + 1 }]);
+    const { net } = await netOf([f, r], st0);
+    expect(net.parkTrims.has("F")).toBe(false);
+    expect(siteMetrics([f, r], [], [], st0).stalls).toBe(stallFieldLayout(f, st0).count);
+  });
+  it("with the default keep-back the same road plants the row it laps (no car overhangs the road)", async () => {
     const f = makeField(FIELD), r = roadThrough(f, [{ x: -80, y: -13.5 + 1 }, { x: 560, y: -13.5 + 1 }]);
     const { net } = await netOf([f, r]);
-    expect(net.parkTrims.has("F")).toBe(false);
-    expect(siteMetrics([f, r], [], [], SETTINGS).stalls).toBe(stallFieldLayout(f, SETTINGS).count);
+    expect(net.parkTrims.get("F").removed.every((c) => c.band === 0)).toBe(true);
   });
 });
 
@@ -176,38 +182,29 @@ describe("trailer parking gets the same treatment", () => {
   });
 });
 
-describe("parking keeps back from a road (owner: \"parking should never really be like right against the roads\")", () => {
-  // the road runs ALONGSIDE the top face, its curb a little clear of the outer row: an aisle-class road leaves the field whole,
-  // a public road (10 ft keep-back) plants the outer row it would overhang.
-  const along = (f, o) => roadThrough(f, [{ x: -80, y: -16 }, { x: 560, y: -16 }], o);
-  it("the class defaults: drive aisle none, fire 5, public / truck / custom 10", () => {
-    expect(PARK_SETBACK_DEFAULTS).toEqual({ truck: 10, aisle: 0, public: 10, fire: 5, custom: 10 });
-    expect(parkSetbackFor({ roadClass: "public" }, SETTINGS)).toBe(10);
-    expect(parkSetbackFor({ roadClass: "aisle" }, SETTINGS)).toBe(0);
-    expect(parkSetbackFor({}, SETTINGS)).toBe(0);                         // no class = the default class (drive aisle), as everywhere else
+describe("parking keeps back from a road (owner: \"keep parking 5 feet off of roads … a plan-wide setting\")", () => {
+  // the road runs ALONGSIDE the top face, its curb a little clear of the outer row
+  const along = (f) => roadThrough(f, [{ x: -80, y: -16 }, { x: 560, y: -16 }]);
+  it("one plan-wide number: default 5 ft, the plan's value wins, 0 is a real answer, junk falls back to the default; the road's class plays no part", () => {
+    expect(PARK_SETBACK_DEFAULT_FT).toBe(5);
+    expect(parkSetbackFor({ roadClass: "aisle" }, {})).toBe(5);
+    expect(parkSetbackFor({ roadClass: "public" }, {})).toBe(5);
+    expect(parkSetbackFor({}, { parkSetbackFt: 12 })).toBe(12);
+    expect(parkSetbackFor({}, { parkSetbackFt: 0 })).toBe(0);
+    expect(parkSetbackFor({}, { parkSetbackFt: -3 })).toBe(5);
+    expect(parkSetbackFor({ parkSetbackFt: 40 }, { parkSetbackFt: 3 })).toBe(3);   // a stale per-road value from the 2026-11-24 build is ignored
   });
-  it("the plan's class value (Standards → Roads) beats the seed; the road's own value beats both; 0 on the road is a real answer", () => {
-    const st = { ...SETTINGS, roadClasses: [{ key: "public", label: "Public", parkSetback: 15 }, { key: "aisle", label: "Aisle", parkSetback: 0 }] };
-    expect(parkSetbackFor({ roadClass: "public" }, st)).toBe(15);
-    expect(parkSetbackFor({ roadClass: "public", parkSetbackFt: 4 }, st)).toBe(4);
-    expect(parkSetbackFor({ roadClass: "public", parkSetbackFt: 0 }, st)).toBe(0);
-    expect(parkSetbackFor({ roadClass: "public", parkSetbackFt: null }, st)).toBe(15);
-    // a plan saved before the key existed reads the seed for its class
-    expect(parkSetbackFor({ roadClass: "fire" }, { ...SETTINGS, roadClasses: [{ key: "fire", label: "Fire lane", minRadius: 28 }] })).toBe(5);
-  });
-  it("a public road alongside plants the outer row; a drive aisle in the same place does not; the road's own 0 lets the stalls come back", async () => {
+  it("a road alongside plants the outer row by default; set to 0 the field is whole again; the Yield follows the drawing", async () => {
     const f = makeField(FIELD), full = stallFieldLayout(f, SETTINGS).count;
-    const aisle = await netOf([f, along(f, { roadClass: "aisle" })]);
-    expect(aisle.net.parkTrims.has("F")).toBe(false);
-    const pub = await netOf([f, along(f, { roadClass: "public" })]);
-    const trim = pub.net.parkTrims.get("F");
+    const st5 = { ...SETTINGS, parkSetbackFt: 5 }, st0 = { ...SETTINGS, parkSetbackFt: 0 };
+    const five = await netOf([f, along(f)], st5);
+    const trim = five.net.parkTrims.get("F");
     expect(trim).toBeTruthy();
-    expect(pub.net.stallClips.get("F").count).toBeLessThan(full);
+    expect(five.net.stallClips.get("F").count).toBeLessThan(full);
     expect(trim.removed.every((c) => c.band === 0)).toBe(true);          // only the row facing the road
-    const own0 = await netOf([f, along(f, { roadClass: "public", parkSetbackFt: 0 })]);
-    expect(own0.net.parkTrims.has("F")).toBe(false);
-    // the Yield follows the drawing
-    expect(siteMetrics([f, along(f, { roadClass: "public" })], [], [], SETTINGS).stalls).toBe(pub.net.stallClips.get("F").count);
+    const zero = await netOf([f, along(f)], st0);
+    expect(zero.net.parkTrims.has("F")).toBe(false);
+    expect(siteMetrics([f, along(f)], [], [], st5).stalls).toBe(five.net.stallClips.get("F").count);
   });
 });
 

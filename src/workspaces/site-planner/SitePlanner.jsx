@@ -18969,22 +18969,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((x) => (x.id === el.id && x.xsection ? { ...x, xsection: withRowSide(x.xsection, sign, v) } : x)));
   };
-  /* NEW-1 (road-traced parking, 2026-11-24) — this road's own parking keep-back (ft), beating its class default from Standards → Roads
-     (lib/parkingRoadTrim.js parkSetbackFor). 0 is a real answer ("parking may come right up to this road"); a cleared box (null) removes the key so the
-     road follows its class again. The trim itself is derived from this at render time, never stored. */
-  const setRoadParkSetback = (el, ft) => {
-    const want = ft != null && Number.isFinite(+ft) && +ft >= 0;
-    const cur = el.parkSetbackFt != null && Number.isFinite(+el.parkSetbackFt) ? +el.parkSetbackFt : null;
-    if (!want && cur == null) return;                     // nothing to clear — no history frame for a no-op
-    if (want && cur === +ft) return;
-    pushHistory();
-    setEls((a) => a.map((x) => {
-      if (x.id !== el.id) return x;
-      if (want) return { ...x, parkSetbackFt: +ft };
-      const { parkSetbackFt: _drop, ...rest } = x;
-      return rest;
-    }));
-  };
   /* NEW-1 (2026-11-10) — the owner's own length for the taper at one end of a road that meets a narrower (or wider) one end to end
      (lib/roadTaper.js). `end` is "s" | "e"; a blank/zero clears it back to the automatic length. The ONLY stored fact about a taper —
      whether a road tapers at all is derived from the roads, never saved. */
@@ -24542,7 +24526,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const stepBox = (props) => <NumInput boxed unit="ft" boxWidth={96} {...props} />;
                     return (
                     <>
-                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadParkSetback={setRoadParkSetback} setRoadRowFt={setRoadRowFt} setRoadRowSide={setRoadRowSide} rowSideInfo={rowSideInfo} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
+                      <RoadSizeSection cl={cl} designed={designed} jumpToStandards={jumpToStandards} linkBtn={linkBtn} mutedEll={mutedEll} readout={readout} roadLengthOf={roadLengthOf} rowFt={rowFt} selEl={selEl} setRoadClass={setRoadClass} setRoadLength={setRoadLength} setRoadRowFt={setRoadRowFt} setRoadRowSide={setRoadRowSide} rowSideInfo={rowSideInfo} setRoadTravel={setRoadTravel} settings={settings} showRow={showRow} stepBox={stepBox} travelFt={travelFt} />
                       {cl && <RoadXSectionSection roadCurbOf={roadCurbOf} roadTravel={roadTravel} selEl={selEl} setXsDialog={setXsDialog} travelFt={travelFt} />}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
