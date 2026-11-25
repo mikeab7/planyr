@@ -15,7 +15,8 @@ import ActionLink from "./ActionLink.jsx";
 import WatchOutChip from "./WatchOutChip.jsx";
 import YieldFooterDisclaimer from "./YieldFooterDisclaimer.jsx";
 import Collapse from "./Collapse.jsx";
-import { roadClassesOf, classMinRadius, classParkSetback, ROAD_CLASS_SEEDS } from "../lib/roadClasses.js";
+import { roadClassesOf, classMinRadius, ROAD_CLASS_SEEDS } from "../lib/roadClasses.js";
+import { PARK_SETBACK_DEFAULT_FT } from "../lib/parkingRoadTrim.js";
 import { SQFT_PER_ACRE } from "../lib/siteGeometry.js";
 import { costRollup } from "../lib/costTakeoff.js";
 import { DIM_CALLOUT_MIN_PPF } from "../lib/labelLayout.js";
@@ -1010,6 +1011,9 @@ export const LeftPanelBody = memo(function LeftPanelBody({
           <div data-std-sec="roads">
           <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
             <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
+            {/* NEW-1 (road-traced parking, owner 2026-11-25: "keep parking 5 feet off of roads … a plan-wide setting") — the ONE keep-back every road gets
+                (lib/parkingRoadTrim.js parkSetbackFor): no stall within this of a road's curb (or its right-of-way line when one is set). 0 = right up to the curb. */}
+            <Field label="Keep parking off roads (ft)"><NumInput style={numInput} value={settings.parkSetbackFt ?? PARK_SETBACK_DEFAULT_FT} min={0} onCommit={(n) => setSettings((s) => ({ ...s, parkSetbackFt: n }))} /></Field>
             <Field label="Road widths (ft)">
               <input {...NO_AUTOFILL} style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
@@ -1037,8 +1041,6 @@ export const LeftPanelBody = memo(function LeftPanelBody({
                           <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
                         )}
                         <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
-                        {/* NEW-1 (road-traced parking) — how far parking keeps back from this class of road (from its right-of-way line when one is set, else the back of curb). A road can override it in its own panel. */}
-                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Parking keeps back <NumInput style={{ ...numInput, width: 48 }} value={Math.round(classParkSetback(c))} min={0} onCommit={(n) => setRCC(c.key, { parkSetback: n })} />′</label>
                       </div>
                     </div>
                   ))}

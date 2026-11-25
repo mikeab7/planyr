@@ -10,7 +10,7 @@
  * WHAT THIS DECIDES, so nobody re-derives it:
  *   • WHICH ROADS TRIM. A centerline road whose ends are both away from the field (an end on / in the field is a drive JUNCTION — parkingApproach's corridors
  *     own that, and a driveway into the lot is its way in, never trimmed against) and whose KEEP-OUT reaches a stall. The keep-out is the road's pavement,
- *     joined with its right-of-way band when one is designated, grown by the road's PARKING SETBACK (`parkSetbackFor`, below). A road with a setback trims
+ *     joined with its right-of-way band when one is designated, grown by the plan's PARKING SETBACK (`parkSetbackFor`, below). A road with a setback trims
  *     any field whose stalls fall inside it, even one it only runs alongside ("parking should never really be like right against the roads"). A road with
  *     none (an internal auto drive aisle) trims only when it really CUTS the field — covers more than TRIM_CUT_FRACTION (15%, the old through-road rule)
  *     of a stall — and a skim leaves the field byte-for-byte what it was.
@@ -40,7 +40,6 @@ import ClipperLib from "clipper-lib";
 import { carStalls, trailerStalls, roadDenseCenterline } from "./siteGeometry.js";
 import { roadSurfaceRing } from "./roadNetwork.js";
 import { designatedRowFt, rowMarginFt } from "./roadCrossSection.js";
-import { ROAD_CLASS_SEEDS, roadClassOf, classParkSetback } from "./roadClasses.js";
 
 export const TRIM_CUT_FRACTION = 0.15;    // a road "cuts" a field once it covers more than this of some stall (the old through-road removal rule)
 export const TRIM_TOUCH_FRACTION = 0.02;  // once it cuts, a stall it covers more than this of is dropped (whole stalls only)
@@ -54,16 +53,15 @@ const SC = 100;                           // Clipper integer scale: 0.01 ft
 
 const rad = (d) => (d * Math.PI) / 180;
 
-/* PARKING SETBACK FROM A ROAD (owner, 2026-11-24: "parking should never really be like right against the roads … you would have overhang"). The planted
- * strip kept between a road (its ROW line when one is set, else its back of curb) and the first stall. A property of the ROAD — every lot along one road
- * gets the same strip: `road.parkSetbackFt` (the road panel) overrides; else the plan's road-class default (Standards → Roads, `settings.roadClasses[].parkSetback`,
- * lib/roadClasses.js classParkSetback; seeds public / truck / custom 10, fire 5, drive aisle 0). An internal auto drive aisle has none: stalls facing a
- * drive aisle are how a lot works. A road with no class reads the default class exactly as roadClassOf does everywhere else. */
-export const PARK_SETBACK_DEFAULTS = Object.fromEntries(ROAD_CLASS_SEEDS.map((c) => [c.key, c.parkSetback]));
-export function parkSetbackFor(road, settings) {
-  const own = road && road.parkSetbackFt != null && road.parkSetbackFt !== "" ? +road.parkSetbackFt : NaN;
-  if (Number.isFinite(own) && own >= 0) return own;
-  return classParkSetback(roadClassOf(settings, road && road.roadClass));
+/* PARKING SETBACK FROM A ROAD (owner, 2026-11-24: "parking should never really be like right against the roads … you would have overhang";
+ * 2026-11-25: "we don't even need multiple road types. We can just say keep parking 5 feet off of roads … a plan-wide setting. I don't want to
+ * introduce too much complexity"). ONE plan-wide number, `settings.parkSetbackFt` (Standards → Roads, "Keep parking off roads"), default 5 ft,
+ * the same for every road: the planted strip between a road (its ROW line when one is set, else its back of curb) and the first stall. 0 = stalls may
+ * come right up to the curb. No per-road or per-class value (both were built 2026-11-24 and retired the next day at his word). */
+export const PARK_SETBACK_DEFAULT_FT = 5;
+export function parkSetbackFor(_road, settings) {
+  const v = settings && settings.parkSetbackFt != null && settings.parkSetbackFt !== "" ? +settings.parkSetbackFt : NaN;
+  return Number.isFinite(v) && v >= 0 ? v : PARK_SETBACK_DEFAULT_FT;
 }
 
 /** a rect car-parking or trailer-parking field (a free-drawn ring has no stall layout) */

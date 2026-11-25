@@ -23,16 +23,16 @@ export function speedMinRadius(V, e = 0.06, f = 0.165) {
 export const ROAD_CLASS_SEEDS = [
   // Truck route (WB-67 controlling): generous default; warn below ~50′ (WB-67 design
   // turning radius ≈45′ — verify vs. the current AASHTO turning template).
-  { key: "truck",  label: "Truck route",      defaultRadius: 120, minRadius: 50, parkSetback: 10 },
+  { key: "truck",  label: "Truck route",      defaultRadius: 120, minRadius: 50 },
   // Auto drive aisle (passenger car): small default; warn below ~24′ (P-car outer ≈24′).
-  { key: "aisle",  label: "Auto drive aisle", defaultRadius: 25,  minRadius: 24, parkSetback: 0 },
+  { key: "aisle",  label: "Auto drive aisle", defaultRadius: 25,  minRadius: 24 },
   // Public / collector: speed-based — threshold from R = V²/[15(e+f)] (≈185′ at 25 mph).
-  { key: "public", label: "Public / collector", defaultRadius: 150, designSpeed: 25, superE: 0.06, friction: 0.165, parkSetback: 10 },
+  { key: "public", label: "Public / collector", defaultRadius: 150, designSpeed: 25, superE: 0.06, friction: 0.165 },
   // Fire lane: warn below the local inside-radius requirement (commonly ~28′ inside per
   // IFC Appendix D — jurisdiction-specific; verify the adopted code).
-  { key: "fire",   label: "Fire lane",        defaultRadius: 50,  minRadius: 28, parkSetback: 5 },
+  { key: "fire",   label: "Fire lane",        defaultRadius: 50,  minRadius: 28 },
   // Custom: no threshold (the civil check is silent).
-  { key: "custom", label: "Custom",           defaultRadius: 50,  minRadius: 0, parkSetback: 10 },
+  { key: "custom", label: "Custom",           defaultRadius: 50,  minRadius: 0 },
 ];
 
 // A drawn road defaults to a drive aisle — the most common on-site road; a straight road
@@ -78,14 +78,3 @@ export function classReturnRadius(cls) {
   return Math.max(15, Math.min(75, r));
 }
 
-/* NEW-1 (road-traced parking) — how far (ft) parking keeps back from a road of this class: no stall
- * within it (bumper overhang, a planted strip). Measured from the road's right-of-way line when one
- * is designated, else from its back of curb. Seeds: public / truck / custom 10, fire 5, drive aisle 0
- * (parking ON an aisle is the point of an aisle). A plan saved before this key reads the seed for its
- * class key; a road's own `parkSetbackFt` beats the class (lib/parkingRoadTrim.js parkSetbackFor). */
-export function classParkSetback(cls) {
-  const v = cls && cls.parkSetback != null ? +cls.parkSetback : NaN;
-  if (Number.isFinite(v) && v >= 0) return v;
-  const seed = cls && ROAD_CLASS_SEEDS.find((c) => c.key === cls.key);
-  return seed ? seed.parkSetback : 10;
-}

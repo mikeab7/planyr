@@ -555,6 +555,8 @@ export const DEFAULT_SETTINGS = {
   // face: truck court → trailer parking → buffer. User-editable in Standards → Dock zones.
   truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
+  // NEW-1 (road-traced parking, owner 2026-11-25) — the ONE plan-wide keep-back between a road and the first stall (ft); lib/parkingRoadTrim.js.
+  parkSetbackFt: 5,
   showDocks: true,
   // Structural column grid on drawn buildings (B568): speed bay off each dock face, then
   // UNIFORM interior bays sized within the band toward the per-direction target (so the
