@@ -214,3 +214,21 @@ describe("closedMarkupSize / openMarkupLength — NEW-3 (2026-09-07)", () => {
     expect(openMarkupLength(square("p2", 50))).toBe(null);
   });
 });
+
+describe("cloud grab reaches the scalloped line (2026-11-25)", () => {
+  const sq = { id: "c", kind: "cloud", arcFt: 6, pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] };
+  it("an unfilled cloud grabs on an arc crest that bulges past the polygon edge", () => {
+    expect(markupUnderPoint(sq, { x: 50, y: -9 }, 4)).not.toBe(null);   // outward bulge
+    expect(markupUnderPoint(sq, { x: 50, y: 8 }, 4)).not.toBe(null);    // just inside the edge
+  });
+  it("still lets clicks through the middle and from well outside (both unfilled)", () => {
+    expect(markupUnderPoint(sq, { x: 50, y: 50 }, 4)).toBe(null);
+    expect(markupUnderPoint(sq, { x: 50, y: -40 }, 4)).toBe(null);
+  });
+  it("a filled cloud keeps its whole body", () => {
+    expect(markupUnderPoint({ ...sq, fillOpacity: 0.3 }, { x: 50, y: 50 }, 4)).not.toBe(null);
+  });
+  it("a plain polygon's reach is unchanged", () => {
+    expect(markupUnderPoint({ ...sq, kind: "polygon" }, { x: 50, y: -9 }, 4)).toBe(null);
+  });
+});
