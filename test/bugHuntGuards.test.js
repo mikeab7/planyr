@@ -743,8 +743,8 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/crossOrigin: true/);                      // both live tile layers (backfill + detail)
     expect((src.match(/crossOrigin: true/g) || []).length).toBeGreaterThanOrEqual(2);
     // exportAerialForFrame must be async (it awaits the tile fetches) and both callers await it.
-    expect(src).toMatch(/const exportAerialForFrame = async \(frame\)/);
-    expect((src.match(/await exportAerialForFrame\(printFrame\)/g) || []).length).toBe(2); // PNG + PDF
+    expect(src).toMatch(/const exportAerialForFrame = async \(frame(, labelPpf = null)?\)/); // NEW-1 (2026-11-25): + the sheet's label ppf for the street names
+    expect((src.match(/await exportAerialForFrame\(printFrame[,)]/g) || []).length).toBe(2); // PNG + PDF
   });
 
   it("B840: the aerial fetch has its own longer budget + retry + alternate-source fallback", () => {

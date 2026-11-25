@@ -15426,6 +15426,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
     showAerial, // B2589680 — the sheet carries the aerial exactly when the map shows it
+    roadNamesOn: roadNamesPref.on, roadNamesOpacity: roadNamesPref.opacity, // NEW-1 (2026-11-25) — and the map's street names exactly when Layers → Road Names shows them
     basemapOn, basemapSrc, overlays: overlaysDrawn, layerStatus, // NEW-1 (Imagery & Layers) — the sheet carries what the map shows (PDF-PARITY)
     PAL, f0,
     siteName, siteLabel, planLabel, printFrame,
