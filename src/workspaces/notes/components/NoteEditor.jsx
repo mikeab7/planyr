@@ -4461,7 +4461,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       disarm();
       if (e.target instanceof Element && e.target.closest("[data-testid='note-paste-options']")) return;
       /* A press anywhere else — the caret going elsewhere, another box, the toolbar — ends the offer (Word's tab does the same). */
-      if (pasteExpanded) closePasteMenu(false);
+      if (pasteExpanded) { closePasteMenu(false); return; }   // an open menu collapses to the tab first (verify-notes-paste-options)
       setPasteOffer(null);
     };
     const onWheel = (e) => { if (e.ctrlKey) disarm(); };
