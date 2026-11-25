@@ -55,7 +55,7 @@ const rad = (d) => (d * Math.PI) / 180;
 
 /* PARKING SETBACK FROM A ROAD (owner, 2026-11-24: "parking should never really be like right against the roads … you would have overhang";
  * 2026-11-25: "we don't even need multiple road types. We can just say keep parking 5 feet off of roads … a plan-wide setting. I don't want to
- * introduce too much complexity"). ONE plan-wide number, `settings.parkSetbackFt` (Standards → Roads, "Keep parking off roads"), default 5 ft,
+ * introduce too much complexity"). ONE plan-wide number, `settings.parkSetbackFt` (Standards → Roads, "Parking off road"), default 5 ft,
  * the same for every road: the planted strip between a road (its ROW line when one is set, else its back of curb) and the first stall. 0 = stalls may
  * come right up to the curb. No per-road or per-class value (both were built 2026-11-24 and retired the next day at his word). */
 export const PARK_SETBACK_DEFAULT_FT = 5;
