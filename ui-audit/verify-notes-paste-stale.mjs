@@ -27,7 +27,7 @@ const page = await ctx.newPage();
 const errs = [];
 page.on("pageerror", (e) => errs.push(e.message));
 await page.addInitScript(() => { window.__PLANYR_E2E = true; });
-await assertMeasurable(page, "verify-notes-paste-menu");
+await assertMeasurable(page, "verify-notes-paste-stale");
 
 let passN = 0; let failN = 0;
 const failures = [];
