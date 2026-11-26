@@ -1,5 +1,6 @@
+// source-scan: pins that the planner draws switched-off lots through the helper
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 import { inactiveParcelStroke, INACTIVE_PARCEL_MAX_W } from "../src/workspaces/site-planner/lib/inactiveParcelLine.js";
 
 describe("inactiveParcelStroke — a switched-off lot is a fine dashed line, never chunky blocks", () => {
@@ -25,7 +26,7 @@ describe("inactiveParcelStroke — a switched-off lot is a fine dashed line, nev
     expect(inactiveParcelStroke.length).toBe(1);
   });
   it("the planner draws switched-off parcels through it, not the old fixed 8 6 dash", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toContain("inactiveParcelStroke(");
     expect(src).not.toContain('strokeDasharray={inactive ? "8 6"');
   });

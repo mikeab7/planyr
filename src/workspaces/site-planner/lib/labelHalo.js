@@ -13,9 +13,9 @@
  * Pure — unit-tested in test/labelHalo.test.js. */
 
 export const HALO_THIN = 0.6;
-export const AERIAL_LABEL_FILL = "#FFFFFF";
-export const AERIAL_LABEL_HALO = "rgba(12, 22, 26, 0.85)";
-export const PAPER_LABEL_HALO = "#FFFFFF";
+export const AERIAL_LABEL_FILL = "#FFFFFF"; // design-exempt: map-label ink over aerial imagery is fixed, not themed (the printed sheet never goes dark)
+export const AERIAL_LABEL_HALO = "rgba(12, 22, 26, 0.85)"; // design-exempt: map-label ink over aerial imagery is fixed, not themed (the printed sheet never goes dark)
+export const PAPER_LABEL_HALO = "#FFFFFF"; // design-exempt: map-label ink over aerial imagery is fixed, not themed (the printed sheet never goes dark)
 
 /**
  * @param {{ halo: boolean, onAerial: boolean, ink: string, haloW: number }} o

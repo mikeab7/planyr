@@ -1,5 +1,6 @@
+// source-scan: pins that the planner paints element labels through the helper
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { plannerSource } from "./helpers/plannerSource.js";
 import { labelHaloStyle, AERIAL_LABEL_FILL, AERIAL_LABEL_HALO, HALO_THIN } from "../src/workspaces/site-planner/lib/labelHalo.js";
 
 describe("labelHaloStyle — reverse (dark) halo over the aerial, thin white halo on paper", () => {
@@ -19,7 +20,7 @@ describe("labelHaloStyle — reverse (dark) halo over the aerial, thin white hal
     expect(HALO_THIN).toBeLessThan(1);
   });
   it("the planner's element labels paint through it (fill + halo from one answer)", () => {
-    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const src = plannerSource();
     expect(src).toContain("labelHaloStyle({");
     expect(src).not.toMatch(/stroke=\{halo \? "#fff" : undefined\}/);
   });
