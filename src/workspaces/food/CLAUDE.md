@@ -15,7 +15,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `food_places` — the reference snapshot. **Public read, service-role write only** (same
   design as the site-planner's `thoroughfare_segments` reference table) — loaded once (not a
   live API call) from Overture Maps' open Places dataset by `scripts/load-food-places.py`,
-  filtered to the Houston metro and to the `food_and_drink` taxonomy group. Re-run that script
+  filtered to the registered metros (`METROS` in the script: Houston, Dallas-Fort Worth, Austin, Maui, Philadelphia MS; a new town is ONE config row, then load its CSV into production, see `db/food_places_philadelphia_ms.sql` for the pattern) and to the `food_and_drink` taxonomy group. A town outside every metro box shows no snapshot pins (only the live OpenStreetMap search + manual pins). Re-run that script
   once or twice a year to refresh it; it is documented in its own header, including why it's
   Python and not Node (remote GeoParquet row-group pruning needs pyarrow's column stats).
 - `food_visits` — the owner's own log (rating, cost, what he had, notes). **Owner-only RLS**,

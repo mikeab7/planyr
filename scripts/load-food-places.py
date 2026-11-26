@@ -101,10 +101,13 @@ METROS = [
     # The island is mostly ocean inside its own bbox, so a sane row count here is expected to
     # be much smaller than the mainland metros, not evidence something failed (see B634982).
     {"name": "Maui", "bbox": (-156.75, 20.55, -155.95, 21.05)},
+    # Philadelphia, Mississippi (owner, 2026-11-26: "add Philadelphia MS restaurants so I can add
+    # a sonic"). Neshoba County: the town plus the Highway 16/19 strips and Choctaw. One config row.
+    {"name": "Philadelphia MS", "bbox": (-89.35, 32.58, -88.85, 32.95)},
 ]
 DEFAULT_MIN_CONFIDENCE = 0.5
 
-COLUMNS = ["id", "categories", "taxonomy", "confidence", "addresses", "names", "brand", "sources", "bbox"]
+COLUMNS = ["id", "taxonomy", "confidence", "addresses", "names", "brand", "sources", "bbox"]
 
 
 class S3RangeFile(io.RawIOBase):
@@ -176,7 +179,10 @@ def fmt_addr(addrs):
     if not addrs:
         return None
     a = addrs[0]
-    return ", ".join(p for p in (a.get("freeform"), a.get("locality"), a.get("region"), a.get("postcode")) if p)
+    region = a.get("region")
+    if region and region.startswith("US-"):  # 2026-11 releases write "US-MS"; older rows read "TX"
+        region = region[3:]
+    return ", ".join(p for p in (a.get("freeform"), a.get("locality"), region, a.get("postcode")) if p)
 
 
 def slugify(name):
@@ -237,7 +243,9 @@ def scan_metros(session, keys, metros, min_confidence):
                 if r["id"] in seen_ids:
                     continue
                 seen_ids.add(r["id"])
-                cat = r["categories"] or {}
+                # Overture 2026-11-18.0 dropped the old `categories` column; `taxonomy.primary` is its
+                # replacement (same Foursquare-derived slug), so read it from there.
+                cat = {"primary": tax.get("primary")}
                 src, lic = pick_source(r["sources"])
                 out_by_metro[metro_name].append({
                     "id": r["id"],
