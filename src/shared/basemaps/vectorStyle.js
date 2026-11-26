@@ -120,7 +120,7 @@ function roadNameLayers(floor) {
 export const CITY_LIMITS_FROM = 9;
 function boundaryLayers() {
   const base = (id, level, min, width, extra = {}) => ({
-    id, type: "line", source: "vec", "source-layer": "boundary", minzoom: gl(min),
+    id, type: "line", source: "vec", "source-layer": "boundary", minzoom: Math.max(0, gl(min)), // MapLibre rejects a negative minzoom
     filter: ["all", ["==", ["get", "admin_level"], level], ["!=", ["get", "maritime"], 1]],
     layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": TEXT.color, "line-opacity": 0.9, "line-width": width, ...(extra.paint || {}) },

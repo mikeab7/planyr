@@ -153,6 +153,11 @@ describe("names & lines (/food boundaries + state names)", () => {
     const wAt12 = (id) => l(id).paint["line-width"].slice(-1)[0];
     expect(wAt12("boundary-state")).toBeGreaterThan(wAt12("boundary-city"));
   });
+  it("no layer has a negative minzoom (MapLibre rejects the whole style, which silently killed the layer once)", () => {
+    for (const o of [{ mode: "borders" }, { boundaries: true }, { mode: "site" }, {}]) {
+      for (const l of buildVectorStyle(VECTOR_SOURCE, G, o).layers) expect(l.minzoom ?? 0, l.id).toBeGreaterThanOrEqual(0);
+    }
+  });
   it("labels and lines are never interactive", () => {
     expect(vectorLayerOptions(VECTOR_SOURCE, { mode: "borders", boundaries: true }).interactive).toBe(false);
   });
