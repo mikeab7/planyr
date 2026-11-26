@@ -21,16 +21,23 @@ const COPY = {
   },
 };
 
-export function buildAuthEmail({ kind, link }) {
+/* `code` (sign-in only): the short one-time number from the same token, for a browser that cannot open the link or pass
+ * the Turnstile check (Claude's built-in browser pane): it is typed into the sign-in panel instead. Same token, same hour, same single use. */
+export const isEmailCode = (c) => typeof c === "string" && /^\d{6,10}$/.test(c);
+
+export function buildAuthEmail({ kind, link, code }) {
   const c = COPY[kind];
   if (!c) throw new Error("unknown email kind");
   const valid = `This link works once and expires in ${LINK_VALID_MINUTES === 60 ? "1 hour" : LINK_VALID_MINUTES + " minutes"}.`;
   const help = `Trouble? Reply to this email or write ${SUPPORT_EMAIL}.`;
-  const text = `${c.lead}\n\n${c.button}: ${link}\n\n${valid}\n${c.ignore}\n\n${help}\n`;
+  const withCode = kind === "signin" && isEmailCode(code);
+  const codeLine = withCode ? `Can\u2019t open the link on this device? Type this code into the Planyr sign-in box instead: ${code}` : "";
+  const text = `${c.lead}\n\n${c.button}: ${link}\n\n${withCode ? codeLine + "\n\n" : ""}${valid}\n${c.ignore}\n\n${help}\n`;
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827">
 <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:28px">
 <p style="margin:0 0 20px;font-size:16px;line-height:1.5">${esc(c.lead)}</p>
 <p style="margin:0 0 24px"><a href="${esc(link)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px">${esc(c.button)}</a></p>
+${withCode ? `<p style="margin:0 0 20px;font-size:14px;line-height:1.5;color:#374151">Can\u2019t open the link on this device? Type this code into the Planyr sign-in box instead:<br><span style="display:inline-block;margin-top:6px;font-size:24px;font-weight:700;letter-spacing:4px;color:#111827">${esc(code)}</span></p>` : ""}
 <p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#374151">${esc(valid)} ${esc(c.ignore)}</p>
 <p style="margin:0;font-size:13px;line-height:1.5;color:#6b7280">${esc(help)}</p>
 </div></body></html>`;

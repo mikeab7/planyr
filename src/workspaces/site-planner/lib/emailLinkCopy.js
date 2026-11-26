@@ -49,3 +49,17 @@ export function failureCopy(result) {
 
 /** Shown beside the sign-in form when the browser check (Turnstile) could not run on this network. */
 export const BLOCKED_CHECK_COPY = "Your network blocked Planyr’s security check, so the password form can’t finish here. A sign-in link by email doesn’t need it.";
+
+/** The typed-code box under the sent message (sign-in only). */
+export const CODE_COPY = {
+  label: "Or type the code from the email",
+  hint: "Use this if the link won\u2019t open here, for example in a browser that can\u2019t pass the security check.",
+  button: "Sign in",
+};
+/** What to tell the person when a typed code did not work. */
+export function codeFailureCopy(kind) {
+  if (kind === "rate") return "Too many tries. Wait a few minutes, then try again.";
+  if (kind === "network") return `We couldn\u2019t reach Planyr, so nothing was checked. Try again, or email ${SUPPORT_EMAIL}.`;
+  if (kind === "bad_code") return "That code didn\u2019t work. Check it, or press Send again for a new one (the old one stops working).";
+  return `Something went wrong checking the code. Try again, or email ${SUPPORT_EMAIL}.`;
+}

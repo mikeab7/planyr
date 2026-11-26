@@ -30,7 +30,7 @@
  *   5. A mail that did not go out is never reported as sent, and its cap allowance is given back.
  * Logic lives in handleEmailLink(request, env, deps) so it is unit-tested with a fake fetch and a fake mailer. */
 import { buildAuthLinkUrl, LINK_VALID_MINUTES } from "../../../src/shared/auth/authLink.js";
-import { buildAuthEmail } from "../lib/authEmail.js";
+import { buildAuthEmail, isEmailCode } from "../lib/authEmail.js";
 import { serviceHeaders } from "../lib/http.js";
 import { sendViaGmail } from "../lib/gmailSend.js";
 
@@ -133,7 +133,8 @@ export async function handleEmailLink(request, env, deps = {}) {
   let link, mail;
   try {
     link = await buildAuthLinkUrl({ appUrl: e.PUBLIC_APP_URL, kind: purpose, token, email, next: input.next });
-    mail = buildAuthEmail({ kind: purpose, link });
+    const otp = g.email_otp || (g.properties && g.properties.email_otp);
+    mail = buildAuthEmail({ kind: purpose, link, code: isEmailCode(otp) ? otp : undefined });
   } catch (_) { await release(); log({ ok: false, reason: "build" }, request); return reply(502, { ok: false, reason: "link_failed" }); }
 
   // 4) THE MAIL. Anything but a confirmed send is a failure.
