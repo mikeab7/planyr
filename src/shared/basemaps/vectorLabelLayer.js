@@ -24,10 +24,10 @@ const LOAD_DEADLINE_MS = 12000;
 
 /* Pure: the MapLibre constructor options the plugin is handed. Exported so the test can assert the
  * label-collision / non-interactive contract without a browser. */
-export function vectorLayerOptions(source = VECTOR_SOURCE, { includePois = true, mode = "hybrid", origin } = {}) {
+export function vectorLayerOptions(source = VECTOR_SOURCE, { includePois = true, mode = "hybrid", boundaries = false, origin } = {}) {
   const o = origin || (typeof location !== "undefined" ? location.origin : "");
   return {
-    style: buildVectorStyle(source, absoluteGlyphsUrl(source, o), { includePois, mode }),
+    style: buildVectorStyle(source, absoluteGlyphsUrl(source, o), { includePois, mode, boundaries }),
     pane: VECTOR_PANE,
     interactive: false,
     attributionControl: false,
@@ -53,7 +53,7 @@ function ensurePane(map) {
  * get (coalesced pruning + a retained-tile cap) before it is added. Without it the fallback was a bare Leaflet tile layer on a
  * map with fade animation off: every tile that loaded re-ran Leaflet's whole retain/prune pass over every tile the layer had ever
  * kept (measured on the planner: ~1.5 s of a five-step zoom at 4× CPU throttle, inside the tile `load` events). */
-export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, mode = "hybrid", onStatus, decorateFallback } = {}) {
+export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, mode = "hybrid", boundaries = false, onStatus, decorateFallback } = {}) {
   let removed = false;
   let status = "loading";
   let glLayer = null;
@@ -65,6 +65,9 @@ export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = 
     if (removed || fallback) return;
     console.error("vectorLabelLayer: vector roads/labels unavailable — using the raster road names", why);
     if (glLayer) { try { map.removeLayer(glLayer); } catch (_) { /* already gone */ } glLayer = null; }
+    // The "borders" overlay has no raster stand-in (the old road-name tiles would paint ROAD names the
+    // person did not ask for); it just reports `failed` so the surface can say the lines did not load.
+    if (mode === "borders") { say("failed"); return; }
     try {
       fallback = L.tileLayer(ROAD_NAMES_TILES.url, {
         maxZoom: 21, opacity: ROAD_NAMES_TILES.defaultOpacity, zIndex: 2,
@@ -96,7 +99,7 @@ export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = 
       ]);
       if (removed) return;
       if (typeof maplibre.setWorkerUrl === "function") maplibre.setWorkerUrl(workerUrl);
-      glLayer = maplibreGL(vectorLayerOptions(source, { includePois, mode })).addTo(map);
+      glLayer = maplibreGL(vectorLayerOptions(source, { includePois, mode, boundaries })).addTo(map);
       const gl = glLayer.getMaplibreMap();
       let settled = false;
       const ok = () => { if (settled || removed) return; settled = true; clearTimeout(deadline); say("ready"); };

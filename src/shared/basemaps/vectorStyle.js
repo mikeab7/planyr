@@ -110,6 +110,51 @@ function roadNameLayers(floor) {
   ];
 }
 
+/* Boundary LINES — state lines (admin_level 4), country lines (2) and city limits (8), all from the
+ * same OpenMapTiles `boundary` layer the rest of the style reads. Hierarchy by WEIGHT, never hue:
+ * country heaviest, state next, city limits thin and dashed (so a city limit never reads as a state
+ * line). A pale line with a dark hairline casing holds its edge on both aerial and bright pavement.
+ * Offshore (`maritime`) lines are dropped. Nothing is interactive. */
+export const CITY_LIMITS_FROM = 9;
+function boundaryLayers() {
+  const base = (id, level, min, width, extra = {}) => ({
+    id, type: "line", source: "vec", "source-layer": "boundary", minzoom: gl(min),
+    filter: ["all", ["==", ["get", "admin_level"], level], ["!=", ["get", "maritime"], 1]],
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "rgba(255,255,255,0.92)", "line-opacity": 0.9, "line-width": width, ...(extra.paint || {}) },
+  });
+  const casing = (id, level, min, width) => ({
+    ...base(id, level, min, width),
+    paint: { "line-color": "rgba(10, 16, 24, 0.55)", "line-opacity": 0.5, "line-width": width },
+  });
+  const w = (a, b) => widthByZoom([[3, a], [12, b]]);
+  return [
+    casing("boundary-city-casing", 8, CITY_LIMITS_FROM, w(1.2, 2.4)),
+    base("boundary-city", 8, CITY_LIMITS_FROM, w(0.6, 1.3), { paint: { "line-dasharray": [3, 2], "line-opacity": 0.75 } }),
+    casing("boundary-state-casing", 4, 3, w(2.4, 4)),
+    base("boundary-state", 4, 3, w(1.4, 2.4)),
+    casing("boundary-country-casing", 2, 0, w(3, 5)),
+    base("boundary-country", 2, 0, w(2, 3)),
+  ];
+}
+
+/* State NAMES — large, letter-spaced, uppercase, so they read as a region name and never as a place. */
+function stateNameLayer() {
+  return {
+    id: "place-state", type: "symbol", source: "vec", "source-layer": "place",
+    minzoom: gl(4), maxzoom: gl(9),
+    filter: ["==", ["get", "class"], "state"],
+    layout: {
+      "text-field": ["coalesce", ["get", "name:latin"], ["get", "name"]],
+      "text-font": FONT_MEDIUM, "text-transform": "uppercase", "text-letter-spacing": 0.18,
+      "text-size": ["interpolate", ["linear"], ["zoom"], gl(4), 11, gl(8), 16],
+      "text-max-width": 8, "symbol-sort-key": ["coalesce", ["get", "rank"], 99],
+      "text-padding": 10, "text-allow-overlap": false, "text-ignore-placement": false,
+    },
+    paint: { "text-color": "rgba(255,255,255,0.95)", "text-halo-color": TEXT.halo, "text-halo-width": 1.3, "text-halo-blur": 1 },
+  };
+}
+
 function placeLayers() {
   const placeBase = (id, classes, min, max, size, extra = {}) => ({
     id, type: "symbol", source: "vec", "source-layer": "place",
@@ -161,18 +206,23 @@ function poiLayer() {
 
 /* The style. `glyphsUrl` must be ABSOLUTE (the MapLibre worker cannot resolve a relative URL);
  * `source` is the `VECTOR_SOURCE` config entry. */
-export function buildVectorStyle(source, glyphsUrl, { includePois = true, mode = "hybrid" } = {}) {
+export function buildVectorStyle(source, glyphsUrl, { includePois = true, mode = "hybrid", boundaries = false } = {}) {
   /* "site" = the Site Plan map's close-zoom roads: road lines + road names ONLY, nothing before
    * SITE_ROADS_FROM, no vector places (the city names are Planyr's own layer there) and no POIs.
    * "hybrid" = the full Apple/Google-like style with everything phasing in by importance. */
   const site = mode === "site";
+  /* "borders" = boundary lines + state/city/town names ONLY (no roads): the overlay /food's
+   * "Names & lines" switch puts over the plain aerial. */
+  const borders = mode === "borders";
   const floor = site ? SITE_ROADS_FROM : 0;
-  const layers = [...roadLayers(floor), ...roadNameLayers(floor)];
-  if (!site) layers.push(...placeLayers());
-  if (!site && includePois) layers.push(poiLayer());
+  const layers = borders ? [] : [...roadLayers(floor), ...roadNameLayers(floor)];
+  if (borders || boundaries) layers.push(...boundaryLayers());
+  if (!site) layers.push(...(borders ? placeLayers().slice(0, 2) : placeLayers()));
+  if (borders || boundaries) layers.push(stateNameLayer());
+  if (!site && !borders && includePois) layers.push(poiLayer());
   return {
     version: 8,
-    name: site ? "planyr-site-plan-roads" : "planyr-hybrid-labels",
+    name: site ? "planyr-site-plan-roads" : borders ? "planyr-names-and-lines" : "planyr-hybrid-labels",
     glyphs: glyphsUrl,
     sources: { vec: { type: "vector", url: source.tilejson } },
     /* Transparent background: this style paints ONLY on top of the aerial. */

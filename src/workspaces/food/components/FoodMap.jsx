@@ -302,7 +302,7 @@ import { Button, IconButton, SegmentedControl, SIZE } from "../../../shared/ui/c
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 import {
-  SATELLITE_BASEMAP, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
+  SATELLITE_BASEMAP, VECTOR_SOURCE, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
 import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
 import { safeAreaInsets } from "../../../shared/ui/safeAreaInsets.js";
@@ -323,6 +323,12 @@ const MIN_STACK_ROOM_PX = 140; // map height above the sheet below which the bot
 // (B634981: never pass `subdomains: undefined`; axis order is {z}/{y}/{x}) are enforced inside the
 // shared `basemapTileLayers()` and its unit test.
 const BASEMAP_STORAGE_KEY = "planyr:food:basemap"; // per-user, per-device last choice (NEW-1)
+// "Names & lines" (state names, city names, state lines, city limits) — its own per-device switch, ON by
+// default, independent of the basemap choice: it draws over the plain Satellite photo AND over Hybrid.
+const BORDERS_STORAGE_KEY = "planyr:food:borders";
+function readStoredBorders() {
+  try { return window.localStorage.getItem(BORDERS_STORAGE_KEY) !== "off"; } catch (_) { return true; }
+}
 function readStoredBasemap() {
   try { return resolveBasemapChoice(window.localStorage.getItem(BASEMAP_STORAGE_KEY)).key; }
   catch (_) { return SATELLITE_BASEMAP.key; } // storage blocked → the default, never a crash
@@ -526,6 +532,7 @@ export default function FoodMap({
   const pinIndexRef = useRef([]);
   const [tooSmall, setTooSmall] = useState(false);
   const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "hybrid" (default) | "satellite"
+  const [bordersOn, setBordersOn] = useState(readStoredBorders); // stale-ok: per-device display preference, same as `basemap`
   const [basemapError, setBasemapError] = useState(false);
   // B651872 (×4) — tied to the CURRENT tile layer's own 'loading'/'load' events (basemap effect
   // below); drives the "Loading imagery…" pill so a genuinely-in-progress screen never reads as
@@ -656,7 +663,7 @@ export default function FoodMap({
     const choice = resolveBasemapChoice(basemap);
     const specs = basemapTileLayers(choice, { dpr: window.devicePixelRatio || 1 });
     const layers = [];
-    let onLoading, onLoad, loadingLayer, vectorHandle = null;
+    let onLoading, onLoad, loadingLayer;
     const markGap = () => map.getContainer().classList.add(IMAGERY_GRADE.containerClass);
     try {
       // The raster side is the IMAGERY only (NEW-1/B2018608): no `subdomains` key (B634981), high
@@ -680,15 +687,6 @@ export default function FoodMap({
           setTilesLoading(loadingLayer.isLoading());
         }
       });
-      // Satellite (the default) carries NO road/label layer at all (`choice.vector` null) — the photo only.
-      // Hybrid is the full vector map. /food draws no basemap POI labels either way: the restaurant pins
-      // ARE the points of interest, and a basemap label under a pin is the collision the owner called out.
-      if (choice.vector) {
-        vectorHandle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", includePois: false, onStatus: setLabelsStatus });
-        labelsLayerRef.current = vectorHandle;
-      } else {
-        setLabelsStatus("none");
-      }
       setBasemapError(false);
     } catch (err) {
       console.error("FoodMap: basemap tile layer failed to mount", err);
@@ -697,13 +695,44 @@ export default function FoodMap({
     return () => {
       if (loadingLayer) { loadingLayer.off("loading", onLoading); loadingLayer.off("load", onLoad); }
       setTilesLoading(false);
-      if (vectorHandle) { vectorHandle.remove(); labelsLayerRef.current = null; }
       try { map.getContainer().classList.remove(IMAGERY_GRADE.containerClass); } catch (_) { /* container gone */ }
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
   // narrowViewport is deliberately NOT a dep: rebuilding the tile layers on every viewport-width
   // crossing would be churn for nothing (the tile URLs never vary by viewport width).
   }, [basemap]);
+
+  // Roads / names / lines — the shared VECTOR layer, kept in its OWN effect so flipping "Names & lines"
+  // never re-creates the aerial tiles (no flash). Hybrid is the full vector map (+ state names and
+  // lines when "Names & lines" is on); Satellite with it on gets ONLY the names and lines ("borders"
+  // mode: no roads), and with it off gets nothing at all — the photo only. /food draws no basemap POI
+  // labels either way: the restaurant pins ARE the points of interest, and a basemap label under a pin
+  // is the collision the owner called out. The layer sits in its own pane under the markers and is
+  // pointer-events:none, so a name or line can never block a tap on a pin.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+    const choice = resolveBasemapChoice(basemap);
+    let handle = null;
+    try {
+      if (choice.vector) {
+        handle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", boundaries: bordersOn, includePois: false, onStatus: setLabelsStatus });
+      } else if (bordersOn) {
+        handle = addVectorLabels(L, map, { source: VECTOR_SOURCE, mode: "borders", onStatus: setLabelsStatus });
+      } else {
+        setLabelsStatus("none");
+      }
+      labelsLayerRef.current = handle;
+    } catch (err) {
+      console.error("FoodMap: names/lines layer failed to mount", err);
+      setLabelsStatus("failed");
+    }
+    return () => { if (handle) { handle.remove(); labelsLayerRef.current = null; } };
+  }, [basemap, bordersOn]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(BORDERS_STORAGE_KEY, bordersOn ? "on" : "off"); } catch (_) { /* no memory, no crash */ }
+  }, [bordersOn]);
 
   // NEW-1 — remember the last choice (per device); a blocked/full store just means no memory.
   useEffect(() => {
@@ -1204,7 +1233,7 @@ export default function FoodMap({
         )}
         {labelsStatus === "failed" && (
           <div data-testid="food-labels-fallback" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
-            Crisp road labels unavailable — showing basic labels
+            {basemap === "satellite" ? "City names and boundary lines unavailable right now" : "Crisp road labels unavailable — showing basic labels"}
           </div>
         )}
         {tooSmall && (
@@ -1259,6 +1288,12 @@ export default function FoodMap({
           options={FOOD_BASEMAP_CHOICES.map((c) => ({ key: c.key, label: c.label, title: c.title, testid: `food-basemap-${c.key}` }))}
           value={basemap} onChange={setBasemap}
         />
+        <Button
+          variant="ghost" active={bordersOn} onClick={() => setBordersOn((v) => !v)} aria-pressed={bordersOn}
+          accent="var(--accent-food)" onAccent="var(--on-accent-food)" data-testid="food-borders-toggle"
+          title="City and state names, state lines and city limits"
+          style={{ height: SIZE.md.height, padding: SIZE.md.padding }}
+        >Names &amp; lines</Button>
       </div>
       {/* B681520 (×2) RECURRENCE — owner direction, verbatim: the collapse was never about
           desktop ("we can relocate it" was about the sheet, on mobile). "I'm fine with the full
