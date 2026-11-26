@@ -126,3 +126,39 @@ describe("no tinted roads (B2106752)", () => {
     expect(w("road-freeway")).toBeGreaterThan(w("road-major"));
   });
 });
+
+describe("names & lines (/food boundaries + state names)", () => {
+  const G = "https://x.test/f/{fontstack}/{range}.pbf";
+  const ids = (s) => s.layers.map((l) => l.id);
+  it("default hybrid/site styles are unchanged: no boundary or state-name layers", () => {
+    expect(ids(style).some((i) => i.startsWith("boundary-") || i === "place-state")).toBe(false);
+    expect(ids(buildVectorStyle(VECTOR_SOURCE, G, { mode: "site" })).some((i) => i.startsWith("boundary-"))).toBe(false);
+  });
+  it("hybrid + boundaries adds country/state lines, city limits and state names", () => {
+    const s = buildVectorStyle(VECTOR_SOURCE, G, { boundaries: true });
+    for (const i of ["boundary-country", "boundary-state", "boundary-city", "place-state", "road-freeway", "place-city"]) expect(ids(s)).toContain(i);
+  });
+  it("borders mode is lines + state/city/town names only: no roads, no suburbs, no POIs", () => {
+    const s = buildVectorStyle(VECTOR_SOURCE, G, { mode: "borders" });
+    expect(ids(s).some((i) => i.startsWith("road"))).toBe(false);
+    for (const i of ["boundary-state", "boundary-city", "place-state", "place-city", "place-town"]) expect(ids(s)).toContain(i);
+    for (const i of ["place-suburb", "place-neighbourhood", "poi-landmarks"]) expect(ids(s)).not.toContain(i);
+  });
+  it("state lines outrank city limits (heavier), city limits are dashed, offshore lines are dropped", () => {
+    const s = buildVectorStyle(VECTOR_SOURCE, G, { mode: "borders" });
+    const l = (id) => s.layers.find((x) => x.id === id);
+    expect(l("boundary-city").paint["line-dasharray"]).toBeTruthy();
+    expect(l("boundary-state").paint["line-dasharray"]).toBeUndefined();
+    expect(JSON.stringify(l("boundary-state").filter)).toContain("maritime");
+    const wAt12 = (id) => l(id).paint["line-width"].slice(-1)[0];
+    expect(wAt12("boundary-state")).toBeGreaterThan(wAt12("boundary-city"));
+  });
+  it("no layer has a negative minzoom (MapLibre rejects the whole style, which silently killed the layer once)", () => {
+    for (const o of [{ mode: "borders" }, { boundaries: true }, { mode: "site" }, {}]) {
+      for (const l of buildVectorStyle(VECTOR_SOURCE, G, o).layers) expect(l.minzoom ?? 0, l.id).toBeGreaterThanOrEqual(0);
+    }
+  });
+  it("labels and lines are never interactive", () => {
+    expect(vectorLayerOptions(VECTOR_SOURCE, { mode: "borders", boundaries: true }).interactive).toBe(false);
+  });
+});
