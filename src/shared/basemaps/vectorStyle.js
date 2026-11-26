@@ -37,6 +37,8 @@ const widthByZoom = (stops) => [
 ];
 
 /* Soft halo — dark, translucent, thin. The old raster labels carried a heavy black outline. */
+/* Hairline dark casing under a pale line — roads and boundary lines share it. */
+const CASING = "rgba(10, 16, 24, 0.55)";
 const TEXT = { color: "#ffffff", halo: "rgba(18, 26, 38, 0.62)", haloWidth: 1.1, haloBlur: 0.8 };
 
 const ROAD_CLASSES = {
@@ -66,7 +68,7 @@ function roadLayers(floor) {
       id: `road-${id}-casing`, type: "line", source: "vec", "source-layer": "transportation",
       minzoom: gl(Math.max(r.minzoom, floor)), filter: roadFilter(r.classes),
       layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": "rgba(10, 16, 24, 0.55)", "line-opacity": r.opacity * 0.55,
+      paint: { "line-color": CASING, "line-opacity": r.opacity * 0.55,
         "line-width": widthByZoom(r.widths.map(([z, w]) => [z, w + 0.9])) },
     });
     layers.push({
@@ -121,11 +123,11 @@ function boundaryLayers() {
     id, type: "line", source: "vec", "source-layer": "boundary", minzoom: gl(min),
     filter: ["all", ["==", ["get", "admin_level"], level], ["!=", ["get", "maritime"], 1]],
     layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "rgba(255,255,255,0.92)", "line-opacity": 0.9, "line-width": width, ...(extra.paint || {}) },
+    paint: { "line-color": TEXT.color, "line-opacity": 0.9, "line-width": width, ...(extra.paint || {}) },
   });
   const casing = (id, level, min, width) => ({
     ...base(id, level, min, width),
-    paint: { "line-color": "rgba(10, 16, 24, 0.55)", "line-opacity": 0.5, "line-width": width },
+    paint: { "line-color": CASING, "line-opacity": 0.5, "line-width": width },
   });
   const w = (a, b) => widthByZoom([[3, a], [12, b]]);
   return [
@@ -151,7 +153,7 @@ function stateNameLayer() {
       "text-max-width": 8, "symbol-sort-key": ["coalesce", ["get", "rank"], 99],
       "text-padding": 10, "text-allow-overlap": false, "text-ignore-placement": false,
     },
-    paint: { "text-color": "rgba(255,255,255,0.95)", "text-halo-color": TEXT.halo, "text-halo-width": 1.3, "text-halo-blur": 1 },
+    paint: { "text-color": TEXT.color, "text-halo-color": TEXT.halo, "text-halo-width": 1.3, "text-halo-blur": 1 },
   };
 }
 
