@@ -57,6 +57,23 @@ export async function verifyAuthLink({ token, kind }) {
   } catch (e) { return { ok: false, kind: classifyVerifyFailure(e) }; }
 }
 
+/** Spend the emailed one-time CODE (the typed alternative to the link, for a browser that cannot pass the security check or open the link):
+ * → { ok:true, user, accessToken } | { ok:false, kind: "bad_code"|"expired"|"rate"|"network"|"other" }. Goes through verifyOtp,
+ * which carries no browser check; the code is the same single-use token the link carries. */
+export const normalizeCode = (raw) => String(raw == null ? "" : raw).replace(/\D/g, "");
+export async function verifyEmailCode({ email, code }) {
+  const token = normalizeCode(code), addr = String(email || "").trim().toLowerCase();
+  if (!supabase || !addr || token.length < 6 || token.length > 10) return { ok: false, kind: "bad_code" };
+  try {
+    let res = await supabase.auth.verifyOtp({ email: addr, token, type: "email" });
+    if (res.error && !/network|fetch/i.test(String(res.error.message || ""))) res = await supabase.auth.verifyOtp({ email: addr, token, type: "magiclink" }); // an older project stores a sign-in code under the magic-link type
+    if (res.error) { const k = classifyVerifyFailure(res.error); return { ok: false, kind: k === "expired" ? "bad_code" : k }; } // wrong, used and expired look the same to the person
+    const { data } = res;
+    if (!data || !data.user || !data.session) return { ok: false, kind: "other" };
+    return { ok: true, user: data.user, accessToken: data.session.access_token };
+  } catch (e) { return { ok: false, kind: classifyVerifyFailure(e) }; }
+}
+
 /* The address typed on THIS device, so "Send a new one" can pre-fill it on the page the link opens — without
  * the address ever being in the link. A different device simply has none and shows an empty field. */
 export function rememberLinkEmail(email) { try { localStorage.setItem(LAST_EMAIL_KEY, String(email || "").trim().toLowerCase()); } catch (_) { /* blocked */ } }

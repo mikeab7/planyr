@@ -12,7 +12,8 @@ import { signIn, signUp, signOut, signOutEverywhere, updatePassword } from "../l
 // constant in lib/signupOutcome.js / authMail.js. Forgot password and the sign-in link (NEW-1, B2626128) go through
 // Planyr's own /api/auth/email-link route — no Turnstile, no Supabase mailer — and show the shared EmailLinkSent view
 // (lazy: only ever rendered after a send).
-import { requestEmailLink } from "../lib/emailLinkClient.js";
+import { requestEmailLink, verifyEmailCode, recordMailboxProof } from "../lib/emailLinkClient.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { failureCopy, BLOCKED_CHECK_COPY } from "../lib/emailLinkCopy.js";
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
@@ -592,6 +593,15 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     try { await askLink(purpose, addr); } finally { submitting.current = false; setBusy(false); }
   };
   const resendLink = () => requestEmailLink({ email: sent.email, purpose: sent.purpose, next: sent.purpose === "signin" ? currentRoute() : undefined });
+  // Typed-code sign-in (the alternative to opening the link): verifyOtp is not behind Turnstile, so it works in a browser that cannot pass the check.
+  const verifyCode = async (code) => {
+    const r = await verifyEmailCode({ email: sent.email, code });
+    if (r.ok) {
+      recordMailboxProof(r.accessToken).then((p) => { if (!p.ok) reportClientEvent("mailbox-proof-failed", "an emailed code was redeemed but the mailbox proof was not recorded", { reason: p.reason }); });
+      // No close here: the session lands in the `user` prop and the panel becomes the signed-in account view by itself.
+    }
+    return r;
+  };
   // The Sign in form's "Email me a sign-in link": only the address is needed, and a missing one is SAID, never a dead button.
   const onEmailLink = () => {
     const v = readDom();
@@ -686,7 +696,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     return (
       <Wrap onClose={onClose} msg={null} title={sent.purpose === "reset" ? "Reset password" : "Sign in"}>
         <LazyPanel name="The sent-email view" minHeight={160} label="Loading…">
-          <EmailLinkSent email={sent.email} purpose={sent.purpose} initialSeconds={sent.seconds} onResend={resendLink}
+          <EmailLinkSent email={sent.email} purpose={sent.purpose} initialSeconds={sent.seconds} onResend={resendLink} onVerifyCode={sent.purpose === "signin" ? verifyCode : undefined}
             onBack={() => { setSent(null); setMode("signin"); setMsg(null); }} />
         </LazyPanel>
       </Wrap>
