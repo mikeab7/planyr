@@ -293,13 +293,27 @@ describe("mcp_oauth.sql", () => {
       const t3 = await refresh(db, t1.refresh_token, f.client);                 // the client never saw t2 and retried
       expect(t3.ok).toBe(true);
       expect(t3.refresh_token).not.toBe(t2.refresh_token);
-      expect((await check(db, t2.access_token)).ok).toBe(true);
+      expect(await check(db, t2.access_token)).toEqual({ ok: false });         // the first use's pair is retired: ONE chain
       const { grant_id } = await check(db, t3.access_token);
       expect(grant_id).toBeTruthy();
       expect((await refresh(db, t3.refresh_token, f.client)).ok).toBe(true);   // the retried chain carries on
       expect((await refresh(db, t1.refresh_token, "pmcp_client_other")).error).toBe("invalid_grant"); // grace never crosses clients
       const g = await db.query("select revoked_at from public.mcp_oauth_grants where id = $1", [grant_id]);
       expect(g.rows[0].revoked_at).toBeNull();
+    });
+    it("a replay inside the grace leaves ONE chain: the retired pair's refresh then trips reuse and revokes the grant", async () => {
+      const f = await consent(db, A);
+      const r1 = await exchange(db, f);
+      const pairA = await refresh(db, r1.refresh_token, f.client);              // first use of R1 -> pair A
+      const pairB = await refresh(db, r1.refresh_token, f.client);              // R1 again within 30 s -> pair B
+      expect(pairB.ok).toBe(true);
+      expect(await check(db, pairA.access_token)).toEqual({ ok: false });      // pair A's access token is dead
+      const { grant_id } = await check(db, pairB.access_token);
+      expect((await refresh(db, pairA.refresh_token, f.client)).error).toBe("invalid_grant");   // pair A's refresh fails…
+      expect(await check(db, pairB.access_token)).toEqual({ ok: false });      // …and revokes the whole grant
+      expect((await refresh(db, pairB.refresh_token, f.client)).error).toBe("invalid_grant");
+      const g = await db.query("select revoked_reason from public.mcp_oauth_grants where id = $1", [grant_id]);
+      expect(g.rows[0].revoked_reason).toBe("refresh_reused");
     });
     it("housekeeping: codes and tokens long past their expiry are purged; a fresh spent code is kept for replay detection", async () => {
       const f1 = await consent(db, A);

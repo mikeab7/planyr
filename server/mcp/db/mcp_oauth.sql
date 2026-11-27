@@ -201,7 +201,8 @@ end $$;
 -- /api/oauth/token, grant_type=refresh_token. Rotates every time; a refresh token presented twice means it was copied,
 -- so the whole grant is revoked (theft detection) -- EXCEPT within 30 seconds of its first use (review round 2, MED 3):
 -- a client that retries a refresh whose answer it never received (a dropped connection, two requests racing) would
--- otherwise disconnect a real person. Inside that window the retry gets a fresh pair and nothing is revoked; the
+-- otherwise disconnect a real person. Inside that window the retry gets a fresh pair, the pair the first use minted is
+-- retired (so only one chain is ever live), and nothing is revoked; the
 -- price is that a thief holding a copy must race the real client inside the same 30 seconds, which the 1-hour access
 -- token and the grant's own revocation paths bound. After it, reuse revokes as before.
 create or replace function public.mcp_oauth_refresh(p_refresh text, p_client_id text) returns jsonb
@@ -213,7 +214,15 @@ begin
   select * into g from public.mcp_oauth_grants where id = t.grant_id for update;
   if g.revoked_at is not null or g.client_id is distinct from p_client_id then return jsonb_build_object('ok', false, 'error', 'invalid_grant'); end if;
   if t.used_at is not null then
-    if t.used_at > now() - interval '30 seconds' then return public.mcp_oauth_issue(g.id); end if;   -- retry grace
+    if t.used_at > now() - interval '30 seconds' then                                        -- retry grace
+      -- ONE chain survives (review round 3): the pair the first use minted is retired before the new pair is issued.
+      -- Its refresh token is marked spent OUTSIDE the grace window, so whoever later presents it (the real client or
+      -- a thief) trips refresh_reused and the grant is revoked: theft is still detected.
+      delete from public.mcp_oauth_tokens where grant_id = g.id and kind = 'access';
+      update public.mcp_oauth_tokens set used_at = now() - interval '1 day'
+       where grant_id = g.id and kind = 'refresh' and used_at is null;
+      return public.mcp_oauth_issue(g.id);
+    end if;
     perform public.mcp_oauth_revoke_grant(g.id, 'refresh_reused');
     return jsonb_build_object('ok', false, 'error', 'invalid_grant');
   end if;
