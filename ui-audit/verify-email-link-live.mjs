@@ -33,6 +33,8 @@ const ghost = () => `nobody-${Date.now().toString(36)}${Math.random().toString(3
 
 const browser = engine === "webkit" ? await webkit.launch() : await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
 const ctx = await browser.newContext(engine === "webkit" ? { ...devices["iPhone 15"] } : { viewport: { width: 1440, height: 900 } });
+// A person's browser, not an AI agent's: the panel reads navigator.webdriver as an agent and leads with the emailed code (src/shared/auth/agentBrowser.js).
+await ctx.addInitScript(() => { try { Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false, configurable: true }); } catch (_) {} });
 const page = await ctx.newPage();
 const dlg = page.getByRole("dialog");
 const verifyCalls = [];
@@ -79,8 +81,8 @@ try {
   await dlg.getByLabel("Email").fill(ghost());
   const blockedNote = page.getByTestId("captcha-unavailable");
   const shown = await blockedNote.waitFor({ state: "visible", timeout: 25000 }).then(() => true, () => false);
-  const promoted = shown && /network blocked/i.test(await blockedNote.innerText());
-  note("5 Cloudflare's script blocked → the network line shows and 'Email me a sign-in link' is the main action", promoted ? "PASS" : "FAIL", shown ? "" : "the line never appeared within 25 s");
+  const promoted = shown && /network may have blocked/i.test(await blockedNote.innerText());
+  note("5 Cloudflare's script blocked → the blocked-check note shows and 'Email me a sign-in code' is the main action", promoted ? "PASS" : "FAIL", shown ? "" : "the line never appeared within 25 s");
   if (promoted) {
     await page.getByTestId("email-link-signin").click();
     const inbox = page.getByTestId("email-link-inbox");

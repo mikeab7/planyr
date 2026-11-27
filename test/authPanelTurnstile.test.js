@@ -23,7 +23,7 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
     // Forgot password (reset) goes through Planyr's own mail route and needs no browser check (NEW-1).
     expect(panelSrc).toMatch(/const captchaOn = turnstileEnabled\(\) && mode !== "recovery" && mode !== "reset"/);
     expect(panelSrc).not.toMatch(/mode === "signup" && turnstileEnabled\(\)/);
-    expect(panelSrc).toMatch(/\{captchaOn && \(/);
+    expect(panelSrc).toMatch(/\{captchaOn && !agentLayout && \(/); // AI agent access: not drawn in the agent layout (no password to send)
   });
 
   it("only sign-up keeps the visible box; sign in / forgot password are interaction-only", () => {
@@ -63,7 +63,9 @@ describe("AuthPanel — one shared Turnstile widget (NEW-1)", () => {
   });
 
   it("blocked network shows ONE message (the network line) with Try again — never both lines (V2070224)", () => {
-    expect(panelSrc).toContain("captchaBlocked ? BLOCKED_CHECK_COPY : CAPTCHA_UNAVAILABLE_COPY");
+    // AI agent access (2026-11-27): the blocked case is ONE callout (heading + body + retry); the plain line is for every other failure.
+    expect(panelSrc).toMatch(/captchaBlocked \? \(\s*<div role="alert" data-testid="captcha-unavailable" data-blocked="true"/);
+    expect(panelSrc).toContain("{BLOCKED_CHECK_COPY.body}");
     expect(panelSrc).not.toContain("captcha-blocked-note");
   });
 

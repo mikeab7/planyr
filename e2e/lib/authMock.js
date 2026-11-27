@@ -12,6 +12,7 @@
  * callback); `window.__tsTimeout()` fires Cloudflare's own timeout-callback; `window.__ts.renders`
  * records how it was rendered (appearance, size, sitekey). */
 
+import { asHumanBrowser } from "./humanBrowser.js";
 export const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "";
 export const HOST = SUPABASE_URL ? new URL(SUPABASE_URL).hostname : "";
 export const SITE_KEY = process.env.VITE_TURNSTILE_SITE_KEY || "";
@@ -56,6 +57,7 @@ export function sessionFor(user = USER, { expiresAt = Math.floor(Date.now() / 10
 
 /** Installs the mock. Returns { calls, rest, cfg } — `calls` is every gated auth POST (plus Planyr's own /api/auth/email-link, with `cfg.link(body)` to override its answer), `rest` every /rest/v1 request. */
 export async function mockAuth(page, { rawOnly = false, scriptOk = true, cfg: extra = {} } = {}) {
+  await asHumanBrowser(page); // a person's browser, not an AI agent's (see lib/humanBrowser.js)
   const calls = [];
   const rest = [];
   const cfg = { respond: null, refreshOk: true, ...extra };

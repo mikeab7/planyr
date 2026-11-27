@@ -71,8 +71,11 @@ describe("failures are never worded as a send", () => {
     expect(failureCopy({ reason: "throttled", retryAfterSeconds: 2400 })).toMatch(/about 40 minutes/);
   });
   it("the blocked-network line says the NETWORK stopped the check, and offers no 'use phone data' detour", () => {
-    expect(BLOCKED_CHECK_COPY).toMatch(/network blocked/i);
-    expect(BLOCKED_CHECK_COPY).not.toMatch(/phone|cellular|mobile data|hotspot/i);
+    const all = Object.values(BLOCKED_CHECK_COPY).join(" ");
+    expect(BLOCKED_CHECK_COPY.body).toMatch(/network may have blocked/i);
+    expect(BLOCKED_CHECK_COPY.body).toMatch(/AI agent/);
+    expect(BLOCKED_CHECK_COPY.body).toMatch(/sign-in code/);
+    expect(all).not.toMatch(/phone|cellular|mobile data|hotspot/i);
     expect(panelSrc).not.toMatch(/phone data|cellular|mobile data|hotspot/i);
   });
 });

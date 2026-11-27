@@ -47,13 +47,30 @@ export function failureCopy(result) {
   return `Emailed links aren’t working right now, and no email was sent. Email ${SUPPORT_EMAIL} and we’ll get you in.`;
 }
 
-/** Shown beside the sign-in form when the browser check (Turnstile) could not run on this network. */
-export const BLOCKED_CHECK_COPY = "Your network blocked Planyr’s security check, so the password form can’t finish here. A sign-in link by email doesn’t need it.";
+/** Shown beside the sign-in form when the browser check (Turnstile) failed, hung or could not load (owner-approved
+ * "AI agent access" mockup, Moment 2, 2026-11-27). It names the two real causes (a network that blocks the check, or an
+ * AI agent's browser, which the check always refuses) and points at the emailed code, which does not need the check. */
+export const BLOCKED_CHECK_COPY = {
+  heading: "The security check didn\u2019t finish",
+  body: "Your network may have blocked it. Using an AI agent, or does it keep failing? Email a sign-in code instead.",
+  retry: "Try the check again",
+};
+
+/** Shown at the top of the sign-in form when the panel is running inside an AI agent's browser (Moment 1). That
+ * browser can never pass the check, so the emailed code leads and the password form waits behind a link. */
+export const AGENT_BROWSER_COPY = {
+  heading: "Using an AI agent?",
+  body: "This browser can\u2019t pass Planyr\u2019s security check. We\u2019ll email a 6-digit code instead.",
+  usePassword: "Use my password instead",
+};
+
+/** The sign-in form's email button (the email carries both a link and a 6-digit code). */
+export const EMAIL_CODE_BUTTON = "Email me a sign-in code";
 
 /** The typed-code box under the sent message (sign-in only). */
 export const CODE_COPY = {
-  label: "Or type the code from the email",
-  hint: "Use this if the link won\u2019t open here, for example in a browser that can\u2019t pass the security check.",
+  label: "6-digit code from the email",
+  agent: "Signing in through your own AI agent? Read it the code yourself, only for a sign-in you just started. Planyr never shows the code on this screen.",
   button: "Sign in",
 };
 /** What to tell the person when a typed code did not work. */
