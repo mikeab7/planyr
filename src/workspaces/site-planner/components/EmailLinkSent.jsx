@@ -56,7 +56,7 @@ export default function EmailLinkSent({ email, purpose, initialSeconds = 60, onR
   const codeForm = onVerifyCode && (
     <form onSubmit={submitCode} data-testid="email-code-form" style={{ marginTop: 12 }}>
       <label htmlFor="email-code-input" style={{ display: "block", fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>{CODE_COPY.label}</label>
-      <input id="email-code-input" name="code" data-testid="email-code-input" inputMode="numeric" autoComplete="one-time-code" maxLength={12} value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456"
+      <input id="email-code-input" name="code" data-testid="email-code-input" inputMode="numeric" autoComplete="one-time-code" maxLength={12} value={code} onChange={(e) => setCode(e.target.value)} placeholder="6 digits"
         style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: FONT_SIZE.emphasis, border: "1px solid var(--border-default)", borderRadius: 8, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", letterSpacing: 2 }} />
       {codeProblem && <div role="alert" data-testid="email-code-problem" style={{ ...note, color: "var(--danger-text)" }}>{codeProblem}</div>}
       <div style={{ marginTop: 8 }}><Button type="submit" variant="primary" data-testid="email-code-submit" disabled={checking || code.replace(/\D/g, "").length < 6}>{checking ? "Checking…" : CODE_COPY.button}</Button></div>
