@@ -84,7 +84,8 @@ describe("forgot password and the sign-in link do not depend on Cloudflare", () 
   it("the sign-in link button is rendered in the sign-in form regardless of captcha state, and promoted when blocked", () => {
     expect(panel).toMatch(/\{mode === "signin" && \(\s*<>[\s\S]*data-testid="email-link-signin"/);
     expect(panel).toMatch(/captchaBlocked = captchaOn && mode === "signin" && \(cv\.widget === "error" \|\| !!cv\.failure\)/);
-    expect(panel).toMatch(/btn\(captchaBlocked\)/);
+    expect(panel).toMatch(/const codeFirst = captchaBlocked \|\| agentLayout;/); // AI agent access: an agent's browser promotes it too
+    expect(panel).toMatch(/btn\(codeFirst\)/);
     expect(panel).toMatch(/btn\(!captchaBlocked\)/);
   });
   it("a failed request shows failureCopy, and 'sent' is shown only from an ok result", () => {

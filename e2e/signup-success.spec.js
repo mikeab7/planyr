@@ -12,12 +12,14 @@
  *   present → signed in already; the panel closes, no check-your-email screen
  * plus the double-submit guard (one request however many presses) and tab-scoping. */
 import { test, expect } from "@playwright/test";
+import { asHumanBrowser } from "./lib/humanBrowser.js";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "";
 const HOST = SUPABASE_URL ? new URL(SUPABASE_URL).hostname : "";
 const USER = { id: "00000000-0000-4000-8000-000000000001", aud: "authenticated", role: "authenticated", email: "new@example.com", app_metadata: {}, user_metadata: { first_name: "N", last_name: "U" }, created_at: new Date().toISOString() };
 
 async function mock(page, { session, gate, calls }) {
+  await asHumanBrowser(page); // a person's browser, not an AI agent's (see lib/humanBrowser.js)
   await page.routeWebSocket(/.*/, (ws) => { try { ws.close(); } catch (_) {} });
   await page.route("**/*", async (route) => {
     let u; try { u = new URL(route.request().url()); } catch (_) { return route.continue(); }

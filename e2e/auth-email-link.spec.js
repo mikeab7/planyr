@@ -9,6 +9,7 @@
  * What it proves that a unit test cannot: opening the link spends NOTHING (no /verify until the button), the reset
  * form opens by itself and cannot be dismissed, a blocked Turnstile script still leaves a way in, and a page reload
  * during a pending reset brings the form back. */
+import { asHumanBrowser } from "./lib/humanBrowser.js";
 import { test, expect } from "@playwright/test";
 import { accountHint } from "../src/shared/auth/authLink.js";
 
@@ -28,6 +29,7 @@ const FAKE_TURNSTILE = `(function(){var n=0,w={};window.turnstile={render:functi
 
 /* One mock for everything. `world.verify` decides what /verify answers; `world.link` what the mail route answers. */
 async function mock(page, world) {
+  await asHumanBrowser(page); // a person's browser, not an AI agent's (see lib/humanBrowser.js)
   world.calls = world.calls || [];
   await page.routeWebSocket(/.*/, (ws) => { try { ws.close(); } catch (_) {} });
   await page.route("**/*", async (route) => {
@@ -107,7 +109,8 @@ test.describe("emailed sign-in / reset link — every state has a next step", ()
   test("3 blocked Turnstile script: the network line, the sign-in link is the main action, and it gets you to the sent view", async ({ page }) => {
     const w = { blockTurnstile: true }; await mock(page, w);
     await page.goto("/?app&auth=signin");
-    await expect(page.getByTestId("captcha-unavailable")).toContainText("network blocked");
+    await expect(page.getByTestId("captcha-unavailable")).toContainText("network may have blocked it");
+    await expect(page.getByTestId("captcha-unavailable")).toContainText("Using an AI agent");
     await expect(page.getByTestId("captcha-unavailable")).not.toContainText("couldn't run the browser check"); // ONE message, not two (V2070224)
     await expect(page.getByTestId("captcha-retry")).toBeVisible();
     const btn = page.getByTestId("email-link-signin");

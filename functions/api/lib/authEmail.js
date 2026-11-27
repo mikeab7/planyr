@@ -23,6 +23,8 @@ const COPY = {
 
 /* `code` (sign-in only): the short one-time number from the same token, for a browser that cannot open the link or pass
  * the Turnstile check (Claude's built-in browser pane): it is typed into the sign-in panel instead. Same token, same hour, same single use. */
+/** Under the code: share it only with an assistant you are using yourself, right now (the code signs in as you). */
+export const CODE_SHARE_WARNING = "Only give this code to an AI assistant you are using yourself, for a sign-in you just started. Anyone with it can sign in as you, and Planyr will never ask you for it.";
 export const isEmailCode = (c) => typeof c === "string" && /^\d{6,10}$/.test(c);
 
 export function buildAuthEmail({ kind, link, code }) {
@@ -32,12 +34,15 @@ export function buildAuthEmail({ kind, link, code }) {
   const help = `Trouble? Reply to this email or write ${SUPPORT_EMAIL}.`;
   const withCode = kind === "signin" && isEmailCode(code);
   const codeLine = withCode ? `Can\u2019t open the link on this device? Type this code into the Planyr sign-in box instead: ${code}` : "";
-  const text = `${c.lead}\n\n${c.button}: ${link}\n\n${withCode ? codeLine + "\n\n" : ""}${valid}\n${c.ignore}\n\n${help}\n`;
+  // AI agent access (2026-11-27, adversarial review): the panel now tells an agent to ask the person for this code, which is
+  // also exactly what a stranger's agent would say. The email is where the person decides, so it says when NOT to share it.
+  const codeWarn = withCode ? CODE_SHARE_WARNING : "";
+  const text = `${c.lead}\n\n${c.button}: ${link}\n\n${withCode ? codeLine + "\n" + codeWarn + "\n\n" : ""}${valid}\n${c.ignore}\n\n${help}\n`;
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827">
 <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:28px">
 <p style="margin:0 0 20px;font-size:16px;line-height:1.5">${esc(c.lead)}</p>
 <p style="margin:0 0 24px"><a href="${esc(link)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px">${esc(c.button)}</a></p>
-${withCode ? `<p style="margin:0 0 20px;font-size:14px;line-height:1.5;color:#374151">Can\u2019t open the link on this device? Type this code into the Planyr sign-in box instead:<br><span style="display:inline-block;margin-top:6px;font-size:24px;font-weight:700;letter-spacing:4px;color:#111827">${esc(code)}</span></p>` : ""}
+${withCode ? `<p style="margin:0 0 20px;font-size:14px;line-height:1.5;color:#374151">Can\u2019t open the link on this device? Type this code into the Planyr sign-in box instead:<br><span style="display:inline-block;margin-top:6px;font-size:24px;font-weight:700;letter-spacing:4px;color:#111827">${esc(code)}</span><br><span style="display:inline-block;margin-top:8px;font-size:13px;color:#374151">${esc(codeWarn)}</span></p>` : ""}
 <p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#374151">${esc(valid)} ${esc(c.ignore)}</p>
 <p style="margin:0;font-size:13px;line-height:1.5;color:#6b7280">${esc(help)}</p>
 </div></body></html>`;

@@ -18,6 +18,8 @@ if (!email || !goodPw) { console.error("set E2E_EMAIL and E2E_PASSWORD"); proces
 const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
 const browser = engine === "webkit" ? await webkit.launch() : await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
 const ctx = await browser.newContext(engine === "webkit" ? { ...devices["iPhone 15"] } : { viewport: { width: 1440, height: 900 } });
+// A person's browser, not an AI agent's: the panel reads navigator.webdriver as an agent and leads with the emailed code (src/shared/auth/agentBrowser.js).
+await ctx.addInitScript(() => { try { Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false, configurable: true }); } catch (_) {} });
 const page = await ctx.newPage();
 const wire = [];
 page.on("response", async (r) => {

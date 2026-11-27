@@ -14,7 +14,8 @@ import { signIn, signUp, signOut, signOutEverywhere, updatePassword } from "../l
 // (lazy: only ever rendered after a send).
 import { requestEmailLink, verifyEmailCode, recordMailboxProof } from "../lib/emailLinkClient.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
-import { failureCopy, BLOCKED_CHECK_COPY } from "../lib/emailLinkCopy.js";
+import { failureCopy, BLOCKED_CHECK_COPY, AGENT_BROWSER_COPY, EMAIL_CODE_BUTTON } from "../lib/emailLinkCopy.js";
+import { detectAgentBrowser } from "../../../shared/auth/agentBrowser.js";
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
 // NEW-1 (follow-up to B2619760): every failure reads as plain words with a next step; what is missing is said at
@@ -522,6 +523,13 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   // The browser check could not run on this network (script blocked, timed out, errored): the sign-in link is then the real
   // way in, so it is promoted to the main action (NEW-1). A pending or passed check is not "blocked".
   const captchaBlocked = captchaOn && mode === "signin" && (cv.widget === "error" || !!cv.failure);
+  // AI agent access, Moment 1 (owner-approved mockup 2026-11-27): inside an AI agent's browser the check refuses even a
+  // real person's tick, so the emailed code LEADS and the password form waits behind "Use my password instead". Only
+  // where the check is actually on: with no Turnstile the password form works everywhere and nothing changes.
+  const [agentReason] = useState(() => detectAgentBrowser());
+  const [agentWantsPassword, setAgentWantsPassword] = useState(false);
+  const agentLayout = captchaOn && mode === "signin" && !!agentReason && !agentWantsPassword;
+  const codeFirst = captchaBlocked || agentLayout;
 
   // Keep what has been typed so far (email + tab only, never a password) for as long as the panel is open signed out: if the
   // page is reloaded under the person (the stale-build rescue), the Shell reopens the panel with it.
@@ -663,7 +671,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
     setMsg(null);
     gate.submit({ needsToken: captchaOn });
   };
-  const onFormSubmit = (e) => { e.preventDefault(); submit(); };
+  const onFormSubmit = (e) => { e.preventDefault(); if (agentLayout) onEmailLink(); else submit(); }; // Enter in the AI-agent layout sends the code: there is no password to send
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
   if (user && !recovery) {
@@ -737,35 +745,50 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           </>
         )}
         <input aria-label="Email" name="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
-        {mode !== "reset" && (
+        {agentLayout && (
+          <div data-testid="agent-browser-note" data-agent-reason={agentReason} style={{ background: "var(--info-bg)", borderRadius: RADIUS.md, padding: "10px 12px", marginTop: 8 }}>
+            <div style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: PAL.ink }}>{AGENT_BROWSER_COPY.heading}</div>
+            <div style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 2, lineHeight: 1.45 }}>{AGENT_BROWSER_COPY.body}</div>
+          </div>
+        )}
+        {mode !== "reset" && !agentLayout && (
           <input aria-label="Password" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field}
             aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
         )}
         {mode === "signup" && passwordHintVisible(pwFocus, pw) && (
           <div id="auth-pw-hint" data-testid="password-hint" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4 }}>{PASSWORD_MIN_HINT}</div>
         )}
-        {captchaOn && (
+        {captchaOn && !agentLayout && (
           <div style={{ marginTop: mode === "signup" || cv.widget === "interactive" ? 10 : 0 }}>
             <Turnstile key={widgetKey} ref={widgetRef} appearance={mode === "signup" ? "always" : "interaction-only"}
               onToken={gate.setToken} onStateChange={gate.setWidgetState} onTimeout={gate.widgetTimedOut} />
             {cv.widget === "interactive" && !cv.failure && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Finish the quick check to continue.</div>}
-            {(cv.widget === "error" || cv.failure) && (
+            {captchaBlocked ? (
+              <div role="alert" data-testid="captcha-unavailable" data-blocked="true" style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-text)", borderRadius: RADIUS.md, padding: "10px 12px", marginTop: 8 }}>
+                <div style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--danger-text)" }}>{BLOCKED_CHECK_COPY.heading}</div>
+                <div style={{ fontSize: FONT_SIZE.label, color: PAL.ink, marginTop: 2, lineHeight: 1.45 }}>
+                  {BLOCKED_CHECK_COPY.body}{" "}
+                  <button type="button" data-testid="captcha-retry" style={{ ...linkBtn, padding: "0 2px" }} onClick={() => gate.retry()}>{BLOCKED_CHECK_COPY.retry}</button>
+                </div>
+              </div>
+            ) : (cv.widget === "error" || cv.failure) && (
               <div role="alert" data-testid="captcha-unavailable" style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 6 }}>
-                {captchaBlocked ? BLOCKED_CHECK_COPY : CAPTCHA_UNAVAILABLE_COPY}{" "}
+                {CAPTCHA_UNAVAILABLE_COPY}{" "}
                 <button type="button" data-testid="captcha-retry" style={linkBtn} onClick={() => gate.retry()}>Try again</button>
               </div>
             )}
           </div>
         )}
-        {/* Never greyed for a missing field — Submit says what is missing. Off only while the request is out / waiting on the check. */}
-        <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(!captchaBlocked), width: "100%", marginTop: 12, scrollMarginBottom: 12 }}
+        {/* Never greyed for a missing field — Submit says what is missing. Off only while the request is out / waiting on the check.
+            In the AI-agent layout there is no password, so there is nothing for this button to send: it is not drawn. */}
+        {!agentLayout && <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(!captchaBlocked), width: "100%", marginTop: 12, scrollMarginBottom: 12 }}
           disabled={busy || cv.pending}
-        >{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
+        >{busy ? (mode === "signup" ? "Creating account…" : "…") : cv.pending ? "Verifying…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>}
         {mode === "signin" && (
           <>
             <button type="button" data-testid="email-link-signin" disabled={busy} onClick={onEmailLink}
-              style={{ ...btn(captchaBlocked), width: "100%", marginTop: 8, opacity: busy ? 0.6 : 1 }}>
-              {busy ? "…" : "Email me a sign-in link"}
+              style={{ ...btn(codeFirst), width: "100%", marginTop: agentLayout ? 12 : 8, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "…" : EMAIL_CODE_BUTTON}
             </button>
           </>
         )}
@@ -773,7 +796,9 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
             {mode === "reset"
               ? <button type="button" style={linkBtn} onClick={() => { setMode("signin"); setMsg(null); }}>← Back to sign in</button>
-              : <button type="button" style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
+              : agentLayout
+                ? <button type="button" data-testid="agent-use-password" style={linkBtn} onClick={() => setAgentWantsPassword(true)}>{AGENT_BROWSER_COPY.usePassword}</button>
+                : <button type="button" style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
           </div>
         )}
       </form>

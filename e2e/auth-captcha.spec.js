@@ -13,6 +13,7 @@
  * a delay the test controls (`window.__tsGate`), and records how it was rendered. This proves the wire
  * shape and the panel's behaviour; whether Cloudflare accepts a real headless browser is the separate
  * live check (V-entry on the item). */
+import { asHumanBrowser } from "./lib/humanBrowser.js";
 import { test, expect } from "@playwright/test";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "";
@@ -47,6 +48,7 @@ const FAKE_TURNSTILE = `
 `;
 
 async function mock(page, { calls, rawOnly = false, scriptOk = true }) {
+  await asHumanBrowser(page); // a person's browser, not an AI agent's (see lib/humanBrowser.js)
   const seen = new Set();
   await page.routeWebSocket(/.*/, (ws) => { try { ws.close(); } catch (_) {} });
   await page.route("**/*", async (route) => {
