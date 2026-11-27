@@ -7,7 +7,8 @@
  * Arms: C1 Allow sends the browser back to the ONE redirect with code+state+iss · C2 Cancel sends access_denied ·
  * C3 an answered / expired / unknown request is a dead end with words, no buttons that act · C4 signed out: sign in
  * first, the request survives · C5 Settings lists a connection and Disconnect removes it · C6 a loopback assistant
- * carries the "your own computer" warning · P1 phone width, both themes. */
+ * carries the "your own computer" warning · C7 "Sign out on all devices" signs out even when disconnecting assistants
+ * fails, and says so · C8 "Not you?" signs out and keeps the request · P1 phone width, both themes. */
 import { test, expect } from "@playwright/test";
 import { asHumanBrowser } from "./lib/humanBrowser.js";
 
@@ -46,6 +47,7 @@ async function mock(page, state) {
     const p = u.pathname;
     if (p === "/auth/v1/token") return json(session());
     if (p === "/auth/v1/user") return json(session().user);
+    if (p === "/auth/v1/logout") { state.logout = (state.logout || []).concat(u.searchParams.get("scope") || ""); return route.fulfill({ status: 204, body: "" }); }
     if (p.startsWith("/auth/v1/")) return json({});
     if (p.startsWith("/rest/v1/rpc/mcp_oauth_")) {
       const fn = p.slice("/rest/v1/rpc/".length);
@@ -55,6 +57,7 @@ async function mock(page, state) {
       if (fn === "mcp_oauth_decide") return json(body.p_allow ? state.decide : { ok: true, redirect_uri: state.info.redirect_uri || CALLBACK, state: "st-1", error: "access_denied" });
       if (fn === "mcp_oauth_my_grants") return json(state.grants);
       if (fn === "mcp_oauth_revoke_my_grant") { state.grants = state.grants.filter((g) => g.id !== body.p_id); return json(true); }
+      if (fn === "mcp_oauth_revoke_all_my_grants") return state.revokeAllFails ? json({ message: "function public.mcp_oauth_revoke_all_my_grants() does not exist" }, 404) : json(state.grants.length);
       return json(null);
     }
     if (p.startsWith("/rest/v1/")) return json([]);
@@ -82,11 +85,12 @@ test.describe("the Allow page", () => {
     await expect(page).toHaveURL(new RegExp(`#/connect/${RID}$`));           // the route was not rewritten away
     await shot(page, "connect-allow-desktop");
     expect(state.rpc.filter((r) => r.fn === "mcp_oauth_decide")).toHaveLength(0); // nothing is decided by opening the page
+    const issuer = new URL(page.url()).origin;                                // read BEFORE Allow: the page then leaves for the callback
     await page.getByTestId("connect-allow").click();
     await expect.poll(() => state.left).not.toBeNull();
     const back = new URL(state.left);
     expect(back.origin + back.pathname).toBe(CALLBACK);
-    expect(Object.fromEntries(back.searchParams)).toEqual({ code: "pmcp_code_abc", state: "st-1", iss: new URL(page.url()).origin });
+    expect(Object.fromEntries(back.searchParams)).toEqual({ code: "pmcp_code_abc", state: "st-1", iss: issuer });
     const d = state.rpc.filter((r) => r.fn === "mcp_oauth_decide");
     expect(d).toHaveLength(1);
     expect(d[0]).toMatchObject({ method: "POST", body: { p_id: RID, p_allow: true }, auth: "Bearer a.b.c" });
@@ -135,6 +139,20 @@ test.describe("the Allow page", () => {
     await expect(page.getByTestId("connect-signed-out")).toBeVisible();
   });
 
+  test("C8 Not you? signs out here and keeps the request for the right person", async ({ page }) => {
+    test.setTimeout(90_000);
+    const state = { info: readyInfo(), decide: null, grants: [] };
+    await mock(page, state);
+    await page.goto(`/?app#/connect/${RID}`);
+    await expect(page.getByTestId("connect-email")).toHaveText("dana@example.com", { timeout: 30_000 });
+    await page.getByTestId("connect-not-you").click();
+    await expect(page.getByTestId("connect-signed-out")).toBeVisible();
+    await expect.poll(() => (state.logout || []).length).toBe(1);
+    const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("planyr:auth:pendingConnect") || "null"));
+    expect(kept && kept.id).toBe(RID);
+    expect(state.rpc.filter((r) => r.fn === "mcp_oauth_decide")).toHaveLength(0);   // nothing was answered
+  });
+
   test("C6 an assistant on the person's own computer carries a warning", async ({ page }) => {
     test.setTimeout(90_000);
     const state = { info: readyInfo({ client_name: "Claude Code", redirect_host: "localhost", redirect_uri: "http://localhost:9/cb" }), decide: { ok: true, redirect_uri: "http://localhost:9/cb", state: "s", code: "pmcp_code_l" }, grants: [] };
@@ -173,6 +191,33 @@ test.describe("Settings → AI assistants", () => {
     expect(state.rpc.find((r) => r.fn === "mcp_oauth_revoke_my_grant")).toMatchObject({ method: "POST", body: { p_id: "g-1" } });
     await shot(page, "settings-assistants-empty");
   });
+});
+
+test.describe("Sign out on all devices", () => {
+  for (const fails of [false, true]) {
+    test(`C7 signs out everywhere${fails ? " even when disconnecting assistants fails, and says so" : " and disconnects assistants"}`, async ({ page }) => {
+      test.setTimeout(90_000);
+      const state = { info: readyInfo(), grants: [], revokeAllFails: fails };
+      await mock(page, state);
+      await page.goto("/?app");
+      const acct = page.getByRole("button", { name: /^Account:/ });
+      await expect(acct).toBeVisible({ timeout: 30_000 });
+      await acct.click();
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      const dlg = page.getByRole("dialog");
+      await dlg.getByRole("button", { name: /Account & security/ }).click();
+      await dlg.getByTestId("sign-out-everywhere").click();
+      await expect.poll(() => state.logout || []).toEqual(["global"]);   // the sign-out itself is never skipped
+      expect(state.rpc.filter((r) => r.fn === "mcp_oauth_revoke_all_my_grants")).toHaveLength(1);
+      await expect(page.getByRole("button", { name: /^Account:/ })).toHaveCount(0);
+      if (fails) {
+        await expect(page.getByTestId("auth-msg")).toContainText("couldn't disconnect your AI assistants");
+        await expect(page.getByTestId("auth-msg")).toContainText("signed out on all devices");
+      } else {
+        await expect(page.getByTestId("auth-msg")).toHaveCount(0);
+      }
+    });
+  }
 });
 
 test.describe("phone width", () => {

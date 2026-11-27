@@ -244,7 +244,7 @@ function MenuRow({ sec, last, onOpen }) {
 
 const fieldLabel = { display: "block", fontSize: 11.5, fontWeight: 600, color: PAL.muted, marginBottom: 4 };
 
-function AccountView({ user, profileApi, initialTab, onClose }) {
+function AccountView({ user, profileApi, initialTab, onClose, onSignedOutNotice }) {
   const narrow = useNarrow();
   const uid = useId();
   const [tab, setTab] = useState(() => SECTION_ALIAS[initialTab] || "profile");
@@ -307,9 +307,12 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   const signOutAll = async () => {
     setBusy(true); setMsg(null);
     try {
-      const { error } = await signOutEverywhere();
-      // LOUD-FAILURE: a security action that quietly fails is worse than one not offered.
-      if (error) setMsg({ type: "err", text: error });
+      const { error, signedOut } = await signOutEverywhere();
+      // LOUD-FAILURE: a security action that quietly fails is worse than one not offered. When the sign-out itself
+      // worked but assistants could not be disconnected, the panel stays open to say so (the person IS signed out).
+      // The account view unmounts once the session is gone, so that notice is handed to the signed-out panel.
+      if (error && signedOut) onSignedOutNotice(error);
+      else if (error) setMsg({ type: "err", text: error });
       else onClose();
     } finally { setBusy(false); }
   };
@@ -681,7 +684,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
   if (user && !recovery) {
-    return <AccountView user={user} profileApi={profileApi} initialTab={initialTab} onClose={onClose} />;
+    return <AccountView user={user} profileApi={profileApi} initialTab={initialTab} onClose={onClose} onSignedOutNotice={(text) => setMsg({ type: "err", text })} />;
   }
 
   // Set-new-password (arrived from a reset link). NOT dismissable (NEW-1 point 6): Escape and a backdrop tap used to

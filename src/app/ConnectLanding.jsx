@@ -18,6 +18,7 @@ import { FONT_SIZE, SPACE } from "../shared/ui/designTokens.js";
 import { CONNECTOR_TOOLS, CONNECTOR_CANNOT, CONNECTOR_SEES } from "../shared/mcp/connectorScope.js";
 import { connectRequestInfo, decideConnect, returnUrl } from "../shared/mcp/connectorClient.js";
 import { rememberPendingConnect, clearPendingConnect } from "../shared/auth/connectRequest.js";
+import { signOut } from "../workspaces/site-planner/lib/auth.js";
 
 const AUTH_WAIT_MS = 4000;
 const ink = "var(--text-primary)", muted = "var(--text-secondary)";
@@ -123,7 +124,13 @@ export default function ConnectLanding({ requestId, user, authKnown, onOpenSignI
   const busy = phase === "deciding" || phase === "leaving";
   return (
     <Frame title={`Connect ${name} to Planyr?`}>
-      <div style={small}>Signed in as <strong style={{ color: ink, wordBreak: "break-all" }} data-testid="connect-email">{user.email}</strong></div>
+      <div style={small}>
+        Signed in as <strong style={{ color: ink, wordBreak: "break-all" }} data-testid="connect-email">{user.email}</strong>
+        {" · "}
+        {/* "Not you?" (approved mockup): signs out here and keeps the request, so the right person can sign in and answer it. */}
+        <button type="button" data-testid="connect-not-you" disabled={busy} onClick={() => { rememberPendingConnect(requestId); signOut(); }}
+          style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "var(--accent)", textDecoration: "underline", cursor: "pointer" }}>Not you?</button>
+      </div>
       <div style={{ ...small, marginTop: SPACE.xs }} data-testid="connect-host">
         “{name}” is the name this assistant gave itself. After you answer, Planyr sends you back to <strong style={{ color: ink }}>{host}</strong>.
       </div>

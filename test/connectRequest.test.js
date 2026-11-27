@@ -103,11 +103,17 @@ describe("wiring the reviewer named", () => {
     const headers = src("public/_headers");
     expect(headers).toMatch(/^\/\n\s+Cache-Control: no-cache\n\s+X-Frame-Options: DENY\n\s+Content-Security-Policy: frame-ancestors 'none'/m);
   });
-  it("Sign out on all devices disconnects assistants first, and refuses to half-finish", () => {
+  it("Sign out on all devices asks to disconnect assistants first, but a failure there never blocks the sign-out", () => {
     const auth = src("src/workspaces/site-planner/lib/auth.js");
-    const body = auth.slice(auth.indexOf("export async function signOutEverywhere"));
+    const body = auth.slice(auth.indexOf("export async function signOutEverywhere"), auth.indexOf("export const ASSISTANTS_STILL_CONNECTED"));
     expect(body.indexOf("disconnectAllAssistants()")).toBeGreaterThan(0);
     expect(body.indexOf("disconnectAllAssistants()")).toBeLessThan(body.indexOf('signOut({ scope: "global" })'));
+    // no early return between the assistant step and the sign-out (review round 2, HIGH 1)
+    const between = body.slice(body.indexOf("disconnectAllAssistants()"), body.indexOf('signOut({ scope: "global" })'));
+    expect(between).not.toMatch(/return/);
+    expect(body).toMatch(/ASSISTANTS_STILL_CONNECTED, signedOut: true/);
+    const panel = src("src/workspaces/site-planner/components/AuthPanel.jsx");
+    expect(panel).toMatch(/if \(error && signedOut\) onSignedOutNotice\(error\)/);
   });
   it("Settings has the AI assistants section, lazily loaded", () => {
     const panel = src("src/workspaces/site-planner/components/AuthPanel.jsx");

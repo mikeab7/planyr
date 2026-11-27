@@ -78,6 +78,7 @@ create table if not exists public.mcp_oauth_codes (
   used_at        timestamptz,
   grant_id       uuid references public.mcp_oauth_grants(id) on delete cascade
 );
+create index if not exists mcp_oauth_codes_expires on public.mcp_oauth_codes(expires_at);
 create table if not exists public.mcp_oauth_tokens (
   token_hash text primary key,
   grant_id   uuid not null references public.mcp_oauth_grants(id) on delete cascade,
@@ -87,6 +88,7 @@ create table if not exists public.mcp_oauth_tokens (
   created_at timestamptz not null default now()
 );
 create index if not exists mcp_oauth_tokens_grant on public.mcp_oauth_tokens(grant_id);
+create index if not exists mcp_oauth_tokens_expires on public.mcp_oauth_tokens(expires_at);
 
 alter table public.mcp_oauth_clients  enable row level security;
 alter table public.mcp_oauth_requests enable row level security;
@@ -182,6 +184,9 @@ begin
     return jsonb_build_object('ok', false, 'error', 'invalid_grant');
   end if;
   update public.mcp_oauth_codes set used_at = now() where code_hash = k.code_hash;   -- spent on ANY attempt, right or wrong
+  -- housekeeping (review round 2, LOW 6): a code is worth keeping a day past its 10 minutes (so a late replay still
+  -- finds it and revokes), never longer
+  delete from public.mcp_oauth_codes where expires_at < now() - interval '1 day';
   if k.expires_at < now() or k.client_id is distinct from p_client_id or k.redirect_uri is distinct from p_redirect_uri
      or k.code_challenge is distinct from p_verifier_challenge then
     return jsonb_build_object('ok', false, 'error', 'invalid_grant');
@@ -194,7 +199,11 @@ begin
 end $$;
 
 -- /api/oauth/token, grant_type=refresh_token. Rotates every time; a refresh token presented twice means it was copied,
--- so the whole grant is revoked (theft detection).
+-- so the whole grant is revoked (theft detection) -- EXCEPT within 30 seconds of its first use (review round 2, MED 3):
+-- a client that retries a refresh whose answer it never received (a dropped connection, two requests racing) would
+-- otherwise disconnect a real person. Inside that window the retry gets a fresh pair and nothing is revoked; the
+-- price is that a thief holding a copy must race the real client inside the same 30 seconds, which the 1-hour access
+-- token and the grant's own revocation paths bound. After it, reuse revokes as before.
 create or replace function public.mcp_oauth_refresh(p_refresh text, p_client_id text) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare t public.mcp_oauth_tokens; g public.mcp_oauth_grants;
@@ -204,13 +213,16 @@ begin
   select * into g from public.mcp_oauth_grants where id = t.grant_id for update;
   if g.revoked_at is not null or g.client_id is distinct from p_client_id then return jsonb_build_object('ok', false, 'error', 'invalid_grant'); end if;
   if t.used_at is not null then
+    if t.used_at > now() - interval '30 seconds' then return public.mcp_oauth_issue(g.id); end if;   -- retry grace
     perform public.mcp_oauth_revoke_grant(g.id, 'refresh_reused');
     return jsonb_build_object('ok', false, 'error', 'invalid_grant');
   end if;
   if t.expires_at < now() then return jsonb_build_object('ok', false, 'error', 'invalid_grant'); end if;
   update public.mcp_oauth_tokens set used_at = now() where token_hash = t.token_hash;
   delete from public.mcp_oauth_tokens where grant_id = g.id and kind = 'access';         -- the old access token ends with its refresh
-  delete from public.mcp_oauth_tokens where grant_id = g.id and kind = 'refresh' and used_at < now() - interval '30 days';
+  -- housekeeping (LOW 6): a spent refresh token is kept until it would have expired anyway (so a late replay is still
+  -- caught), then goes; expired tokens of every grant go too (indexed on expires_at)
+  delete from public.mcp_oauth_tokens where expires_at < now() - interval '1 day';
   return public.mcp_oauth_issue(g.id);
 end $$;
 
@@ -307,7 +319,10 @@ begin
   end if;
   return new;
 exception when others then
-  return new;   -- never block a password change on this; the grant check still reads revoked_at live
+  -- never block a password change on this, but never be silent either (review round 2, MED 4): the warning lands in
+  -- the Postgres log, and Settings -> AI assistants still lists the connection so the person can Disconnect it
+  raise warning 'mcp_oauth_password_changed: could not revoke assistant grants for user %: % (%)', new.id, sqlerrm, sqlstate;
+  return new;
 end $$;
 drop trigger if exists mcp_oauth_password_changed on auth.users;
 create trigger mcp_oauth_password_changed after update of encrypted_password on auth.users

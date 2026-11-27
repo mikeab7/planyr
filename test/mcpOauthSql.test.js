@@ -277,13 +277,42 @@ describe("mcp_oauth.sql", () => {
       expect((await check(db, t2.access_token)).ok).toBe(true);
       expect((await refresh(db, t2.refresh_token, "pmcp_client_other")).error).toBe("invalid_grant");   // another client's refresh is refused
     });
-    it("a reused refresh token revokes the whole grant (theft detection)", async () => {
+    it("a reused refresh token revokes the whole grant (theft detection) once its 30-second retry grace has passed", async () => {
       const f = await consent(db, A);
       const t1 = await exchange(db, f);
       const t2 = await refresh(db, t1.refresh_token, f.client);
+      await db.query("update public.mcp_oauth_tokens set used_at = now() - interval '31 seconds' where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [t1.refresh_token]);
       expect((await refresh(db, t1.refresh_token, f.client)).error).toBe("invalid_grant");
       expect(await check(db, t2.access_token)).toEqual({ ok: false });
       expect((await refresh(db, t2.refresh_token, f.client)).error).toBe("invalid_grant");
+    });
+    it("a retried refresh inside 30 seconds (lost answer, racing requests) gets a fresh pair and disconnects nobody", async () => {
+      const f = await consent(db, A);
+      const t1 = await exchange(db, f);
+      const t2 = await refresh(db, t1.refresh_token, f.client);
+      const t3 = await refresh(db, t1.refresh_token, f.client);                 // the client never saw t2 and retried
+      expect(t3.ok).toBe(true);
+      expect(t3.refresh_token).not.toBe(t2.refresh_token);
+      expect((await check(db, t2.access_token)).ok).toBe(true);
+      const { grant_id } = await check(db, t3.access_token);
+      expect(grant_id).toBeTruthy();
+      expect((await refresh(db, t3.refresh_token, f.client)).ok).toBe(true);   // the retried chain carries on
+      expect((await refresh(db, t1.refresh_token, "pmcp_client_other")).error).toBe("invalid_grant"); // grace never crosses clients
+      const g = await db.query("select revoked_at from public.mcp_oauth_grants where id = $1", [grant_id]);
+      expect(g.rows[0].revoked_at).toBeNull();
+    });
+    it("housekeeping: codes and tokens long past their expiry are purged; a fresh spent code is kept for replay detection", async () => {
+      const f1 = await consent(db, A);
+      const t = await exchange(db, f1);
+      await db.query("update public.mcp_oauth_codes set expires_at = now() - interval '2 days' where code_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [f1.code]);
+      await db.query("update public.mcp_oauth_tokens set expires_at = now() - interval '2 days' where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [t.access_token]);
+      const f2 = await consent(db, A);
+      const t2 = await exchange(db, f2);                                          // any exchange sweeps old codes
+      const codes = await db.query("select code_hash from public.mcp_oauth_codes where code_hash in (encode(sha256(convert_to($1, 'UTF8')), 'hex'), encode(sha256(convert_to($2, 'UTF8')), 'hex'))", [f1.code, f2.code]);
+      expect(codes.rows).toHaveLength(1);                                          // f1 gone, f2 (spent minutes ago) kept
+      await refresh(db, t2.refresh_token, f2.client);                              // any refresh sweeps old tokens
+      const toks = await db.query("select 1 from public.mcp_oauth_tokens where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [t.access_token]);
+      expect(toks.rows).toHaveLength(0);
     });
     it("an expired access token is refused", async () => {
       const t = await exchange(db, await consent(db, A));
@@ -318,6 +347,20 @@ describe("mcp_oauth.sql", () => {
       expect((await check(db, t.access_token)).ok).toBe(true);
       await db.query("update auth.users set encrypted_password = 'new' where id = $1", [B]);
       expect(await check(db, t.access_token)).toEqual({ ok: false });
+    });
+    it("a password change never fails because revoking assistants failed, and says so in the log (RAISE WARNING)", async () => {
+      const t = await exchange(db, await consent(db, B));
+      const orig = (await db.query("select pg_get_functiondef('public.mcp_oauth_revoke_grant(uuid, text)'::regprocedure) d")).rows[0].d;
+      await db.exec("create or replace function public.mcp_oauth_revoke_grant(p_grant uuid, p_reason text) returns void language plpgsql as $$ begin raise exception 'boom'; end $$;");
+      const notices = [];
+      try {
+        await db.query("update auth.users set encrypted_password = 'newer' where id = $1", [B], { onNotice: (n) => notices.push(n) });
+        expect((await db.query("select encrypted_password from auth.users where id = $1", [B])).rows[0].encrypted_password).toBe("newer");
+        expect(notices.some((n) => n.severity === "WARNING" && /could not revoke assistant grants/.test(n.message))).toBe(true);
+      } finally {
+        await db.exec(orig);
+      }
+      expect((await check(db, t.access_token)).ok).toBe(true);                    // still listed, so the person can Disconnect it
     });
     it("deleting the account removes its grants and tokens", async () => {
       const f = await consent(db, C);
