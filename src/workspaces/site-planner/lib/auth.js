@@ -14,6 +14,7 @@ import { markDeliberateSignOut, currentAuthEventMeta } from "../../../shared/aut
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 // NEW-1 (B2619760 follow-up): every gated call reports its outcome through ONE helper — see authTelemetry.js.
 import { observeAuthCall } from "../../../shared/auth/authTelemetry.js";
+import { disconnectAllAssistants } from "../../../shared/mcp/connectorClient.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
@@ -105,6 +106,10 @@ export async function signOut() {
 export async function signOutEverywhere() {
   clearRecoveryPending();
   if (!supabase) return { error: "Cloud not configured." };
+  // "Every device" includes every connected AI assistant (Connect to Claude, review A3). Done FIRST, while the
+  // session still exists to ask with; if it fails, nothing is signed out and the person is told (LOUD-FAILURE).
+  const assistants = await disconnectAllAssistants();
+  if (!assistants.ok) return { error: "Couldn't disconnect your AI assistants, so nothing was signed out. Please try again." };
   markDeliberateSignOut();
   try {
     const { error } = await supabase.auth.signOut({ scope: "global" });

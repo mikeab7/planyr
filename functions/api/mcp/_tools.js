@@ -4,27 +4,29 @@
  * get_project, get_site_layout, get_schedule, search_project_files. Results are
  * pretty-printed JSON inside a text content block (MCP tools/call shape).
  *
- * ── SECURITY INVARIANT (read-only MCP) ──────────────────────────────────────
- * `pgGet` below is the ONLY function that touches the main Supabase project.
- * It issues GETs exclusively — nothing in this module can write — and it appends
- * the `user_id=eq.<PLANYR_MCP_OWNER_ID>` filter ITSELF, so no tool can forget
- * owner scoping. The service-role key lives only in the Cloudflare Pages env
- * (context.env), never in the browser bundle. Do not add a second query path.
+ * ── SECURITY INVARIANT (read-only MCP, AS THE PERSON) ───────────────────────
+ * `read` below is the ONLY function that touches the main Supabase project. It calls ONE database function,
+ * public.mcp_read (server/mcp/db/mcp_oauth.sql), by a fixed query NAME. That function is owned by the
+ * no-login, no-bypass role `mcp_reader` and sets the request's user to the connected person, so the SAME
+ * row-level-security policies that guard the app decide every row (own rows + rows shared with them through a
+ * team), and it is STABLE, so Postgres refuses any write inside it. There is no user_id filter here to forget.
+ * The person comes from `ctx.userId`, which only _handler.js sets: the grant behind a live OAuth access token
+ * (mcp_oauth_check), or PLANYR_MCP_OWNER_ID for the legacy owner-only path token. The service-role key lives
+ * only in the Cloudflare Pages env, never in the browser bundle. Do not add a second query path.
+ * (Adversarial review "AI agent access", blockers A1/A2, 2026-11-27.)
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * B408 consolidation (2026-07-11): the scheduler's planar_* tables now live in the SAME
  * (main) Supabase project as everything else — the old dedicated project is retired.
  * ⛔ B778/NEW-1 (2026-09-02): planar_data is NO LONGER anon-readable — its RLS now requires an
  * authenticated request from the schedule's own owner (private by default, no team sharing —
- * see src/workspaces/scheduler/db/ and BACKLOG.md B778). Reads now go through `pgGet` like
- * every other table here, so owner-scoping can't be forgotten — this connector's
- * PLANYR_MCP_OWNER_ID is Michael's own account id, and planar_data's one row is owned by that
- * same account.
+ * see src/workspaces/scheduler/db/ and BACKLOG.md B778). Reads go through `read` like every
+ * other table here, so that RLS answers for the connected person.
  */
 import { summarizeSite } from "./_metrics.js";
 import { serviceHeaders } from "../lib/http.js";
+import { CONNECTOR_TOOLS } from "../../../src/shared/mcp/connectorScope.js";
 
-const SEQ_KEY = "hs-v1"; // the one planar_data row the scheduler reads/writes
 
 /** JSON-RPC "invalid params" — the transport surfaces this as -32602, not a tool error. */
 export class InvalidParams extends Error {
@@ -37,16 +39,16 @@ function requireEnv(env, names) {
   }
 }
 
-/* THE single main-Supabase access point — GET-only, always owner-scoped (see header). */
-async function pgGet(env, table, params) {
-  requireEnv(env, ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "PLANYR_MCP_OWNER_ID"]);
-  const qs = new URLSearchParams(params);
-  qs.append("user_id", `eq.${env.PLANYR_MCP_OWNER_ID}`);
-  const r = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/${table}?${qs}`, {
-    method: "GET",
-    headers: serviceHeaders(env.SUPABASE_SERVICE_ROLE_KEY),
+/* THE single main-Supabase access point — one named, read-only query, run AS the connected person (see header). */
+async function read(env, ctx, query, args = {}) {
+  requireEnv(env, ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
+  if (!ctx || typeof ctx.userId !== "string" || !ctx.userId) throw new Error("no connected Planyr account for this call");
+  const r = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/rpc/mcp_read`, {
+    method: "POST",
+    headers: serviceHeaders(env.SUPABASE_SERVICE_ROLE_KEY, { "content-type": "application/json" }),
+    body: JSON.stringify({ p_user: ctx.userId, p_query: query, p_args: args }),
   });
-  if (!r.ok) throw new Error(`Supabase ${table} query failed: ${r.status} ${await r.text().catch(() => "")}`);
+  if (!r.ok) throw new Error(`Supabase ${query} read failed: ${r.status} ${await r.text().catch(() => "")}`);
   return r.json();
 }
 
@@ -60,15 +62,15 @@ async function pgGet(env, table, params) {
  * list_projects/get_project/get_site_layout/get_schedule would have kept answering an LLM's
  * questions about Michael's own schedule from the 2026-09-22 snapshot forever, the same defect,
  * a different surface. Same shape as src/shared/schedule/scheduleSource.js's client-side
- * resolver, reimplemented here against pgGet's REST-param style rather than the supabase-js
+ * resolver, reimplemented here over the named mcp_read queries rather than the supabase-js
  * client (this Cloudflare Pages Function has no import path into src/). */
-async function isScheduleRowsAuthoritative(env) {
-  const rows = await pgGet(env, "schedule_account_index", [["select", "rows_authoritative"]]);
+async function isScheduleRowsAuthoritative(db) {
+  const rows = await db("schedule_index");
   return !!(rows && rows[0] && rows[0].rows_authoritative);
 }
 
-async function fetchScheduleProjectsFromRows(env) {
-  const rows = await pgGet(env, "schedules", [["select", "id,data"], ["deleted_at", "is.null"]]);
+async function fetchScheduleProjectsFromRows(db) {
+  const rows = await db("schedules_live");
   const projects = {};
   for (const row of rows || []) {
     if (!row || row.id == null) continue;
@@ -77,18 +79,18 @@ async function fetchScheduleProjectsFromRows(env) {
   return projects;
 }
 
-/* Scheduler read — same main Supabase project since B408; routed through the shared pgGet
- * choke point (owner-scoped automatically, GET-only) now that planar_data carries a real
+/* Scheduler read — same main Supabase project since B408; routed through the shared `read`
+ * choke point (as the person, read-only) now that planar_data carries a real
  * user_id (B778/NEW-1). No second query path. Checks the authority flag first (B1927952) and, on
  * a flipped account, composes the answer from public.schedules instead of the legacy blob — same
  * "compose { [id]: data } from non-deleted rows" shape scheduleSource.js uses, so every existing
  * consumer of `scheduleProjects` here (liveScheduleNameMap, resolveScheduleProject,
  * summarizeScheduleProject) needs no change. */
-async function fetchScheduleData(env) {
-  if (await isScheduleRowsAuthoritative(env)) {
-    return await fetchScheduleProjectsFromRows(env);
+async function fetchScheduleData(db) {
+  if (await isScheduleRowsAuthoritative(db)) {
+    return await fetchScheduleProjectsFromRows(db);
   }
-  const rows = await pgGet(env, "planar_data", [["key", `eq.${SEQ_KEY}`], ["select", "value"]]);
+  const rows = await db("planar_hs"); // planar_data where key = 'hs-v1' (the one row the scheduler reads/writes)
   return (rows && rows[0] && rows[0].value && rows[0].value.projects) || {};
 }
 
@@ -108,13 +110,9 @@ function liveScheduleNameMap(scheduleProjects) {
   return map;
 }
 
-/* Light sites listing — JSON-extracted columns only, never the full data blob. */
-const SITES_LIGHT_SELECT =
-  "id,group_id,site,name,county,updated_at," +
-  "status:data->>status,lat:data->origin->>lat,lon:data->origin->>lon," +
-  "sched_id:data->>scheduleProjectId,sched_name:data->>scheduleProjectName";
-
-const fetchSitesLight = (env) => pgGet(env, "sites", [["select", SITES_LIGHT_SELECT]]);
+/* Light sites listing (mcp_read 'sites_light'): id, group_id, site, name, county, updated_at plus status, origin
+ * lat/lon and the linked schedule id/name pulled out of data — never the full data blob. */
+const fetchSitesLight = (db) => db("sites_light");
 
 /* Group site rows into projects by group_id (a groupless site is its own project).
  * Semantics mirror src/shared/projects: name/status come from the newest row. */
@@ -207,7 +205,6 @@ function resolveScheduleProject(projects, wanted) {
 
 /* ── file_facts helpers ─────────────────────────────────────────────────── */
 
-const FACT_SELECT = "id,review_id,category,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,state,updated_at";
 
 /* B1953796 (R2) — file_facts keeps a COPY of facts that live on doc_reviews (project, deleted).
  * Read them from the review at read time: drop facts whose review is soft-deleted, and let the
@@ -231,8 +228,8 @@ export function applyReviewTruth(factRows, reviewRows) {
   }
   return out;
 }
-async function truthFor(env, factRows) {
-  const reviews = await pgGet(env, "doc_reviews", [["select", "id,project_id,deleted_at,discipline,item,revision,doc_date"]]);
+async function truthFor(db, factRows) {
+  const reviews = await db("reviews_truth");
   return applyReviewTruth(factRows, reviews);
 }
 
@@ -259,7 +256,7 @@ function groupFacts(rows) {
   return grouped;
 }
 
-/* PostgREST `or=(a.ilike.*q*,...)` grammar breaks on , ( ) % * — strip them. */
+/* Kept from the PostgREST-param era: , ( ) % * are stripped (mcp_read also strips % and escapes _ itself). */
 const sanitizeQuery = (q) => String(q || "").replace(/[,()%*]/g, " ").replace(/\s+/g, " ").trim();
 
 /* ── The tool registry ──────────────────────────────────────────────────── */
@@ -268,17 +265,17 @@ export const TOOLS = [
   {
     name: "list_projects",
     description:
-      "List ALL of the owner's Planyr projects (industrial real-estate deals) in one call: id, name, deal status (pursuit/active/onhold/complete/dead), counties, number of site plans, map origin (lat/lon), drawing counts from the document library, linked construction schedule, and last-updated time. Also lists scheduler-only projects that have no site plan yet. Start here.",
+      "List ALL of the connected person's Planyr projects (their own and any shared with them through a team) (industrial real-estate deals) in one call: id, name, deal status (pursuit/active/onhold/complete/dead), counties, number of site plans, map origin (lat/lon), drawing counts from the document library, linked construction schedule, and last-updated time. Also lists scheduler-only projects that have no site plan yet. Start here.",
     inputSchema: { type: "object", properties: {}, required: [] },
-    async handler(env) {
+    async handler(db) {
       const [siteRows, rawFacts] = await Promise.all([
-        fetchSitesLight(env),
-        pgGet(env, "file_facts", [["select", "id,review_id,project_id,needs_filing,state"]]),
+        fetchSitesLight(db),
+        db("facts_light"),
       ]);
-      const factRows = await truthFor(env, rawFacts);
+      const factRows = await truthFor(db, rawFacts);
       const projects = groupSitesIntoProjects(siteRows);
       let scheduleProjects = null, scheduleBackendError = null;
-      try { scheduleProjects = await fetchScheduleData(env); }
+      try { scheduleProjects = await fetchScheduleData(db); }
       catch (e) { scheduleBackendError = e?.message || String(e); }
       // B1768080 — prefer the schedule's own CURRENT name over the possibly-stale mirror stored
       // on the site row (see liveScheduleNameMap's header). `scheduleProjects` is null only when
@@ -322,8 +319,8 @@ export const TOOLS = [
       properties: { project: { type: "string", description: "Project id, exact name, or name fragment" } },
       required: ["project"],
     },
-    async handler(env, args) {
-      const projects = groupSitesIntoProjects(await fetchSitesLight(env));
+    async handler(db, args) {
+      const projects = groupSitesIntoProjects(await fetchSitesLight(db));
       const res = resolveProject(projects, args.project);
       if (!res.project) {
         return res.matched === 0
@@ -332,18 +329,18 @@ export const TOOLS = [
       }
       const p = res.project;
       const [fullRows, rawFacts, reviewRows] = await Promise.all([
-        pgGet(env, "sites", [["select", "id,site,name,county,updated_at,data"], ["group_id", `eq.${p.id}`]]),
-        pgGet(env, "file_facts", [["select", FACT_SELECT + ",project_id"], ["order", "doc_date.desc.nullslast"]]),
-        pgGet(env, "doc_reviews", [["select", "id,title,kind,discipline,item,revision,doc_date,updated_at"], ["project_id", `eq.${p.id}`], ["deleted_at", "is.null"], ["order", "updated_at.desc"]]),
+        db("sites_by_group", { id: p.id }),
+        db("facts_full"),            // the drawing index (+ project_id), newest doc_date first
+        db("reviews_for_project", { id: p.id }),
       ]);
-      const factRows = (await truthFor(env, rawFacts)).filter((f) => f.project_id === p.id);
+      const factRows = (await truthFor(db, rawFacts)).filter((f) => f.project_id === p.id);
       // A groupless site (project id = site id) has no group_id to match on.
-      const rows = fullRows.length ? fullRows : await pgGet(env, "sites", [["select", "id,site,name,county,updated_at,data"], ["id", `eq.${p.id}`]]);
+      const rows = fullRows.length ? fullRows : await db("site_by_id", { id: p.id });
 
       let schedule = null, scheduleBackendError = null, liveNames = null;
       if (p.schedule) {
         try {
-          const scheduleProjects = await fetchScheduleData(env);
+          const scheduleProjects = await fetchScheduleData(db);
           liveNames = liveScheduleNameMap(scheduleProjects);
           const sp = resolveScheduleProject(scheduleProjects, p.schedule.id);
           if (sp) schedule = summarizeScheduleProject(sp, new Date().toISOString().slice(0, 10));
@@ -371,15 +368,15 @@ export const TOOLS = [
       properties: { site_id: { type: "string", description: "The site id (sites.id)" } },
       required: ["site_id"],
     },
-    async handler(env, args) {
-      const rows = await pgGet(env, "sites", [["select", "id,updated_at,data"], ["id", `eq.${args.site_id}`]]);
+    async handler(db, args) {
+      const rows = await db("site_by_id", { id: String(args.site_id) });
       if (!rows.length) return { error: `No site with id "${args.site_id}". Use list_projects / get_project to find site ids.` };
       // B1768080 — same live-name preference as list_projects/get_project (see
       // liveScheduleNameMap's header); only worth the round trip when this site actually names a
       // linked schedule.
       let liveNames = null, scheduleBackendError = null;
       if (rows[0].data && typeof rows[0].data === "object" && rows[0].data.scheduleProjectId != null) {
-        try { liveNames = liveScheduleNameMap(await fetchScheduleData(env)); }
+        try { liveNames = liveScheduleNameMap(await fetchScheduleData(db)); }
         catch (e) { scheduleBackendError = e?.message || String(e); }
       }
       return {
@@ -398,8 +395,8 @@ export const TOOLS = [
       properties: { project: { type: "string", description: "Schedule project id or name fragment" } },
       required: ["project"],
     },
-    async handler(env, args) {
-      const projects = await fetchScheduleData(env);
+    async handler(db, args) {
+      const projects = await fetchScheduleData(db);
       const sp = resolveScheduleProject(projects, args.project);
       if (!sp) {
         return {
@@ -422,25 +419,17 @@ export const TOOLS = [
       },
       required: ["query"],
     },
-    async handler(env, args) {
+    async handler(db, args) {
       const q = sanitizeQuery(args.query);
       if (!q) throw new InvalidParams("query is empty after removing PostgREST-reserved characters , ( ) % *");
-      const limit = String(Math.min(Math.max(Number(args.limit) || 40, 1), 200));
-      const like = `*${q}*`;
+      const limit = Math.min(Math.max(Number(args.limit) || 40, 1), 200);
       const [rawFacts, reviews, driveFiles, siteRows] = await Promise.all([
-        pgGet(env, "file_facts", [
-          ["select", FACT_SELECT + ",project_id"],
-          ["or", `(sheet_title.ilike.${like},source_file.ilike.${like},item.ilike.${like},sheet_number.ilike.${like})`],
-          ["limit", limit],
-        ]),
-        pgGet(env, "doc_reviews", [
-          ["select", "id,title,kind,project_id,discipline,item,revision,doc_date,updated_at"],
-          ["title", `ilike.${like}`], ["deleted_at", "is.null"], ["limit", limit],
-        ]),
-        pgGet(env, "drive_files", [["select", "planyr_key,name,updated_at"], ["name", `ilike.${like}`], ["limit", limit]]),
-        fetchSitesLight(env),
+        db("facts_search", { q, limit }),       // sheet_title / source_file / item / sheet_number contain q
+        db("reviews_search", { q, limit }),     // title contains q, not deleted
+        db("drive_search", { q, limit }),       // name contains q
+        fetchSitesLight(db),
       ]);
-      const facts = await truthFor(env, rawFacts);
+      const facts = await truthFor(db, rawFacts);
       const nameOf = new Map(groupSitesIntoProjects(siteRows).map((p) => [p.id, p.name]));
       const proj = (pid) => (pid ? { projectId: pid, projectName: nameOf.get(pid) || null } : { projectId: null, projectName: null });
       return {
@@ -455,10 +444,16 @@ export const TOOLS = [
   },
 ];
 
+/* A9 — the Allow page lists CONNECTOR_TOOLS; a tool added here without a plain-words line there fails at load. */
+{
+  const here = TOOLS.map((t) => t.name).join(","), promised = CONNECTOR_TOOLS.map((t) => t.tool).join(",");
+  if (here !== promised) throw new Error(`MCP tool list (${here}) differs from src/shared/mcp/connectorScope.js (${promised})`);
+}
+
 /** Run one tools/call. Unknown tool / bad args → InvalidParams (protocol -32602);
  *  a failing tool → { isError: true } result carrying the REAL upstream message
  *  (LOUD-FAILURE: never a silent empty result, never a masked 500). */
-export async function callTool(env, params) {
+export async function callTool(env, params, ctx) {
   const tool = TOOLS.find((t) => t.name === params?.name);
   if (!tool) throw new InvalidParams(`unknown tool: ${params?.name}`);
   const args = params?.arguments || {};
@@ -466,7 +461,8 @@ export async function callTool(env, params) {
     if (args[k] == null || args[k] === "") throw new InvalidParams(`missing required argument: ${k}`);
   }
   try {
-    const payload = await tool.handler(env, args);
+    const db = (query, qargs) => read(env, ctx, query, qargs);
+    const payload = await tool.handler(db, args);
     return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
   } catch (e) {
     if (e instanceof InvalidParams) throw e;

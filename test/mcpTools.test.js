@@ -1,10 +1,31 @@
 /* MCP tool-registry tests (B671) — stubbed-fetch router pattern (see driveShare.test.js).
- * The one that matters most: the OWNER-SCOPING INVARIANT — every main-Supabase request
- * a tool makes must be a GET carrying user_id=eq.<owner>. */
+ * The one that matters most: the AS-THE-PERSON INVARIANT — every main-Supabase request a tool makes is the ONE
+ * read function (rpc/mcp_read) carrying the connected person's id, so row-level security answers (2026-11-27).
+ * The stub turns each named query back into the table-shaped pseudo-URL the older tests route on. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { callTool, InvalidParams } from "../functions/api/mcp/_tools.js";
 
-const ENV = { SUPABASE_URL: "https://main.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "svc-key", PLANYR_MCP_OWNER_ID: "OWNER-123" };
+const ENV = { SUPABASE_URL: "https://main.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "svc-key" };
+const CTX = { userId: "USER-123", via: "oauth" };
+const call = (env, params, ctx = CTX) => callTool(env, params, ctx);
+
+/* mcp_read's named queries → the table each one reads, with the id filter it applies. */
+function pseudoUrl(query, args = {}) {
+  const base = "https://main.supabase.co/rest/v1/";
+  switch (query) {
+    case "schedule_index": return base + "schedule_account_index";
+    case "schedules_live": return base + "schedules";
+    case "planar_hs": return base + "planar_data";
+    case "sites_light": return base + "sites";
+    case "sites_by_group": return base + `sites?group_id=eq.${args.id}`;
+    case "site_by_id": return base + `sites?id=eq.${args.id}`;
+    case "facts_light": case "facts_full": case "facts_search": return base + "file_facts";
+    case "reviews_truth": case "reviews_search": return base + "doc_reviews";
+    case "reviews_for_project": return base + `doc_reviews?project_id=eq.${args.id}`;
+    case "drive_search": return base + "drive_files";
+    default: return base + "UNKNOWN_QUERY_" + query;
+  }
+}
 
 const SITES_LIGHT = [
   { id: "s1", group_id: "g1", site: "Goose Creek", name: "Pad A", county: "Harris", updated_at: "2026-07-01T00:00:00Z", status: "active", lat: "29.7", lon: "-95.3", sched_id: "3", sched_name: "Goose Creek" },
@@ -43,11 +64,12 @@ const SCHEDULE_ACCOUNT_INDEX_UNFLIPPED = [{ rows_authoritative: false }];
 function makeFetch(overrides = {}) {
   const calls = [];
   const fn = vi.fn(async (url, init = {}) => {
-    calls.push({ url: String(url), method: init.method || "GET" });
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url: String(url), method: init.method || "GET", body });
+    const u = String(url).endsWith("/rest/v1/rpc/mcp_read") ? pseudoUrl(body.p_query, body.p_args) : String(url);
     for (const [substr, resp] of Object.entries(overrides)) {
-      if (String(url).includes(substr)) return resp();
+      if (u.includes(substr)) return resp();
     }
-    const u = String(url);
     const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
     if (u.includes("schedule_account_index")) return ok(SCHEDULE_ACCOUNT_INDEX_UNFLIPPED);
     if (u.includes("/rest/v1/schedules")) return ok([]); // only reached on a flipped account; overridden per-test
@@ -75,7 +97,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("list_projects", () => {
   it("groups sites into projects with drawing counts and scheduler-only projects", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
+    const out = parse(await call(ENV, { name: "list_projects", arguments: {} }));
     expect(out.projects).toHaveLength(3);
     const gc = out.projects.find((p) => p.id === "g1");
     expect(gc).toMatchObject({ name: "Goose Creek", status: "active", siteCount: 2, drawingCount: 1, schedule: { id: 3, name: "Goose Creek" } });
@@ -89,14 +111,14 @@ describe("list_projects", () => {
   // name ("Goose Creek"); the live scheduler backend must win.
   it("prefers the linked schedule's LIVE name over a stale stored hint", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
+    const out = parse(await call(ENV, { name: "list_projects", arguments: {} }));
     const renamed = out.projects.find((p) => p.id === "g4");
     expect(renamed.schedule).toEqual({ id: 3, name: "Goose Creek" });
   });
 
   it("surfaces a scheduler outage loudly instead of failing the whole tool, and falls back to the stored hint", async () => {
     vi.stubGlobal("fetch", makeFetch({ planar_data: () => new Response("boom", { status: 500 }) }));
-    const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
+    const out = parse(await call(ENV, { name: "list_projects", arguments: {} }));
     expect(out.projects).toHaveLength(3);
     expect(out.scheduleBackendError).toMatch(/500/);
     expect(out.schedulerOnlyProjects).toBeNull();
@@ -109,7 +131,7 @@ describe("list_projects", () => {
 describe("get_project", () => {
   it("resolves by name fragment and returns site summaries + grouped drawings + schedule", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_project", arguments: { project: "goose" } }));
+    const out = parse(await call(ENV, { name: "get_project", arguments: { project: "goose" } }));
     expect(out.id).toBe("g1");
     expect(out.sites[0].buildings.totalSqft).toBe(2000);
     const civil = out.drawings.Drawings.Civil;
@@ -122,7 +144,7 @@ describe("get_project", () => {
 
   it("returns candidates when nothing matches", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_project", arguments: { project: "zzz" } }));
+    const out = parse(await call(ENV, { name: "get_project", arguments: { project: "zzz" } }));
     expect(out.error).toMatch(/No project matched/);
     expect(out.availableProjects.length).toBe(3);
   });
@@ -133,7 +155,7 @@ describe("get_project", () => {
   // the sharpest form of the bug: one call, two different names for the same schedule.
   it("prefers the linked schedule's LIVE name at both the top level and inside each site summary", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_project", arguments: { project: "New Name LLC" } }));
+    const out = parse(await call(ENV, { name: "get_project", arguments: { project: "New Name LLC" } }));
     expect(out.id).toBe("g4");
     expect(out.schedule.name).toBe("Goose Creek");
     expect(out.sites[0].schedule).toEqual({ id: 3, name: "Goose Creek" });
@@ -143,7 +165,7 @@ describe("get_project", () => {
 describe("get_site_layout / get_schedule", () => {
   it("summarizes one site by id", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s1" } }));
+    const out = parse(await call(ENV, { name: "get_site_layout", arguments: { site_id: "s1" } }));
     expect(out.siteId).toBe("s1");
     expect(out.parcels.siteSqft).toBe(10000);
   });
@@ -151,14 +173,14 @@ describe("get_site_layout / get_schedule", () => {
   // B1768080 — same live-name preference, reached this time without a project group at all.
   it("prefers the linked schedule's LIVE name over its own stored stale hint", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
+    const out = parse(await call(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
     expect(out.siteId).toBe("s4");
     expect(out.schedule).toEqual({ id: 3, name: "Goose Creek" });
   });
 
   it("falls back to the stored hint when the scheduler backend is unreachable", async () => {
     vi.stubGlobal("fetch", makeFetch({ planar_data: () => new Response("boom", { status: 500 }) }));
-    const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
+    const out = parse(await call(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
     expect(out.schedule).toEqual({ id: 3, name: "Old Stale Schedule Name" });
     expect(out.scheduleBackendError).toMatch(/500/);
   });
@@ -176,7 +198,7 @@ describe("get_site_layout / get_schedule", () => {
     vi.stubGlobal("fetch", makeFetch());
     let out;
     try {
-      out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
+      out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
     } finally {
       vi.useRealTimers();
     }
@@ -191,7 +213,7 @@ describe("get_site_layout / get_schedule", () => {
 
   it("lists available schedules when the name misses", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
+    const out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
     expect(out.availableSchedules).toContainEqual({ id: 9, name: "Kilgore" });
   });
 });
@@ -232,7 +254,7 @@ describe("get_schedule — rows-authoritative account (B1927952)", () => {
     vi.stubGlobal("fetch", makeFlippedFetch());
     let out;
     try {
-      out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
+      out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
     } finally {
       vi.useRealTimers();
     }
@@ -242,19 +264,19 @@ describe("get_schedule — rows-authoritative account (B1927952)", () => {
 
   it("a soft-deleted schedule (id 31, 'Operations (Copy)') never appears as an available schedule", async () => {
     vi.stubGlobal("fetch", makeFlippedFetch());
-    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
+    const out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
     expect(out.availableSchedules.map((s) => s.id)).toEqual([3]);
   });
 
   it("zero live schedules on a flipped account → an empty, not a crashing, availableSchedules list", async () => {
     vi.stubGlobal("fetch", makeFlippedFetch({ "/rest/v1/schedules": () => new Response(JSON.stringify([]), { status: 200 }) }));
-    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "anything" } }));
+    const out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "anything" } }));
     expect(out.availableSchedules).toEqual([]);
   });
 
   it("an un-flipped account (the default stub) still reads the blob, unaffected by this fix", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "kilgore" } }));
+    const out = parse(await call(ENV, { name: "get_schedule", arguments: { project: "kilgore" } }));
     expect(out).toMatchObject({ id: 9, name: "Kilgore", taskCount: 0 }); // only exists in the blob (SCHED)
   });
 });
@@ -263,55 +285,77 @@ describe("search_project_files", () => {
   it("merges the three sources with project attribution and sanitizes the query", async () => {
     const fetchStub = makeFetch();
     vi.stubGlobal("fetch", fetchStub);
-    const out = parse(await callTool(ENV, { name: "search_project_files", arguments: { query: "detention,(%*)" } }));
+    const out = parse(await call(ENV, { name: "search_project_files", arguments: { query: "detention,(%*)" } }));
     expect(out.query).toBe("detention");
     const sources = new Set(out.results.map((r) => r.source));
     expect(sources).toEqual(new Set(["drawing_index", "review", "drive_file"]));
     expect(out.results.find((r) => r.source === "drawing_index" && r.projectId === "g1").projectName).toBe("Goose Creek");
-    for (const c of fetchStub.calls_) expect(c.url).not.toMatch(/[(),]ilike|%2C\(/); // no raw grammar breakage from the query
+    for (const c of fetchStub.calls_) if (c.body?.p_args?.q != null) expect(c.body.p_args.q).toBe("detention"); // only the cleaned query is sent
   });
 
   it("rejects a query that is empty after sanitizing", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    await expect(callTool(ENV, { name: "search_project_files", arguments: { query: ",,((%%**))" } })).rejects.toBeInstanceOf(InvalidParams);
+    await expect(call(ENV, { name: "search_project_files", arguments: { query: ",,((%%**))" } })).rejects.toBeInstanceOf(InvalidParams);
   });
 });
 
 describe("guardrails", () => {
-  it("INVARIANT: every main-Supabase call is a GET and owner-scoped with user_id filter", async () => {
+  it("INVARIANT: every main-Supabase call is the one read function, as the connected person, by a named query", async () => {
     const fetchStub = makeFetch();
     vi.stubGlobal("fetch", fetchStub);
-    await callTool(ENV, { name: "list_projects", arguments: {} });
-    await callTool(ENV, { name: "get_project", arguments: { project: "goose" } });
-    await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s1" } });
-    await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } });
-    await callTool(ENV, { name: "search_project_files", arguments: { query: "plat" } });
-    const mainCalls = fetchStub.calls_.filter((c) => c.url.startsWith(ENV.SUPABASE_URL));
-    expect(mainCalls.length).toBeGreaterThan(5);
-    for (const c of mainCalls) {
-      expect(c.method).toBe("GET");
-      expect(c.url).toContain("user_id=eq.OWNER-123");
+    await call(ENV, { name: "list_projects", arguments: {} });
+    await call(ENV, { name: "get_project", arguments: { project: "goose" } });
+    await call(ENV, { name: "get_site_layout", arguments: { site_id: "s1" } });
+    await call(ENV, { name: "get_schedule", arguments: { project: "goose" } });
+    await call(ENV, { name: "search_project_files", arguments: { query: "plat" } });
+    expect(fetchStub.calls_.length).toBeGreaterThan(5);
+    for (const c of fetchStub.calls_) {
+      expect(c.url).toBe("https://main.supabase.co/rest/v1/rpc/mcp_read");
+      expect(c.method).toBe("POST");
+      expect(c.body.p_user).toBe("USER-123");
+      expect(pseudoUrl(c.body.p_query)).not.toMatch(/UNKNOWN_QUERY/);
+      expect(Object.keys(c.body).sort()).toEqual(["p_args", "p_query", "p_user"]);
     }
+  });
+
+  it("every query name a tool uses exists in mcp_read (one list, in the SQL)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const sql = readFileSync(new URL("../server/mcp/db/mcp_oauth.sql", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../functions/api/mcp/_tools.js", import.meta.url), "utf8");
+    const used = [...new Set([...src.matchAll(/\bdb\("([a-z_]+)"/g)].map((m) => m[1]))];
+    expect(used.length).toBeGreaterThanOrEqual(13);
+    for (const q of used) expect(sql).toContain(`when '${q}' then`);
+  });
+
+  it("without a connected person nothing is read", async () => {
+    const fetchStub = makeFetch();
+    vi.stubGlobal("fetch", fetchStub);
+    for (const ctx of [null, {}, { userId: "" }]) {
+      const out = await callTool(ENV, { name: "list_projects", arguments: {} }, ctx);
+      expect(out.isError).toBe(true);
+      expect(textOf(out)).toMatch(/no connected Planyr account/);
+    }
+    expect(fetchStub.calls_).toHaveLength(0);
   });
 
   it("an upstream 500 becomes an isError result carrying the real message — never a throw", async () => {
     vi.stubGlobal("fetch", makeFetch({ "/rest/v1/sites": () => new Response("permission denied", { status: 500 }) }));
-    const out = await callTool(ENV, { name: "list_projects", arguments: {} });
+    const out = await call(ENV, { name: "list_projects", arguments: {} });
     expect(out.isError).toBe(true);
-    expect(textOf(out)).toMatch(/sites query failed: 500/);
+    expect(textOf(out)).toMatch(/sites_light read failed: 500/);
     expect(textOf(out)).toMatch(/permission denied/);
   });
 
   it("missing env secrets produce a clear 'not configured' isError result", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    const out = await callTool({ SUPABASE_URL: "https://main.supabase.co" }, { name: "list_projects", arguments: {} });
+    const out = await call({ SUPABASE_URL: "https://main.supabase.co" }, { name: "list_projects", arguments: {} });
     expect(out.isError).toBe(true);
     expect(textOf(out)).toMatch(/not configured: set SUPABASE_SERVICE_ROLE_KEY/);
   });
 
   it("unknown tool and missing required args are protocol errors (InvalidParams)", async () => {
     vi.stubGlobal("fetch", makeFetch());
-    await expect(callTool(ENV, { name: "drop_tables", arguments: {} })).rejects.toBeInstanceOf(InvalidParams);
-    await expect(callTool(ENV, { name: "get_project", arguments: {} })).rejects.toBeInstanceOf(InvalidParams);
+    await expect(call(ENV, { name: "drop_tables", arguments: {} })).rejects.toBeInstanceOf(InvalidParams);
+    await expect(call(ENV, { name: "get_project", arguments: {} })).rejects.toBeInstanceOf(InvalidParams);
   });
 });

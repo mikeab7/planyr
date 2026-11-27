@@ -62,6 +62,8 @@ export const AGENT_BROWSER_COPY = {
   heading: "Using an AI agent?",
   body: "This browser can\u2019t pass Planyr\u2019s security check. We\u2019ll email a 6-digit code instead.",
   usePassword: "Use my password instead",
+  // "Connect to Claude" pointer (approved mockup, moment 1): the connector needs no browser at all.
+  connector: "Better for agents: add planyr.io/api/mcp as a connector in Claude, then approve it once.",
 };
 
 /** The sign-in form's email button (the email carries both a link and a 6-digit code). */

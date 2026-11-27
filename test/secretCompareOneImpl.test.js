@@ -28,13 +28,14 @@ describe("one constant-time secret compare for every functions/ route (audit bat
     expect((await onRequestPost({ ...mk("k"), env: { E2E_LOGIN_KEY: "k" } })).status).toBe(503);
     expect((await onRequestPost({ ...mk("nope"), env: { TAXUNITS_INDEX_KEY: "right" } })).status).toBe(403);
   });
-  it("MCP accepts Authorization: Bearer on the bare route, and still the path token; wrong/none is 404", async () => {
-    const env = { PLANYR_MCP_TOKEN: "sekret-token" };
+  it("MCP accepts the legacy secret as Bearer on the bare route, and still the path token; a wrong path token is 404, a wrong or missing bearer 401 (OAuth discovery)", async () => {
+    const env = { PLANYR_MCP_TOKEN: "sekret-token", PLANYR_MCP_OWNER_ID: "OWNER-1" };
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
     const call = (headers, segs) => handleMcp({ env, request: new Request("https://x/api/mcp", { method: "POST", body, headers }), method: "POST", segs });
     expect((await call({ authorization: "Bearer sekret-token" }, [])).status).toBe(200);
     expect((await call({}, ["sekret-token"])).status).toBe(200);
-    expect((await call({ authorization: "Bearer wrong" }, [])).status).toBe(404);
-    expect((await call({}, [])).status).toBe(404);
+    expect((await call({}, ["wrong"])).status).toBe(404);
+    expect((await call({ authorization: "Bearer wrong" }, [])).status).toBe(401);
+    expect((await call({}, [])).status).toBe(401);
   });
 });
