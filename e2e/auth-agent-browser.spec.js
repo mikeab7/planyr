@@ -73,7 +73,7 @@ test.describe("AI agent access: the sign-in panel", () => {
     await expect(note).toBeVisible();
     await expect(note).toHaveAttribute("data-agent-reason", "automated");
     await expect(note).toContainText("Using an AI agent?");
-    await expect(note).toContainText("6-digit code");
+    await expect(note).toContainText("sign-in code");
     await expect(dlg(page).getByLabel("Password")).toHaveCount(0);
     await expect(page.getByTestId("auth-submit")).toHaveCount(0);
     await expect(page.getByTestId("turnstile-widget")).toHaveCount(0);

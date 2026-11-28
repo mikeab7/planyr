@@ -24,6 +24,7 @@ import { authErrorAction, validateAuthFields, recoveryErrorText } from "../../..
 // Cloudflare Turnstile (B1160720; widened to sign-in + forgot-password by NEW-1): ONE widget, ONE token,
 // ONE gate for every logged-out mode. No external script loads until this form actually mounts the
 // widget, so a plain import costs nothing here (unlike the Team panel below, which is lazy).
+import PasswordInput from "../../../shared/ui/PasswordInput.jsx";
 import Turnstile from "../../../shared/turnstile/Turnstile.jsx";
 import { turnstileEnabled } from "../../../shared/turnstile/turnstileConfig.js";
 import { useCaptchaGate } from "../../../shared/turnstile/useCaptchaGate.js";
@@ -398,7 +399,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
     <div data-settings-panel="security">
       {sectionHead("Account & security")}
       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Change password</div>
-      <input aria-label="New password" type="password" autoComplete="new-password" placeholder={`New password (min ${MIN_PASSWORD_LENGTH} characters)`} value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= MIN_PASSWORD_LENGTH) changePassword(); }} />
+      <PasswordInput aria-label="New password" autoComplete="new-password" placeholder={`New password (min ${MIN_PASSWORD_LENGTH} characters)`} value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= MIN_PASSWORD_LENGTH) changePassword(); }} />
       <button style={{ ...btn(true), width: "100%", marginTop: 10 }} disabled={busy || pw.length < MIN_PASSWORD_LENGTH} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
       <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Signed in elsewhere?</div>
@@ -685,7 +686,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
       <Wrap onClose={onClose} msg={msg} title="Set a new password" dismissable={false}>
         <form ref={formRef} noValidate onSubmit={onFormSubmit}>
           <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }} data-testid="recovery-form">Set a new password</div>
-          <input aria-label="New password" name="password" type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
+          <PasswordInput aria-label="New password" name="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
           <button ref={submitRef} type="submit" data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy}>{busy ? "…" : "Update password"}</button>
           <div style={{ marginTop: 10, fontSize: 12 }}>
             <button type="button" style={linkBtn} onClick={sendNewLink}>Link not working? Send a new one</button>
@@ -752,7 +753,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           </div>
         )}
         {mode !== "reset" && !agentLayout && (
-          <input aria-label="Password" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field}
+          <PasswordInput aria-label="Password" name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field}
             aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
         )}
         {mode === "signup" && passwordHintVisible(pwFocus, pw) && (

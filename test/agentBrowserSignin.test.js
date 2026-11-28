@@ -41,7 +41,7 @@ describe("agentBrowserReason", () => {
 describe("the copy", () => {
   it("says the approved words, plain, and points at the code", () => {
     expect(AGENT_BROWSER_COPY.heading).toBe("Using an AI agent?");
-    expect(AGENT_BROWSER_COPY.body).toMatch(/6-digit code/);
+    expect(AGENT_BROWSER_COPY.body).toMatch(/sign-in code/);
     expect(EMAIL_CODE_BUTTON).toBe("Email me a sign-in code");
     expect(BLOCKED_CHECK_COPY.heading).toMatch(/didn.t finish/);
     expect(CODE_COPY.agent).toMatch(/only for a sign-in you just started/);
@@ -57,7 +57,7 @@ describe("AuthPanel wiring", () => {
     expect(panel).toMatch(/onClick=\{\(\) => setAgentWantsPassword\(true\)\}/);
   });
   it("in the agent layout there is no password field, no check widget, no dead Sign in button, and Enter sends the code", () => {
-    expect(panel).toMatch(/mode !== "reset" && !agentLayout && \(\s*<input aria-label="Password"/);
+    expect(panel).toMatch(/mode !== "reset" && !agentLayout && \(\s*<PasswordInput aria-label="Password"/);
     expect(panel).toMatch(/captchaOn && !agentLayout && \(/);
     expect(panel).toMatch(/\{!agentLayout && <button ref=\{submitRef\}/);
     expect(panel).toMatch(/onFormSubmit = \(e\) => \{ e\.preventDefault\(\); if \(agentLayout\) onEmailLink\(\); else submit\(\); \}/);
