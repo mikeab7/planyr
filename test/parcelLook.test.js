@@ -237,7 +237,8 @@ describe("source guards on the render rules", () => {
   const src = plannerSource();
   it("boundary and setback ring strokes carry NO zoom factor (screen pixels, constant across zoom)", () => {
     const outline = src.slice(src.indexOf('data-testid="parcel-outline"'), src.indexOf('data-testid="parcel-outline"') + 900);
-    expect(outline).toMatch(/strokeWidth=\{\(picked \|\| isSel\) \? Math\.max\(3, baseW\) : baseW\}/);
+    // 2026-11-26: a switched-off lot draws at the thin screen-pixel weight from inactiveParcelStroke (still no zoom factor)
+    expect(outline).toMatch(/strokeWidth=\{\(picked \|\| isSel\) \? Math\.max\(3, baseW\) : \(inactive \? offLine\.width : baseW\)\}/);
     expect(outline).not.toMatch(/strokeZoom/);
     const ring = src.slice(src.indexOf('data-testid="setback-ring"'), src.indexOf('data-testid="setback-ring"') + 400);
     expect(ring).toMatch(/strokeWidth=\{sbs\.weight\}/);

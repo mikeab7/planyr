@@ -351,6 +351,8 @@ import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from ".
 import { TAPER_MAX_FT } from "./lib/roadTaper.js";
 import { roundaboutDiameterFor, roundaboutBandFor, normalizeRoundaboutD, ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D } from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
+import { inactiveParcelStroke } from "./lib/inactiveParcelLine.js";
+import { labelHaloStyle } from "./lib/labelHalo.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS } from "./lib/roadClasses.js";
 import { SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers, CURB, CURB_6, CURB_12, curbWidthOf, isCenterlineRoad, roadCurbWidth, roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadJunctionVerticesOf, roundaboutsForSite } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
@@ -16143,6 +16145,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   }
   const dimSuppressed = suppressedDimIds(dimItems, committedLabelBoxes, 2);
+  // Is there aerial imagery under the labels (live tiles, or a pinned map-captured picture)? Picks
+  // the label halo: reverse/dark over imagery, white on plain paper (lib/labelHalo.js).
+  const labelsOnAerial = showAerial && (basemapOn || !!mapRef);
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
@@ -16157,9 +16162,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
     // (The white halo means the existing/added two-tone fills below need no per-zone ink.)
     const carto = d.carto;
-    const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
+    // 2026-11-26 — every element label is the app's one UI face (Inter, the same face the label
+    // measurer sizes it in); numbers stay tabular so "845,240 SF" columns still line up. It was a
+    // typewriter face, which looked foreign next to the rest of the app.
+    const fam = NUM_FONT;
     const halo = carto || leader;
     const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
+    // 2026-11-26 — reverse halo over the aerial (white text, thin dark edge, like the road names),
+    // thin white halo on plain paper; one answer for fill + halo (lib/labelHalo.js).
+    const hs = labelHaloStyle({ halo, onAerial: labelsOnAerial, ink, haloW: (carto ? 2.75 : 3) * dlsL });
     // B875 — a pond's map label is a click target (a leadered pond label often sits away from the
     // basin, so it's a real second handle): a single click SELECTS, a double-click opens the
     // inspector.
@@ -16221,8 +16232,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {!d.added && d.el.locked && <LockCue x={x} y={top - 3 * dls} size={12 * dls} data-export="skip" />}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
-          fontFamily={fam} fill={ink}
-          stroke={halo ? "#fff" : undefined} strokeWidth={halo ? (carto ? 2.75 : 3) * dlsL : undefined} paintOrder={halo ? "stroke" : undefined}
+          fontFamily={fam} fontVariantNumeric={TABULAR_NUMS} fill={hs.fill}
+          stroke={hs.stroke} strokeWidth={hs.strokeWidth} strokeLinejoin={halo ? "round" : undefined} paintOrder={halo ? "stroke" : undefined}
           style={{ fontWeight: 600, letterSpacing: carto ? "0" : "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
@@ -21470,6 +21481,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // where the colour IS the message, and on an inactive parcel, which is deliberately
                 // faint context.
                 const cased = !picked && !inactive;
+                // A switched-off lot is a FINE dashed line at every zoom (thin weight, dash proportional to it),
+                // never the parcel's own heavy weight with a fixed dash — that read as big blocks from far out.
+                const offLine = inactiveParcelStroke(baseW);
                 const pcFillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0); // Fill is an option with its own opacity; 0 = no fill
                 // Parcels rework — while this parcel's page is open, its boundary SECTIONS answer a press (selecting
                 // the section for editing) and the selected one is drawn heavier. Off in Edit parcels, where the
@@ -21483,8 +21497,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                   <polygon data-testid="parcel-outline" points={ring}
                     fill={picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
-                    stroke={picked ? "#2563eb" : lkB.color} strokeWidth={(picked || isSel) ? Math.max(3, baseW) : baseW}
-                    strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
+                    stroke={picked ? "#2563eb" : lkB.color} strokeWidth={(picked || isSel) ? Math.max(3, baseW) : (inactive ? offLine.width : baseW)}
+                    strokeDasharray={inactive ? offLine.dash : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: parcelBodyCursor({ tool, editingCorners, locked: pc.locked, addCursor: ADD_CURSOR,
