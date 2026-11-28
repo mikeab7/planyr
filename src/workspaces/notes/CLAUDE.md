@@ -277,6 +277,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   (`OverflowMenu`'s `big` mode), never the wrapped multi-row column it used to become on a
   phone. Every control that moves between the row and the sheet is defined ONCE as a JSX
   variable and placed in exactly one of the two spots — never duplicated.
+- **⛔ FINGER-SIZED ≠ NARROW (B2671348, 2026-11-28).** Tap size follows the INPUT (`useCoarsePointer`, the shared ui coarse-pointer module): a mouse-driven window under the 760 px breakpoint (a laptop at high scaling + browser zoom — the owner's work laptop) gets 28 px controls packed left, never the stretched 44 px phone row. The toolbar's fold is three MEASURED levels (`level` 0 full · 1 compact · 2 essentials + More), stepping down only when the rendered row overflows its own bar; never go back to a width guess (the compact row needs ~853 px and hid controls at every window from 761 to ~1200 wide).
 - **PHONE DRILL-IN (B849632/B849635).** Below the same breakpoint, `Notes.jsx` shows the
   page list (`NotesTree`) OR the open page/bin-peek reader, never both — `showList`/
   `showDetail` are two INDEPENDENT conditions (not each other's negation: both are always

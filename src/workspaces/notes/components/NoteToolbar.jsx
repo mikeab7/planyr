@@ -85,6 +85,7 @@ import { nextAnchorSpot, selectionInsideAnchor } from "../lib/notesAnchorNode.js
 import { isMultiCell, refuseMultiCell } from "../lib/notesTableMultiSelect.js";
 import { BOLD_TITLE, BOLD_TITLE_IN_HEADER, TABLE_FILLS, boldTruth, currentFill, headerRowsState, selectionInHeaderCells } from "../lib/notesTableFill.js";
 import { RADIUS } from "../lib/notesControls.js";
+import { useCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -101,6 +102,8 @@ const POPOVER_EDGE_MARGIN = 8;
  * this width every group in NEW-1's list fits on one line with room to spare; below it the two
  * fold steps buy back exactly the room the mockup's own narrow-window screenshots show. */
 const COMPACT_BREAKPOINT_PX = 1000;
+/* B2671348 — a mouse-driven narrow bar this wide also carries the style trio on the row. */
+const ROOMY_NARROW_PX = 600;
 
 /* ⛔ NEW-4 — THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
  * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
@@ -1238,16 +1241,52 @@ export default function NoteToolbar({
    * breakpoint, `data-compact` stuck at "0". Re-running this effect once `editor` flips from
    * null to a real instance (the same render that first returns real DOM instead of `null`)
    * is what lets it find the node at all. */
-  const [compact, setCompact] = useState(false);
-  useEffect(() => {
+  /* B2671348 — finger-sized controls follow the INPUT, not the width: a phone-width window
+   * driven by a mouse (a laptop at 150% scaling plus browser zoom) gets the compact 28px controls,
+   * packed left, never the 44px tap targets stretched across the bar. */
+  const coarse = useCoarsePointer();
+  const touch = narrow && coarse;
+  /* B2671348 — on a mouse-driven essentials bar, the style trio (paragraph style, font, size)
+   * rides the row when the bar is wide enough to hold it, measured on the bar's own width. */
+  const [roomy, setRoomy] = useState(false);
+  /* ⛔ B2671348 — THREE FOLD LEVELS, DECIDED BY WHETHER THE ROW FITS, never by a guessed width
+   * alone. 0 = the full row · 1 = NEW-9's compact fold (alignment dropdown, "+" insert menu) · 2 = the
+   * essentials row with everything else in More (the phone row's structure; finger-sized only on a
+   * finger). Measured before: the compact row needs ~853px, so every window from 761 to ~1200 wide
+   * (a 1024 tablet, a 1366 laptop at 125%, a half-screen window) scrolled the bar sideways and hid
+   * the last 20–360px of controls; the 1000px guess said "fits". A level only steps DOWN when the
+   * rendered row overflows its own bar, and remembers how wide that row needed to be (`needRef`), so
+   * it steps back UP only once there is that much room again — no flip-flop at the edge. Runs in a
+   * layout effect (and again on every level change) so a step lands before paint. */
+  const [level, setLevel] = useState(0);
+  const needRef = useRef([COMPACT_BREAKPOINT_PX, 0]);
+  const levelRef = useRef(0); levelRef.current = level;
+  useLayoutEffect(() => {
     const el = rootRef.current;
-    if (!el || typeof ResizeObserver !== "function") return undefined;
-    const check = () => setCompact(el.offsetWidth < COMPACT_BREAKPOINT_PX);
+    if (!el) return undefined;
+    const check = () => {
+      const w = el.clientWidth || el.offsetWidth;
+      if (!w) return;
+      setRoomy(w >= ROOMY_NARROW_PX);
+      const lv = levelRef.current;
+      const over = el.scrollWidth > w + 1;
+      let next = lv;
+      if (lv === 0) {
+        if (w < COMPACT_BREAKPOINT_PX || over) { needRef.current[0] = Math.max(COMPACT_BREAKPOINT_PX, over ? el.scrollWidth : 0); next = 1; }
+      } else if (lv === 1) {
+        if (over) { needRef.current[1] = el.scrollWidth; next = 2; }
+        else if (w >= needRef.current[0]) next = 0;
+      } else if (!narrow && w >= needRef.current[1]) next = 1;
+      if (next !== lv) setLevel(next);
+    };
     check();
+    if (typeof ResizeObserver !== "function") return undefined;
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [editor]);
+  }, [editor, level, narrow]);
+  const compact = level >= 1;
+  const essentials = narrow || level >= 2;
 
   /* NEW-6b — the phone "More" panel: open/closed, and where it hangs (just under the bar, never taller
    * than the VISIBLE viewport — the keyboard covers the layout viewport's lower part on iOS). */
@@ -1258,10 +1297,13 @@ export default function NoteToolbar({
     const measure = () => {
       const el = rootRef.current;
       if (!el) return;
-      const top = el.getBoundingClientRect().bottom;
+      const r = el.getBoundingClientRect();
+      const top = r.bottom;
       const vv = window.visualViewport;
       const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-      setMoreBox({ top, max: Math.max(160, bottom - top - 8) });
+      /* B2671348 — off the phone the sheet hangs under THIS bar (beside the page list), not
+       * across the whole window. */
+      setMoreBox({ top, max: Math.max(160, bottom - top - 8), left: r.left, width: r.width });
     };
     measure();
     const vv = window.visualViewport;
@@ -1525,7 +1567,7 @@ export default function NoteToolbar({
         onClick={onBack}
         aria-label="Back to the notes list"
         style={{
-          flex: "0 0 auto", minWidth: 32, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
+          flex: "0 0 auto", minWidth: 32, minHeight: touch ? 44 : 28, display: "inline-flex", alignItems: "center", gap: 4,
           border: "none", background: "transparent", color: "var(--accent-notes-text)",
           font: "inherit", fontSize: 14, fontWeight: 650, cursor: "pointer", padding: "0 6px 0 2px", lineHeight: 1,
         }}
@@ -1539,17 +1581,17 @@ export default function NoteToolbar({
   const structural = (run) => { if (isMultiCell(editor.state)) { refuseMultiCell(editor); return; } run(); };
   const tableGroupControls = inTable ? (
     <>
-      <TBButton title="Select the whole table (then Ctrl+C / Ctrl+X to copy or move it)" testid="nt-table-select" wide big={narrow} label="Select table" onClick={() => structural(() => chain().selectWholeTable().run())} />
-      <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => structural(() => chain().addRowBefore().run())} />
-      <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => structural(() => chain().addRowAfter().run())} />
-      <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => structural(() => chain().deleteRow().run())} />
-      <TBButton title="Insert column left" testid="nt-col-before" wide big={narrow} label="Col ←" onClick={() => structural(() => chain().addColumnBefore().run())} />
-      <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => structural(() => chain().addColumnAfter().run())} />
-      <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => structural(() => chain().deleteColumn().run())} />
-      <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => structural(() => chain().mergeOrSplit().run())} />
-      <TBButton title="Header row" testid="nt-header-row" wide big={narrow} label="Header row" pressed={headerRowsState(editor.state) ?? "false"} onClick={() => structural(() => chain().toggleHeaderRows().run())} />
-      <FillPopover current={currentFill(editor.state)} big={narrow} onPick={(v) => chain().setCellFill(v).run()} />
-      <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => structural(() => chain().deleteTable().run())} />
+      <TBButton title="Select the whole table (then Ctrl+C / Ctrl+X to copy or move it)" testid="nt-table-select" wide big={touch} label="Select table" onClick={() => structural(() => chain().selectWholeTable().run())} />
+      <TBButton title="Insert row above" testid="nt-row-before" wide big={touch} label="Row ↑" onClick={() => structural(() => chain().addRowBefore().run())} />
+      <TBButton title="Insert row below" testid="nt-row-after" wide big={touch} label="Row ↓" onClick={() => structural(() => chain().addRowAfter().run())} />
+      <TBButton title="Delete row" testid="nt-row-del" wide big={touch} label="Row ✕" onClick={() => structural(() => chain().deleteRow().run())} />
+      <TBButton title="Insert column left" testid="nt-col-before" wide big={touch} label="Col ←" onClick={() => structural(() => chain().addColumnBefore().run())} />
+      <TBButton title="Insert column right" testid="nt-col-after" wide big={touch} label="Col →" onClick={() => structural(() => chain().addColumnAfter().run())} />
+      <TBButton title="Delete column" testid="nt-col-del" wide big={touch} label="Col ✕" onClick={() => structural(() => chain().deleteColumn().run())} />
+      <TBButton title="Merge or split cells" testid="nt-merge" wide big={touch} label="Merge/split" onClick={() => structural(() => chain().mergeOrSplit().run())} />
+      <TBButton title="Header row" testid="nt-header-row" wide big={touch} label="Header row" pressed={headerRowsState(editor.state) ?? "false"} onClick={() => structural(() => chain().toggleHeaderRows().run())} />
+      <FillPopover current={currentFill(editor.state)} big={touch} onPick={(v) => chain().setCellFill(v).run()} />
+      <TBButton title="Delete table" testid="nt-table-del" wide big={touch} label="Delete table" onClick={() => structural(() => chain().deleteTable().run())} />
     </>
   ) : null;
 
@@ -1558,56 +1600,56 @@ export default function NoteToolbar({
    * sheet. One implementation of every control — never a second copy for the phone. */
   const undoRedo = (
     <>
-      <TBButton title="Undo" testid="nt-undo" big={narrow} disabled={!editor.can().undo()} onClick={() => chain().undo().run()}>
+      <TBButton title="Undo" testid="nt-undo" big={touch} disabled={!editor.can().undo()} onClick={() => chain().undo().run()}>
         <Icon><path d="M3 7h6.5a3 3 0 0 1 0 6H6" /><path d="M5.5 4.5L3 7l2.5 2.5" /></Icon>
       </TBButton>
-      <TBButton title="Redo" testid="nt-redo" big={narrow} disabled={!editor.can().redo()} onClick={() => chain().redo().run()}>
+      <TBButton title="Redo" testid="nt-redo" big={touch} disabled={!editor.can().redo()} onClick={() => chain().redo().run()}>
         <Icon><path d="M13 7H6.5a3 3 0 0 0 0 6H10" /><path d="M10.5 4.5L13 7l-2.5 2.5" /></Icon>
       </TBButton>
     </>
   );
   const styleGroup = (
     <>
-      <FormatMenu title="Paragraph style" testid="nt-block" big={narrow}
+      <FormatMenu title="Paragraph style" testid="nt-block" big={touch}
         value={blockDisplay} mixed={blockMixed}
         iconTrigger={<PilcrowIcon />}
         onPick={setBlock} options={titleActive ? TITLE_OPTIONS : HEADING_OPTIONS} />
 
-      <FormatMenu title="Font" testid="nt-font" width={92} big={narrow} disabled={titleActive}
+      <FormatMenu title="Font" testid="nt-font" width={92} big={touch} disabled={titleActive}
         value={currentFontOption ? currentFontOption.value : currentFont}
         mixed={fontMixed}
         displayLabel={fontLabel}
         options={fontOptions.map((f) => ({ label: f.label, value: f.value }))}
         onPick={(v) => (v ? chain().setFontFamily(v).seedMark("textStyle", { fontFamily: v }).run() : chain().unsetFontFamily().seedMark("textStyle", { fontFamily: null }).run())} />
 
-      <SizeMenu testid="nt-size" big={narrow}
+      <SizeMenu testid="nt-size" big={touch}
         value={currentSizeNum} mixed={sizeMixed} displayLabel={sizeLabel}
         onPick={pickSize} />
     </>
   );
   const bIU = (
     <>
-      <TBButton title={boldInHeader ? BOLD_TITLE_IN_HEADER : BOLD_TITLE} testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => { if (!boldInHeader) chain().toggleBold().seedMark("bold", {}, "toggle").run(); }}>
+      <TBButton title={boldInHeader ? BOLD_TITLE_IN_HEADER : BOLD_TITLE} testid="nt-bold" big={touch} disabled={titleActive} pressed={boldPressed} onClick={() => { if (!boldInHeader) chain().toggleBold().seedMark("bold", {}, "toggle").run(); }}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>B</span>
       </TBButton>
-      <TBButton title="Italic" testid="nt-italic" big={narrow} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().seedMark("italic", {}, "toggle").run()}>
+      <TBButton title="Italic" testid="nt-italic" big={touch} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().seedMark("italic", {}, "toggle").run()}>
         <span style={{ fontStyle: "italic", fontFamily: "Georgia, serif", fontSize: 13 }}>I</span>
       </TBButton>
-      <TBButton title="Underline" testid="nt-underline" big={narrow} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().seedMark("underline", {}, "toggle").run()}>
+      <TBButton title="Underline" testid="nt-underline" big={touch} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().seedMark("underline", {}, "toggle").run()}>
         <span style={{ textDecoration: "underline", fontSize: 13 }}>U</span>
       </TBButton>
     </>
   );
   const strikeSupSub = (
     <>
-      <TBButton title="Strikethrough" testid="nt-strike" big={narrow} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().seedMark("strike", {}, "toggle").run()}>
+      <TBButton title="Strikethrough" testid="nt-strike" big={touch} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().seedMark("strike", {}, "toggle").run()}>
         <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
       </TBButton>
-      <TBButton title="Superscript" testid="nt-sup" big={narrow} pressed={supPressed}
+      <TBButton title="Superscript" testid="nt-sup" big={touch} pressed={supPressed}
         onClick={() => (titleActive ? setTitleStyle({ sup: !titleStyle.sup, sub: false }) : chain().toggleSuperscript().run())}>
         <SupIcon />
       </TBButton>
-      <TBButton title="Subscript" testid="nt-sub" big={narrow} pressed={subPressed}
+      <TBButton title="Subscript" testid="nt-sub" big={touch} pressed={subPressed}
         onClick={() => (titleActive ? setTitleStyle({ sub: !titleStyle.sub, sup: false }) : chain().toggleSubscript().run())}>
         <SubIcon />
       </TBButton>
@@ -1615,14 +1657,14 @@ export default function NoteToolbar({
   );
   const textColor = (
     <>
-      <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed}
+      <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={touch} mixed={colorMixed}
         swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
         onPick={(c) => (titleActive ? setTitleStyle({ color: c }) : (c ? chain().setColor(c).seedMark("textStyle", { color: c }).run() : chain().unsetColor().seedMark("textStyle", { color: null }).run()))} />
     </>
   );
   const highlight = (
     <>
-      <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} mixed={hlMixed}
+      <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={touch} mixed={hlMixed}
         swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
         onPick={(c) => (titleActive ? setTitleStyle({ highlight: c }) : (c ? chain().setHighlight({ color: c }).seedMark("highlight", { color: c }, "set").run() : chain().unsetHighlight().seedMark("highlight", {}, "unset").run()))} />
     </>
@@ -1630,12 +1672,12 @@ export default function NoteToolbar({
   const align = (
     <>
       {compact ? (
-        disabledWrap(<AlignMenu value={alignDisplay ?? "left"} mixed={alignMixed} big={narrow}
+        disabledWrap(<AlignMenu value={alignDisplay ?? "left"} mixed={alignMixed} big={touch}
           onPick={(id) => chain().setTextAlign(id).run()} />)
       ) : disabledWrap(
         <>
           {ALIGNS.map((a) => (
-            <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`} big={narrow}
+            <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`} big={touch}
               pressed={alignPressed(a.id)}
               onClick={() => chain().setTextAlign(a.id).run()}>
               <AlignIcon lines={a.lines} />
@@ -1647,16 +1689,16 @@ export default function NoteToolbar({
   );
   const bulletOrdered = (
     <>
-          <TBButton title="Bulleted list" testid="nt-bullet" big={narrow} pressed={listPressed("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
-          <TBButton title="Numbered list" testid="nt-ordered" big={narrow} pressed={listPressed("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
+          <TBButton title="Bulleted list" testid="nt-bullet" big={touch} pressed={listPressed("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
+          <TBButton title="Numbered list" testid="nt-ordered" big={touch} pressed={listPressed("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
     </>
   );
   const listExtras = (
     <>
-          <TBButton title="Checklist" testid="nt-task" big={narrow} pressed={listPressed("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
-          <TBButton title="Decrease indent" testid="nt-outdent" big={narrow} onClick={outdent}><IndentIcon out /></TBButton>
-          <TBButton title="Increase indent" testid="nt-indent" big={narrow} onClick={indent}><IndentIcon /></TBButton>
-          <SpacingPopover big={narrow} lineHeight={spacingResolved} spaceBefore={spaceBeforeCaret} spaceAfter={spaceAfterCaret}
+          <TBButton title="Checklist" testid="nt-task" big={touch} pressed={listPressed("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
+          <TBButton title="Decrease indent" testid="nt-outdent" big={touch} onClick={outdent}><IndentIcon out /></TBButton>
+          <TBButton title="Increase indent" testid="nt-indent" big={touch} onClick={indent}><IndentIcon /></TBButton>
+          <SpacingPopover big={touch} lineHeight={spacingResolved} spaceBefore={spaceBeforeCaret} spaceAfter={spaceAfterCaret}
             onPick={pickSpacing} onApplyWholePage={applySpacingWholePage} onReset={resetSpacing} />
     </>
   );
@@ -1664,10 +1706,10 @@ export default function NoteToolbar({
     <>
       {!compact && !titleActive && (
         <>
-          <LinkControl editor={editor} big={narrow} />
-          <TableGridPicker big={narrow} onInsert={insertTableSmart} />
-          <TBButton title="Insert a picture" testid="nt-image" big={narrow} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
-          <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={narrow} onClick={onAttach}>
+          <LinkControl editor={editor} big={touch} />
+          <TableGridPicker big={touch} onInsert={insertTableSmart} />
+          <TBButton title="Insert a picture" testid="nt-image" big={touch} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
+          <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={touch} onClick={onAttach}>
             <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon>
           </TBButton>
         </>
@@ -1677,7 +1719,7 @@ export default function NoteToolbar({
   const insertMenu = (
     <>
       {!titleActive && (
-        <InsertMenu editor={editor} big={narrow} compact={compact} fileRef={fileRef} onAttach={onAttach}
+        <InsertMenu editor={editor} big={touch} compact={compact} fileRef={fileRef} onAttach={onAttach}
           onInsertTable={insertTableSmart} />
       )}
     </>
@@ -1686,7 +1728,7 @@ export default function NoteToolbar({
     <>
       {disabledWrap(
         <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"
-          testid="nt-arrow" active={arrowMode} big={narrow} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>,
+          testid="nt-arrow" active={arrowMode} big={touch} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>,
       )}
     </>
   );
@@ -1727,30 +1769,35 @@ export default function NoteToolbar({
    * which is the regression. Essentials: undo · redo · B · I · U · bullet · numbered · text colour ·
    * More. The "More" panel drops DOWN from the bar (never up from the bottom: the soft keyboard
    * covers the bottom) and also carries the page actions that used to hide in the module-tab row. */
-  if (narrow) {
+  /* Placed exactly once: on the row (mouse, room for it) or in the More sheet — never both. */
+  const styleOnRow = !touch && roomy;
+  if (essentials) {
     return (
       <div
         ref={rootRef}
         style={{ ...barStyle, overflowX: "hidden", gap: 0 }}
         data-testid="note-toolbar"
-        data-narrow="1"
+        data-narrow={narrow ? "1" : "0"}
+        data-fold="2"
         data-compact={compact ? "1" : "0"}
         role="toolbar"
         aria-label="Formatting"
         onMouseDownCapture={() => onBeforeAction?.()}
       >
         {backControl}
-        <style>{`
+        {/* Stretch-to-fill is a THUMB-REACH rule — phone only. A mouse never gets it (B2671348). */}
+        {touch ? <style>{`
           [data-testid="note-toolbar-essentials"] > span { flex: 1 1 0 !important; min-width: 0 !important; display: flex !important; }
           [data-testid="note-toolbar-essentials"] > span[data-grow="2"] { flex-grow: 2 !important; }
           [data-testid="note-toolbar-essentials"] button { flex: 1 1 0 !important; min-width: 0 !important; padding: 0 !important; }
-        `}</style>
-        <span data-testid="note-toolbar-essentials" style={{ display: "flex", alignItems: "center", flex: "1 1 0", minWidth: 0 }}>
+        `}</style> : null}
+        <span data-testid="note-toolbar-essentials" data-touch={touch ? "1" : "0"} style={{ display: "flex", alignItems: "center", gap: touch ? 0 : 2, flex: touch ? "1 1 0" : "1 1 auto", minWidth: 0 }}>
           {undoRedo}
+          {styleOnRow ? <><Sep />{styleGroup}<Sep /></> : null}
           {bIU}
           <span data-grow="2" style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: titleActive ? 0.35 : 1, pointerEvents: titleActive ? "none" : "auto" }}>{bulletOrdered}</span>
           {textColor}
-          <TBButton title="More formatting" testid="nt-more" big={narrow} active={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
+          <TBButton title="More formatting" testid="nt-more" big={touch} active={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
             <Icon><circle cx="3.5" cy="8" r="1.1" fill="currentColor" /><circle cx="8" cy="8" r="1.1" fill="currentColor" /><circle cx="12.5" cy="8" r="1.1" fill="currentColor" /></Icon>
           </TBButton>
         </span>
@@ -1760,16 +1807,18 @@ export default function NoteToolbar({
             data-testid="note-toolbar-more"
             onMouseDown={stop}
             style={{
-              position: "fixed", left: 0, right: 0, top: moreTop, zIndex: 60,
+              position: "fixed", ...(narrow || moreBox.width == null ? { left: 0, right: 0 } : { left: moreBox.left, width: moreBox.width }), top: moreTop, zIndex: 60,
               maxHeight: `calc(${moreMaxPx}px)`, overflowY: "auto",
               background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
               boxShadow: POPOVER_SHADOW, padding: "6px 8px 10px",
               display: "flex", flexDirection: "column", gap: 6,
             }}
           >
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
-              {styleGroup}
-            </div>
+            {styleOnRow ? null : (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
+                {styleGroup}
+              </div>
+            )}
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
               {strikeSupSub}
               {highlight}
@@ -1810,6 +1859,7 @@ export default function NoteToolbar({
       data-testid="note-toolbar"
       data-narrow={narrow ? "1" : "0"}
       data-compact={compact ? "1" : "0"}
+      data-fold={level}
       role="toolbar"
       aria-label="Formatting"
       onMouseDownCapture={() => onBeforeAction?.()}
