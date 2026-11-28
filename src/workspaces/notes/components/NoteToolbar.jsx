@@ -1770,12 +1770,15 @@ export default function NoteToolbar({
    * More. The "More" panel drops DOWN from the bar (never up from the bottom: the soft keyboard
    * covers the bottom) and also carries the page actions that used to hide in the module-tab row. */
   /* Placed exactly once: on the row (mouse, room for it) or in the More sheet — never both. */
-  const styleOnRow = !touch && roomy;
+  /* A mouse inside a TABLE keeps the table's own buttons on the row (they are what you came to use) and the
+   * style chips step into More to make room; the row scrolls sideways, never hides, if even that is too wide. */
+  const tableOnRow = !touch && !!tableGroupControls;
+  const styleOnRow = !touch && roomy && !tableOnRow;
   if (essentials) {
     return (
       <div
         ref={rootRef}
-        style={{ ...barStyle, overflowX: "hidden", gap: 0 }}
+        style={{ ...barStyle, overflowX: tableOnRow ? "auto" : "hidden", gap: 0 }}
         data-testid="note-toolbar"
         data-narrow={narrow ? "1" : "0"}
         data-fold="2"
@@ -1801,6 +1804,7 @@ export default function NoteToolbar({
             <Icon><circle cx="3.5" cy="8" r="1.1" fill="currentColor" /><circle cx="8" cy="8" r="1.1" fill="currentColor" /><circle cx="12.5" cy="8" r="1.1" fill="currentColor" /></Icon>
           </TBButton>
         </span>
+        {tableOnRow ? <span style={{ display: "inline-flex", alignItems: "center", flex: "0 0 auto" }}>{tableGroup}</span> : null}
         {fileInput}
         {moreOpen ? (
           <div
@@ -1829,7 +1833,7 @@ export default function NoteToolbar({
               {insertMenu}
               {arrow}
             </div>
-            {inTable ? <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>{tableGroup}</div> : null}
+            {inTable && !tableOnRow ? <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>{tableGroup}</div> : null}
             {pageActions && pageActions.length ? (
               <div data-testid="note-toolbar-page-actions" style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 6, borderTop: "1px solid var(--border-default)" }}>
                 {pageActions.map((a) => (
