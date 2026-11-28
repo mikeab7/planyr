@@ -1,3 +1,4 @@
+// source-scan: pins that Turnstile.jsx keeps retry:"never" + the silent-retry decision and that every password box renders the shared PasswordInput (no jsdom here to render them).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { decideWidgetError, isPermanentWidgetError, silentRetryDelay, MAX_SILENT_RETRIES } from "../src/shared/turnstile/turnstileRetry.js";
