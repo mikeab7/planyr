@@ -533,10 +533,14 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *   ⛔ RAISED 18 → 19 (NEW-2, 2026-10-28) — `FillPopover`'s `open` (the table Fill swatch dropdown), the
      *     same transient popover flag every other picker here carries; the fill it shows is read from
      *     the document (`currentFill(editor.state)`), never stored in React.
+     *   ⛔ RAISED 19 → 20 (B2671348, 2026-11-28) — `compact` became `level` (the three fold
+     *     levels, still from a `ResizeObserver` on the bar's own root) and `roomy` joined it (whether a
+     *     mouse-driven essentials bar has room for the style trio) — both rendered-width facts about the
+     *     bar, never read from `editor.`.
      * If a future change makes any of these read `editor.` at init, the sharp assertion above
      * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(19);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(20);
   });
 });
 
