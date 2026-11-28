@@ -3,7 +3,7 @@
  *
  * Why it matters: Cloudflare Turnstile (the hidden security check on the password form) refuses these
  * browsers even when a real person ticks the box, so the password route is a dead end there. The emailed
- * 6-digit code (functions/api/auth/email-link.js + EmailLinkSent.jsx) does not need the check, so when this
+ * sign-in code (functions/api/auth/email-link.js + EmailLinkSent.jsx) does not need the check, so when this
  * answers non-null the panel leads with that route. It NEVER loosens the check itself: it only changes which
  * button is primary and what the note says (the owner rejected weakening the bot check, 2026-11-27).
  *
