@@ -18,10 +18,11 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { TURNSTILE_SITE_KEY } from "./turnstileConfig.js";
 // NEW-1 (B2619760 follow-up): a blocked script / widget error / timeout is reported, so a broken bot check is not silent.
 import { reportAuthEvent, AUTH_EVENT } from "../auth/authTelemetry.js";
+import { decideWidgetError } from "./turnstileRetry.js";
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 let scriptPromise = null;
-export const SCRIPT_WAIT_MS = 10000;
+export const SCRIPT_WAIT_MS = 20000;   // a slow corporate proxy can take well over 10 s to hand over Cloudflare's script
 
 function loadTurnstileScript() {
   if (typeof window === "undefined") return Promise.reject(new Error("no window"));
@@ -69,6 +70,8 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
 
   useEffect(() => {
     let cancelled = false;
+    let retries = 0;            // silent retries spent on transient widget errors (turnstileRetry.js)
+    let retryTimer = null;
     report("loading");
     cb.current.onToken && cb.current.onToken("");
     loadTurnstileScript()
@@ -81,13 +84,28 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
           // 300 px box that overflows a narrow phone; it still renders at full size where there is room.
           size: "flexible",
           "refresh-expired": "auto",
-          callback: (token) => { cb.current.onToken && cb.current.onToken(token); report("ready"); },
+          callback: (token) => { retries = 0; cb.current.onToken && cb.current.onToken(token); report("ready"); },
           "expired-callback": () => { cb.current.onToken && cb.current.onToken(""); }, // Turnstile refreshes it itself
+          // We drive retries ourselves (below) so the person never sees a transient hiccup.
+          retry: "never",
           "error-callback": (code) => {
             cb.current.onToken && cb.current.onToken("");
-            setErrorCode(String(code == null ? "" : code).slice(0, 20));
-            reportAuthEvent(AUTH_EVENT.CAPTCHA_WIDGET_ERROR, { code: String(code == null ? "" : code) });
+            const c = String(code == null ? "" : code);
+            const d = decideWidgetError(c, retries);
+            if (d.action === "retry") {
+              // Transient (e.g. 300010 on a work network): reset quietly; the widget stays "loading", nothing is shown.
+              retries += 1;
+              clearTimeout(retryTimer);
+              retryTimer = setTimeout(() => {
+                if (cancelled) return;
+                try { widgetIdRef.current != null && window.turnstile && window.turnstile.reset(widgetIdRef.current); } catch (_) {}
+              }, d.ms);
+              return true;   // true = Cloudflare need not log it to the console either
+            }
+            setErrorCode(c.slice(0, 20));
+            reportAuthEvent(AUTH_EVENT.CAPTCHA_WIDGET_ERROR, { code: c, reason: retries ? `after-${retries}-retries` : "permanent" });
             report("error");
+            return true;
           },
           "timeout-callback": () => {
             cb.current.onToken && cb.current.onToken("");
@@ -110,6 +128,7 @@ const Turnstile = forwardRef(function Turnstile({ onToken, onStateChange, onTime
       });
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
       try { widgetIdRef.current != null && window.turnstile && window.turnstile.remove(widgetIdRef.current); } catch (_) {}
       widgetIdRef.current = null;
       cb.current.onToken && cb.current.onToken("");

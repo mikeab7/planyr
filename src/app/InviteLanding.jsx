@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { Button } from "../shared/ui/controls.jsx";
+import PasswordInput from "../shared/ui/PasswordInput.jsx";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { supabase } from "../workspaces/site-planner/lib/supabase.js";
@@ -125,7 +126,7 @@ function SignupCard({ plan, inviteId, onJoined, onHaveAccount, onDismiss }) {
         <input aria-label="Last name" data-testid="invite-signup-last" autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={input} />
       </div>
       <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company (optional)" value={org} onChange={(e) => setOrg(e.target.value)} style={input} />
-      <input aria-label="Password" data-testid="invite-signup-password" type="password" autoComplete="new-password" placeholder="Password (6+ characters)" value={pw}
+      <PasswordInput aria-label="Password" data-testid="invite-signup-password" autoComplete="new-password" placeholder="Password (6+ characters)" value={pw}
         onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} style={input} />
       {err && <div role="alert" data-testid="invite-signup-error" style={{ marginTop: 6, color: "var(--danger-text)", overflowWrap: "anywhere" }}>{err}</div>}
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>

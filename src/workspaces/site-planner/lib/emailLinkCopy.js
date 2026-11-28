@@ -60,16 +60,16 @@ export const BLOCKED_CHECK_COPY = {
  * browser can never pass the check, so the emailed code leads and the password form waits behind a link. */
 export const AGENT_BROWSER_COPY = {
   heading: "Using an AI agent?",
-  body: "This browser can\u2019t pass Planyr\u2019s security check. We\u2019ll email a 6-digit code instead.",
+  body: "This browser can\u2019t pass Planyr\u2019s security check. We\u2019ll email you a sign-in code instead.",
   usePassword: "Use my password instead",
 };
 
-/** The sign-in form's email button (the email carries both a link and a 6-digit code). */
+/** The sign-in form's email button (the email carries both a link and a sign-in code). */
 export const EMAIL_CODE_BUTTON = "Email me a sign-in code";
 
 /** The typed-code box under the sent message (sign-in only). */
 export const CODE_COPY = {
-  label: "6-digit code from the email",
+  label: "Code from the email",
   agent: "Signing in through your own AI agent? Read it the code yourself, only for a sign-in you just started. Planyr never shows the code on this screen.",
   button: "Sign in",
 };
