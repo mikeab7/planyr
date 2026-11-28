@@ -53,7 +53,10 @@ export function pushToastPure(list, toast) {
     const i = l.findIndex((t) => t && t.dedupeKey === toast.dedupeKey);
     if (i >= 0) {
       const next = l.slice();
-      next[i] = { ...l[i], ...toast, id: l[i].id };   // same slot, same id → no remount, no timer restart
+      // same slot, same id → no remount, no timer restart. `renew: true` (the Site Planner's merged undo toast,
+      // lib/undoToast.js) asks for a FRESH id instead: same slot, but its lifetime starts over, because the toast now
+      // describes a newer action ("Deleted 3 parcels" after "Deleted 2 parcels") the person has only just done.
+      next[i] = { ...l[i], ...toast, id: toast.renew ? "t" + ++toastSeq : l[i].id };
       return next;
     }
   }
@@ -139,21 +142,26 @@ function ToastItem({ toast, onDismiss }) {
     remainRef.current = Math.max(1000, remainRef.current - (Date.now() - startedRef.current));
   };
   useEffect(() => { arm(); return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, [arm]);
+  const [held, setHeld] = useState(false);
   return (
     <div
       role="status"
       data-testid={toast.testId || "sync-toast"}
-      onMouseEnter={hold}
-      onMouseLeave={arm}
+      onMouseEnter={() => { hold(); setHeld(true); }}
+      onMouseLeave={() => { arm(); setHeld(false); }}
       style={{
         display: "flex", alignItems: "center", gap: 10,
         background: "var(--surface-raised)", color: "var(--text-primary)",
         border: "1px solid var(--border-strong)", borderLeft: "4px solid var(--warn-text)",
         borderRadius: 8, padding: "9px 12px", fontSize: 12.5, fontWeight: 600,
         boxShadow: "0 8px 28px rgba(0,0,0,0.28)", pointerEvents: "auto", maxWidth: 520,
+        ...(toast.countdown ? { position: "relative", overflow: "hidden" } : null),
       }}
     >
-      <span style={{ flex: 1 }}>{toast.text}</span>
+      <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+        <span>{toast.text}</span>
+        {toast.detail ? <span data-toast-detail="1" style={{ fontSize: FONT_SIZE.label, fontWeight: 500, color: "var(--text-secondary)" }}>{toast.detail}</span> : null}
+      </span>
       {toast.action && (
         <button
           onClick={() => { toast.action.onClick?.(); onDismiss(toast.id); }}
@@ -167,8 +175,21 @@ function ToastItem({ toast, onDismiss }) {
         style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--text-secondary)",
           border: "none", fontSize: 14, fontWeight: 800, padding: "0 2px", lineHeight: 1 }}
       >✕</button>
+      {toast.countdown ? (
+        // How long the toast stays: drains to empty over its lifetime and PAUSES while hovered (hover-hold).
+        <span aria-hidden="true" data-toast-countdown="1" style={{ position: "absolute", left: 0, bottom: 0, height: 3, width: "100%",
+          background: "var(--accent)", transformOrigin: "left center",
+          animation: `planyr-toast-drain ${toast.ttlMs || TOAST_TTL_MS}ms linear forwards`, animationPlayState: held ? "paused" : "running" }} />
+      ) : null}
     </div>
   );
+}
+// The countdown bar's keyframes, injected once (a toast is app chrome, not a stylesheet module).
+if (typeof document !== "undefined" && !document.getElementById("planyr-toast-keyframes")) {
+  const st = document.createElement("style");
+  st.id = "planyr-toast-keyframes";
+  st.textContent = "@keyframes planyr-toast-drain{from{transform:scaleX(1)}to{transform:scaleX(0)}}@media (prefers-reduced-motion: reduce){[data-toast-countdown]{animation:none!important;opacity:.6}}";
+  document.head.appendChild(st);
 }
 
 /* NEW-1 (2026-11-25, owner screenshot: two "Deleted Parcel N [Undo] ✕" toasts and a "+1 more" pill

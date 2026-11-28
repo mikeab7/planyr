@@ -23,7 +23,7 @@ describe("paving setback wiring", () => {
   it("removing deletes the KEY (an add-then-remove parcel is byte-identical to one that never added)", () => {
     const rm = src.slice(src.indexOf("const pavingRemove = () =>"), src.indexOf("const pavingSectionValue2"));
     expect(rm).toMatch(/const \{ pavingSetbacks: _gone, \.\.\.rest \} = p; return rest;/);
-    expect(rm).toContain('label: "Undo"');
+    expect(rm).toContain('pushUndoToast({ text: "Paving setback removed" })'); // the one undo toast (lib/undoToast.js)
   });
   it("the line is drawn only for a parcel that added paving, behind its own Show line, dotted, in its own token", () => {
     expect(src).toMatch(/settings\.showPaving !== false && !isHidden\(hiddenGroups, "parcels"\) && parcels\.filter\(\(pc\) => pc\.active !== false && hasPaving\(pc\)\)/);

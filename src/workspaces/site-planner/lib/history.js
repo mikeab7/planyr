@@ -186,6 +186,40 @@ export function createHistoryStack({ keyOf, limit = 80 } = {}) {
     },
     canRedo() { return future.length > 0; },
 
+    /* The frame the last push() recorded (the pre-mutation snapshot of the most recent action), or null. A caller
+     * that wants to name "this action" later (the undo toast, lib/undoToast.js) keeps this reference. */
+    top() { return past.length ? past[past.length - 1] : null; },
+
+    /* ⛔ IS THE UNDO TOAST STILL TELLING THE TRUTH? (2026-11-25, owner screenshot of two "Deleted Parcel N · Undo"
+     * toasts, where Undo on the OLDER one reversed the NEWER delete because every toast called the global undo.)
+     * `frames` are the pre-snapshots of the toast's actions, oldest first (each the `top()` right after its push).
+     * True iff those actions are, right now, exactly the newest REAL steps on the stack, in order, so that
+     * `undoN(current, frames.length)` reverses those actions and nothing else. Frames that sit between them and
+     * above them must be NO-OP frames (a selection click pushes one: same collection references as the state on
+     * either side, see canUndo's note). REFERENCE checks only (`sameRefs`), never `keyOf`: this is read after every
+     * commit while an undo toast is up, so it may not stringify the plan. It errs only toward "not honest" (the
+     * toast is withdrawn / not merged), never toward undoing the wrong thing.
+     * `current` is the live state; pass null when the newest frame's own action has not committed yet (the
+     * caller is about to apply it), which skips the "the newest action changed something" test for that frame. */
+    stepsAreTop(frames, current) {
+      if (!Array.isArray(frames) || !frames.length) return false;
+      let i = past.length - 1;
+      let expect = current;
+      for (let j = frames.length - 1; j >= 0; j--) {
+        const f = frames[j];
+        if (!f) return false;
+        while (i >= 0 && past[i] !== f) {
+          if (expect == null || !sameRefs(past[i], expect)) return false;
+          i--;
+        }
+        if (i < 0) return false;
+        if (expect != null && sameRefs(f, expect)) return false; // that "step" changed nothing
+        expect = f;
+        i--;
+      }
+      return true;
+    },
+
     reset() { past = []; future = []; },
 
     /* NEW-1 (2026-11-13, "undo survives leaving a plan") — seed an EMPTY stack with frames carried over
