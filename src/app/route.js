@@ -106,6 +106,8 @@ export function unknownModuleSlug(hash) {
   // Same reasoning for "dashboard" (see isDashboardRoute, NEW-1/B1213312) — a real,
   // resolvable destination that isn't a tabbed workspace either.
   if (slug === DASHBOARD_SLUG) return null;
+  // Same reasoning for "connect" — the "Connect to Claude" Allow page (#/connect/<id>, app/ConnectLanding.jsx).
+  if (slug === CONNECT_SLUG) return null;
   return MODULE_BY_SLUG[slug] ? null : slug;
 }
 
@@ -116,6 +118,7 @@ export function unknownModuleSlug(hash) {
  * unrecognized route (parseRoute falls back to DEFAULT_MODULE exactly as it would for a
  * typo), rather than needing its own "access denied" branch anywhere in the route grammar. */
 const ADMIN_SLUG = "admin";
+const CONNECT_SLUG = "connect"; // = shared/auth/connectRequest.js CONNECT_SLUG (test/connectRequest.test.js keeps them equal)
 export function isAdminRoute(hash) {
   const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
   return segs[0] === ADMIN_SLUG;

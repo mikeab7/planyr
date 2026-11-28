@@ -26,6 +26,7 @@ import { isSpreadsheetName } from "../workspaces/model/lib/spreadsheetKind.js";
 import { scopeKeyFor, setActiveFile } from "../workspaces/model/lib/activeFile.js";
 import { dashboardGate, dashboardTarget, setDashboardOwner } from "../shared/ui/dashboardAccess.js";
 import { useIsAdmin } from "../workspaces/admin/lib/useIsAdmin.js";
+import { connectIdFromHash, freshPendingConnect } from "../shared/auth/connectRequest.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, parseRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute, pointerForRoute } from "./lastRoute.js";
@@ -51,6 +52,8 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 const InviteLanding = lazy(() => import("./InviteLanding.jsx"));
 // Emailed sign-in / password-reset link (NEW-1): loaded only when the address carries ?authlink=, so no other visit pays for it.
 const AuthLinkLanding = lazy(() => import("./AuthLinkLanding.jsx"));
+// "Connect to Claude" Allow page (2026-11-27): loaded only for #/connect/<id>, so no other visit pays for it.
+const ConnectLanding = lazy(() => import("./ConnectLanding.jsx"));
 const WaitingInviteNotice = lazy(() => import("./WaitingInviteNotice.jsx")); // NEW-1 (2026-11-02): "an invitation is waiting" after a no-link sign-up
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
@@ -293,6 +296,13 @@ export default function Shell() {
   const active = (dashGate === "show" || dashGate === "wait") || (isAdminHash && (adminShown || adminKnown)) ? null : routedModule;
   const [hasInviteLink] = useState(() => typeof window !== "undefined" && /[?&]invite=/.test(window.location.search || "")); // captured before InviteLanding strips it
   const [hasAuthLink] = useState(() => typeof window !== "undefined" && /[?&]authlink=/.test(window.location.search || "")); // captured before AuthLinkLanding strips it
+  // "Connect to Claude": the Allow page's request id, read ONCE at boot from #/connect/<id>. An emailed sign-in link
+  // opened in another tab brings it back through its `next` route (goToLinkRoute below) or, failing that, from this
+  // device's 10-minute memory of the request (shared/auth/connectRequest.js).
+  const [connectId, setConnectId] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return connectIdFromHash(window.location.hash) || (/[?&]authlink=/.test(window.location.search || "") ? freshPendingConnect() : null);
+  });
   // NEW-1 (follow-up to B2619760): the e-mail link the person just followed was read from the URL at module load
   // (shared/auth/authReturn.js), BEFORE anything could erase it — a reset link opens the set-new-password form
   // even if PASSWORD_RECOVERY fired before this component subscribed, and a dead link (expired / already used)
@@ -840,6 +850,8 @@ export default function Shell() {
   // form (they all parse to the default route), so those are left to the normal boot, which resumes where they were.
   const goToLinkRoute = useCallback((next) => {
     const h = "#" + next;
+    const cid = connectIdFromHash(h);
+    if (cid) { setConnectId(cid); return; }
     if (isAdminRoute(h) || isDesignRoute(h) || isDashboardRoute(h)) return;
     const r = parseRoute(h);
     navigate({ module: r.module, projectId: r.projectId, cross: r.cross, org: r.org });
@@ -876,6 +888,7 @@ export default function Shell() {
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <NameNoticeHost />
       {hasInviteLink && <Suspense fallback={null}><InviteLanding user={user} authKnown={authKnown} onNeedAuth={openAuthForInvite} onOpenWork={goDashboard} onOpenTeam={() => openAccount("team")} /></Suspense>}
+      {connectId && !authOpen && (user || !hasAuthLink) && <Suspense fallback={null}><ConnectLanding requestId={connectId} user={user} authKnown={authKnown} onOpenSignIn={openAuth} onDone={() => setConnectId(null)} /></Suspense>}
       {hasAuthLink && <Suspense fallback={null}><AuthLinkLanding user={user} authKnown={authKnown} onOpenSignIn={openAuth} onRecovery={() => { setRecovery(true); setAuthOpen(true); }} onGoTo={goToLinkRoute} /></Suspense>}
       {/* Item 6 (NEW-1, 2026-11-02): signed up with an invited address but without the link → tell them an invitation is waiting. */}
       {user && authKnown && !hasInviteLink && <Suspense fallback={null}><WaitingInviteNotice user={user} /></Suspense>}

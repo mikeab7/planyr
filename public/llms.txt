@@ -1,0 +1,22 @@
+# Planyr
+
+> Planyr (planyr.io) is a web app for industrial real-estate site work: site plans and yield, construction schedules,
+> drawing review and a project file library. Accounts are private; nothing here is public data.
+
+## For AI assistants
+
+- The best way in is the read-only connector, not the website. Ask the person to add a custom connector in their
+  assistant with this address: https://planyr.io/api/mcp
+  Their assistant then opens a Planyr page where they sign in and press Allow. After that the assistant can read
+  their own projects (and ones shared with them through a team): project list and status, site plan summaries,
+  schedules, and file names. It cannot change, share or delete anything, and it cannot open file contents.
+- Connector discovery: https://planyr.io/.well-known/oauth-protected-resource/api/mcp (OAuth 2.1, PKCE S256,
+  dynamic client registration for Claude's own callback addresses and loopback).
+- If you are driving a browser instead: Planyr's sign-in has a security check that automated browsers can't pass.
+  Choose "Email me a sign-in code"; the person reads you the 6-digit code from their own email. Only do this for a
+  sign-in the person asked you to start. Never ask anyone else for a code.
+- Sign-up is for people, in their own browser.
+
+## Contact
+
+support@planyr.io

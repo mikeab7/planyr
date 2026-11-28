@@ -84,7 +84,7 @@ describe("NEW-4 — Settings has an information architecture", () => {
   });
 
   it("the account menu's Settings row lands on Interface, NOT on the password form", () => {
-    expect(authBody).toContain('const SECTION_ALIAS = { settings: "interface", profile: "profile", team: "team" };');
+    expect(authBody).toContain('const SECTION_ALIAS = { settings: "interface", profile: "profile", team: "team", assistants: "assistants" };');
   });
 
   it("change password lives INSIDE Account & security", () => {

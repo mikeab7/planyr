@@ -1,29 +1,82 @@
-/* MCP transport tests (B671) — token guard, method gates, JSON-RPC dispatch. */
-import { describe, it, expect } from "vitest";
+/* MCP transport tests (B671) — who is asking (legacy path token + per-person OAuth), method gates, JSON-RPC dispatch. */
+import { describe, it, expect, vi } from "vitest";
 import { handleMcp } from "../functions/api/mcp/_handler.js";
 
-const ENV = { PLANYR_MCP_TOKEN: "sekret-token" };
+const ENV = { PLANYR_MCP_TOKEN: "sekret-token", PLANYR_MCP_OWNER_ID: "OWNER-123", SUPABASE_URL: "https://main.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "svc-key" };
 const req = (body) => new Request("https://planyr.io/api/mcp/sekret-token", {
   method: "POST", headers: { "content-type": "application/json" },
   body: typeof body === "string" ? body : JSON.stringify(body),
 });
 const post = (body, env = ENV, segs = ["sekret-token"]) => handleMcp({ env, request: req(body), method: "POST", segs });
 
-describe("capability-URL token guard", () => {
-  it("404s on wrong token, missing token, extra segments, and unset env — identically", async () => {
-    for (const segs of [["wrong"], [], ["sekret-token", "extra"]]) {
+describe("legacy capability-URL token (owner only)", () => {
+  it("404s on a wrong path token, extra segments, and unset env — identically", async () => {
+    for (const segs of [["wrong"], ["sekret-token", "extra"]]) {
       const r = await post({ jsonrpc: "2.0", id: 1, method: "ping" }, ENV, segs);
       expect(r.status).toBe(404);
       expect(await r.text()).toBe("Not found");
     }
-    const unset = await post({ jsonrpc: "2.0", id: 1, method: "ping" }, {}, ["sekret-token"]);
-    expect(unset.status).toBe(404);
+    for (const env of [{}, { PLANYR_MCP_TOKEN: "sekret-token" }]) {   // no owner id → the legacy path is off
+      expect((await post({ jsonrpc: "2.0", id: 1, method: "ping" }, env, ["sekret-token"])).status).toBe(404);
+    }
   });
 
   it("passes with the right token", async () => {
     const r = await post({ jsonrpc: "2.0", id: 1, method: "ping" });
     expect(r.status).toBe(200);
     expect((await r.json()).result).toEqual({});
+  });
+});
+
+describe("per-person OAuth bearer (Connect to Claude)", () => {
+  const bearerReq = (auth) => new Request("https://planyr.io/api/mcp", {
+    method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+  });
+  const call = (auth, fetchImpl) => handleMcp({ env: ENV, request: bearerReq(auth), method: "POST", segs: [], fetchImpl });
+  const checkStub = (answer, status = 200) => vi.fn(async () => new Response(JSON.stringify(answer), { status }));
+
+  it("no token → 401 whose WWW-Authenticate points at the protected-resource metadata", async () => {
+    const r = await call(null, checkStub({ ok: false }));
+    expect(r.status).toBe(401);
+    expect(r.headers.get("www-authenticate")).toBe('Bearer realm="planyr", resource_metadata="https://planyr.io/.well-known/oauth-protected-resource/api/mcp"');
+  });
+
+  it("a live access token is checked against the grant on EVERY call and names the person", async () => {
+    const f = checkStub({ ok: true, user_id: "user-b", grant_id: "g1", scope: "planyr.read" });
+    const r = await call("Bearer pmcp_at_abc", f);
+    expect(r.status).toBe(200);
+    expect(f).toHaveBeenCalledTimes(1);
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://main.supabase.co/rest/v1/rpc/mcp_oauth_check");
+    expect(JSON.parse(init.body)).toEqual({ p_access: "pmcp_at_abc" });
+  });
+
+  it("a revoked / expired / unknown token → 401 invalid_token (Disconnect stops the next call)", async () => {
+    const r = await call("Bearer pmcp_at_revoked", checkStub({ ok: false }));
+    expect(r.status).toBe(401);
+    expect(r.headers.get("www-authenticate")).toMatch(/error="invalid_token"/);
+  });
+
+  it("a Supabase session JWT or any other string is not an MCP token", async () => {
+    const f = checkStub({ ok: true, user_id: "x" });
+    for (const t of ["Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig", "Bearer pmcp_rt_refresh", "Bearer wrong"]) {
+      const r = await call(t, f);
+      expect(r.status).toBe(401);
+    }
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("the legacy secret as a bearer stays pinned to the owner", async () => {
+    const f = checkStub({ ok: true, user_id: "someone-else" });
+    const r = await call("Bearer sekret-token", f);
+    expect(r.status).toBe(200);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("a database outage during the check is a loud 503, never a pass", async () => {
+    const r = await call("Bearer pmcp_at_abc", checkStub("boom", 500));
+    expect(r.status).toBe(503);
   });
 });
 

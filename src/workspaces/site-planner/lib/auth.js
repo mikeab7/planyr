@@ -14,6 +14,7 @@ import { markDeliberateSignOut, currentAuthEventMeta } from "../../../shared/aut
 import { clearRecoveryPending } from "../../../shared/auth/recoveryPending.js";
 // NEW-1 (B2619760 follow-up): every gated call reports its outcome through ONE helper — see authTelemetry.js.
 import { observeAuthCall } from "../../../shared/auth/authTelemetry.js";
+import { disconnectAllAssistants } from "../../../shared/mcp/connectorClient.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
@@ -105,14 +106,29 @@ export async function signOut() {
 export async function signOutEverywhere() {
   clearRecoveryPending();
   if (!supabase) return { error: "Cloud not configured." };
+  // "Every device" includes every connected AI assistant (Connect to Claude, review A3). Asked FIRST, while the
+  // session still exists to ask with. An emergency sign-out is NEVER blocked by it (review round 2): if the
+  // assistant step fails the sign-out still happens, and the person is told plainly that assistants may still be
+  // connected (LOUD-FAILURE). A password change also ends every assistant connection (database trigger).
+  const assistants = await disconnectAllAssistants();
+  let signedOut;
   markDeliberateSignOut();
   try {
     const { error } = await supabase.auth.signOut({ scope: "global" });
-    return failure(error);
+    signedOut = failure(error);
   } catch (e) {
-    return failure(e);
+    signedOut = failure(e);
   }
+  if (signedOut.error) return signedOut;
+  if (!assistants.ok) {
+    console.error("[signOutEverywhere] signed out everywhere, but disconnecting AI assistants failed", assistants.error);
+    return { error: ASSISTANTS_STILL_CONNECTED, signedOut: true };
+  }
+  return signedOut;
 }
+
+export const ASSISTANTS_STILL_CONNECTED =
+  "You're signed out on all devices, but we couldn't disconnect your AI assistants. Sign in and use Settings → AI assistants → Disconnect, or change your password, which disconnects them.";
 
 /* Forgot password has NO Supabase-mailer wrapper here on purpose (NEW-1): it goes through Planyr's own
  * /api/auth/email-link route (lib/emailLinkClient.js), because Supabase's built-in mailer is limited to 2 emails

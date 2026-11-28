@@ -613,6 +613,12 @@
     ],
     "project_layer_opacity": [
       "owner_id"
+    ],
+    "mcp_oauth_clients": [
+      "client_name"
+    ],
+    "mcp_oauth_tokens": [
+      "kind"
     ]
   }
 }

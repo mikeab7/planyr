@@ -35,6 +35,7 @@ import { CAPTCHA_UNAVAILABLE_COPY } from "../../../shared/turnstile/captchaCopy.
  * a first paint of any workspace. Moving it out is the one panel in this tranche whose saving
  * lands on all four routes rather than only the Site route. */
 const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
+const AssistantsPanel = lazy(() => import("../../../shared/mcp/AssistantsPanel.jsx"));
 const EmailLinkSent = lazy(() => import("./EmailLinkSent.jsx"));
 import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
@@ -192,12 +193,13 @@ const SECTIONS = [
   { id: "profile",   label: "Profile",   hint: "Name & organization" },
   { id: "team",      label: "Team",      hint: "Who's in your org" },
   { id: "security",  label: "Account & security", hint: "Password, sessions" },
+  { id: "assistants", label: "AI assistants", hint: "Connect Claude" },
   { id: "interface", label: "Interface", hint: "Theme, zoom" },
 ];
 /* The account dropdown's "Settings" row lands on INTERFACE, not on security. That is the whole
  * point of the item: the front door is the ordinary app preference, and the password is one click
  * away in a section that says what it is. */
-const SECTION_ALIAS = { settings: "interface", profile: "profile", team: "team" };
+const SECTION_ALIAS = { settings: "interface", profile: "profile", team: "team", assistants: "assistants" };
 
 /* NEW-1 — phone Settings is a DRILL-IN: a menu screen, then one section as its own page. The
  * desktop panel already had a real side-by-side layout (section nav beside the content), which a
@@ -243,13 +245,13 @@ function MenuRow({ sec, last, onOpen }) {
 
 const fieldLabel = { display: "block", fontSize: 11.5, fontWeight: 600, color: PAL.muted, marginBottom: 4 };
 
-function AccountView({ user, profileApi, initialTab, onClose }) {
+function AccountView({ user, profileApi, initialTab, onClose, onSignedOutNotice }) {
   const narrow = useNarrow();
   const uid = useId();
   const [tab, setTab] = useState(() => SECTION_ALIAS[initialTab] || "profile");
   // Phone only: which page is showing. The account dropdown's "Settings" row (and any bare open)
   // lands on the MENU; its "Profile" / "Team" rows name a section, so they land straight on it.
-  const [drilled, setDrilled] = useState(() => initialTab === "profile" || initialTab === "team");
+  const [drilled, setDrilled] = useState(() => initialTab === "profile" || initialTab === "team" || initialTab === "assistants");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [org, setOrg] = useState("");
@@ -306,9 +308,12 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   const signOutAll = async () => {
     setBusy(true); setMsg(null);
     try {
-      const { error } = await signOutEverywhere();
-      // LOUD-FAILURE: a security action that quietly fails is worse than one not offered.
-      if (error) setMsg({ type: "err", text: error });
+      const { error, signedOut } = await signOutEverywhere();
+      // LOUD-FAILURE: a security action that quietly fails is worse than one not offered. When the sign-out itself
+      // worked but assistants could not be disconnected, the panel stays open to say so (the person IS signed out).
+      // The account view unmounts once the session is gone, so that notice is handed to the signed-out panel.
+      if (error && signedOut) onSignedOutNotice(error);
+      else if (error) setMsg({ type: "err", text: error });
       else onClose();
     } finally { setBusy(false); }
   };
@@ -370,6 +375,10 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
     <LazyPanel name="The Team section" minHeight={260} label="Loading team…">
       <TeamPanel user={user} setMsg={setMsg} onTitle={setTeamTitle} />
     </LazyPanel>
+  ) : tab === "assistants" ? (
+    <LazyPanel name="The AI assistants section" minHeight={220} label="Loading…">
+      <AssistantsPanel sectionHead={sectionHead} />
+    </LazyPanel>
   ) : tab === "profile" ? (
     <div data-settings-panel="profile">
       {sectionHead("Profile")}
@@ -404,7 +413,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
       <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Signed in elsewhere?</div>
       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 9px" }}>
-        Ends your session on every device, including this one.
+        Ends your session on every device, including this one, and disconnects any AI assistants.
       </div>
       <button style={{ ...btn(false), width: "100%" }} data-testid="sign-out-everywhere" disabled={busy} onClick={signOutAll}>{busy ? "…" : "Sign out on all devices"}</button>
     </div>
@@ -676,7 +685,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
   if (user && !recovery) {
-    return <AccountView user={user} profileApi={profileApi} initialTab={initialTab} onClose={onClose} />;
+    return <AccountView user={user} profileApi={profileApi} initialTab={initialTab} onClose={onClose} onSignedOutNotice={(text) => setMsg({ type: "err", text })} />;
   }
 
   // Set-new-password (arrived from a reset link). NOT dismissable (NEW-1 point 6): Escape and a backdrop tap used to
@@ -750,6 +759,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
           <div data-testid="agent-browser-note" data-agent-reason={agentReason} style={{ background: "var(--info-bg)", borderRadius: RADIUS.md, padding: "10px 12px", marginTop: 8 }}>
             <div style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: PAL.ink }}>{AGENT_BROWSER_COPY.heading}</div>
             <div style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 2, lineHeight: 1.45 }}>{AGENT_BROWSER_COPY.body}</div>
+            <div data-testid="agent-connector-pointer" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4, lineHeight: 1.45 }}>{AGENT_BROWSER_COPY.connector}</div>
           </div>
         )}
         {mode !== "reset" && !agentLayout && (
